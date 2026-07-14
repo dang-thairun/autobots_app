@@ -1,0 +1,130 @@
+{
+  "/Users/11dj/works/autobots_labs/autobots_app/gradlew": {
+    "mtime": 1783925859.4061105,
+    "hash": "f092910dfa8e47c5a37a452c3f6baf8a"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/build.gradle.kts": {
+    "mtime": 1783925695.0675495,
+    "hash": "6edfcb3638ca3b6102aa75c0f738ac64"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/settings.gradle.kts": {
+    "mtime": 1783925694.8431373,
+    "hash": "077d83b081a2b4ac8ae77abc232598a9"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/shared/build.gradle.kts": {
+    "mtime": 1783925698.5631294,
+    "hash": "f2991879ac29393a3817f86049941753"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/shared/src/commonMain/kotlin/com/autobots/camera/PassageThresholds.kt": {
+    "mtime": 1783930465.2170968,
+    "hash": "0dbf85e538f4d36922d602e26c0451cf"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/shared/src/commonMain/kotlin/com/autobots/camera/AutobotsApp.kt": {
+    "mtime": 1783995952.2254157,
+    "hash": "a4d6bef3c16f923123442d864007fe1c"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/shared/src/commonMain/kotlin/com/autobots/camera/CaptureMode.kt": {
+    "mtime": 1783926292.8293083,
+    "hash": "b4ddaebb320b5429c84b49f86a467e42"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt": {
+    "mtime": 1783926933.35097,
+    "hash": "3e57bb65e7b55f7b2622aaa5c0022349"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/build.gradle.kts": {
+    "mtime": 1783995955.2150295,
+    "hash": "97de538d04b74828523ba877ca9e1acd"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/MainActivity.kt": {
+    "mtime": 1784009523.97249,
+    "hash": "20b78726a756b0741fda899e5f3f0d28"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt": {
+    "mtime": 1784011978.1593697,
+    "hash": "d78981dcab62bae3784b7582cae2ff88"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/ui/FaceOverlay.kt": {
+    "mtime": 1783926947.065053,
+    "hash": "fbc53ae7ed7ea4f418f959947e373360"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/ui/AfGridOverlay.kt": {
+    "mtime": 1784011965.4699116,
+    "hash": "491584817049e3339a28f3d4dfcfff82"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt": {
+    "mtime": 1784011979.13616,
+    "hash": "58c7f284ba82b8562273b8d72cb82b8f"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt": {
+    "mtime": 1784009528.7919652,
+    "hash": "38cf154e3f94918c1ebf0231154e4e41"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt": {
+    "mtime": 1784014409.6562486,
+    "hash": "9ae57d6ce678a5684f7e6909fc102f14"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/CameraExposureReadout.kt": {
+    "mtime": 1784009490.488955,
+    "hash": "d7104271dd8856c13f4568236097b6dc"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt": {
+    "mtime": 1783935404.2478542,
+    "hash": "0c0df40aa0b010bd320e4d05d45a19ce"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt": {
+    "mtime": 1783995800.6075442,
+    "hash": "dd696c9418feae2d7d1ce59f8de84dea"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt": {
+    "mtime": 1783928889.4967446,
+    "hash": "d0b1aef2bebd33bfb57859a6d90420b1"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt": {
+    "mtime": 1784002704.5974963,
+    "hash": "bde852f7ec87843cd9774bc8085f74b1"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadSnapshot.kt": {
+    "mtime": 1783996964.811887,
+    "hash": "35a8adf1870012b7a8fd728afd945aad"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt": {
+    "mtime": 1783934281.4089596,
+    "hash": "505c53ac8bd1548b68f3d4fc9c1bce54"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/delivery/PhotoDeliveryService.kt": {
+    "mtime": 1784014395.1862638,
+    "hash": "95d5aca46a20fe5cc299f16791c325ca"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/delivery/LocalDeliveryWriter.kt": {
+    "mtime": 1783934279.778878,
+    "hash": "9b0649b3598fb2509360d1cc2758a047"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/delivery/GalleryLauncher.kt": {
+    "mtime": 1783934281.8892176,
+    "hash": "3c888749824fce21e93addd7d97a7c24"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt": {
+    "mtime": 1783928135.1013076,
+    "hash": "41046a1c03766128fa45c709d55ea8a5"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/CONTEXT.md": {
+    "mtime": 1783925053.4863257,
+    "hash": "0442a10dcd7d500dd14a6bd39358a0e1"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/docs/PRD.md": {
+    "mtime": 1784014561.157378,
+    "hash": "d18f5e252d2c15fa8f3ecd7f1151eccf"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/docs/ARCHITECTURE.md": {
+    "mtime": 1784014572.2169752,
+    "hash": "ed836bd29b9ed40ec26b107bc3e41afe"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/docs/STRUCTURE.md": {
+    "mtime": 1784014582.9156477,
+    "hash": "3626f4c060c29fb859bd3764f2b3903d"
+  },
+  "/Users/11dj/works/autobots_labs/autobots_app/docs/DOCS.md": {
+    "mtime": 1784014590.76091,
+    "hash": "8abbe05e3e6ded2f834839def91e0a14"
+  }
+}

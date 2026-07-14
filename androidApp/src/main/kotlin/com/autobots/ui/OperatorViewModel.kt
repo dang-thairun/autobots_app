@@ -42,6 +42,7 @@ data class OperatorUiState(
     val armThreshold: Float = PassageThresholds.ARM_HALF_BODY,
     val fireThreshold: Float = PassageThresholds.FIRE_HALF_BODY,
     val exposureLine: String = "—mm  ·  —  ·  ISO —",
+    val serverIp: String = "—",
 ) {
     val armReleaseThreshold: Float
         get() = PassageThresholds.armRelease(armThreshold)
@@ -73,6 +74,10 @@ internal fun formatRam(mb: Long): String {
 class OperatorViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(OperatorUiState())
     val state: StateFlow<OperatorUiState> = _state.asStateFlow()
+
+    fun setServerIp(ip: String) {
+        _state.update { it.copy(serverIp = ip) }
+    }
 
     /** Authoritative Passage Gate — closed after Fire until face leaves. */
     private val passageGateOpen = AtomicBoolean(true)

@@ -45,6 +45,7 @@ fun CameraPreviewPane(
     onBurstComplete: (savedCount: Int) -> Unit,
     onPhotoDelivered: (uri: String) -> Unit,
     onExposureReadout: (line: String) -> Unit = {},
+    onFrameEncoded: ((ByteArray) -> Unit)? = null,
     showFaceOverlay: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -60,6 +61,9 @@ fun CameraPreviewPane(
         }
         controller.setExposureReadoutListener { readout ->
             onExposureReadout(readout.line)
+        }
+        controller.setFrameEncodedListener { jpeg ->
+            onFrameEncoded?.invoke(jpeg)
         }
         onDispose { controller.shutdown() }
     }

@@ -11,16 +11,26 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.autobots.camera.delivery.GalleryLauncher
+import com.autobots.camera.network.AutobotsServer
 import com.autobots.ui.OperatorShellScreen
 import com.autobots.ui.OperatorViewModel
 import com.autobots.ui.rememberCameraPermissionState
 
 class MainActivity : ComponentActivity() {
     private val operatorViewModel: OperatorViewModel by viewModels()
+    private var server: AutobotsServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val currentServer = AutobotsServer(applicationContext, operatorViewModel)
+        server = currentServer
+        currentServer.start()
+
+        val localIp = AutobotsServer.getLocalIpAddress() ?: "127.0.0.1"
+        operatorViewModel.setServerIp("$localIp:8080")
+
         setContent {
             MaterialTheme {
                 val state by operatorViewModel.state.collectAsStateWithLifecycle()
@@ -61,6 +71,9 @@ class MainActivity : ComponentActivity() {
                         val uri = state.lastGalleryUri?.let(Uri::parse)
                         GalleryLauncher.open(this@MainActivity, uri)
                     },
+                    onFrameEncoded = { jpeg ->
+                        currentServer.broadcastPreviewFrame(jpeg)
+                    }
                 )
             }
         }
@@ -69,5 +82,10 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         operatorViewModel.stopCapture()
+    }
+
+    override fun onDestroy() {
+        server?.stop()
+        super.onDestroy()
     }
 }

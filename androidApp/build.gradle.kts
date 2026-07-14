@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -59,4 +60,11 @@ dependencies {
     implementation(libs.mlkit.face.detection)
     implementation(libs.coroutines.android)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // Ktor Server for Remote Live View / Control
+    implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.websockets)
+    implementation(libs.ktor.server.content.negotiation)
+    implementation(libs.ktor.serialization.json)
 }

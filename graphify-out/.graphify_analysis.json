@@ -1,0 +1,380 @@
+{
+  "communities": {
+    "0": [
+      "androidapp_src_main_kotlin_com_autobots_camera_capture_leanburstcapturer_kt",
+      "androidapp_src_main_kotlin_com_autobots_camera_delivery_localdeliverywriter_kt",
+      "camera_capturemode_capturemode",
+      "capture_leanburstcapturer_leanburstcapturer",
+      "capture_leanburstcapturer_leanburstcapturer_cancelpending",
+      "capture_leanburstcapturer_leanburstcapturer_capture",
+      "context_android_first_runtime",
+      "context_burst",
+      "context_candidate_shot",
+      "context_capture_mode_option",
+      "context_deferred_score_flags",
+      "context_frame_scoring",
+      "context_future_remote_delivery",
+      "context_keep_all_policy",
+      "context_kept_photo",
+      "context_lean_burst",
+      "context_local_delivery",
+      "context_max_sensor_capture_mode",
+      "context_passage",
+      "context_passage_gate",
+      "context_passage_outcome",
+      "context_standard_capture_mode",
+      "context_still_photo_product",
+      "context_thermal_throttling",
+      "context_write_queue",
+      "delivery_localdeliverywriter_localdeliverywriter",
+      "delivery_localdeliverywriter_localdeliverywriter_publish",
+      "docs_architecture_decisions",
+      "docs_mvp_spec",
+      "shared_src_commonmain_kotlin_com_autobots_camera_capturemode_kt"
+    ],
+    "1": [
+      "androidapp_src_main_kotlin_com_autobots_camera_cameraexposurereadout_kt",
+      "androidapp_src_main_kotlin_com_autobots_camera_previewcameracontroller_kt",
+      "camera_cameraexposurereadout_cameraexposurereadout",
+      "camera_cameraexposurereadout_formatshutter",
+      "camera_previewcameracontroller_previewcameracontroller",
+      "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "camera_previewcameracontroller_previewcameracontroller_publishexposure",
+      "camera_previewcameracontroller_previewcameracontroller_setarmthreshold",
+      "camera_previewcameracontroller_previewcameracontroller_setburstshotcount",
+      "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "camera_previewcameracontroller_previewcameracontroller_setexposurereadoutlistener",
+      "camera_previewcameracontroller_previewcameracontroller_setfirethreshold",
+      "camera_previewcameracontroller_previewcameracontroller_setphotodeliveredlistener",
+      "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "camera_previewcameracontroller_previewcameracontroller_triggerburst",
+      "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "docs_architecture",
+      "docs_package_descriptions",
+      "docs_runtime_pipeline",
+      "docs_structure",
+      "previewcameracontroller_kt"
+    ],
+    "2": [
+      "androidapp_src_main_kotlin_com_autobots_ui_faceoverlay_kt",
+      "androidapp_src_main_kotlin_com_autobots_ui_operatorviewmodel_kt",
+      "ui_camerapreviewpane_camerapreviewpane",
+      "ui_faceoverlay_faceoverlay",
+      "ui_operatorviewmodel_formatram",
+      "ui_operatorviewmodel_operatorviewmodel",
+      "ui_operatorviewmodel_operatorviewmodel_applydeviceload",
+      "ui_operatorviewmodel_operatorviewmodel_consumependingstart",
+      "ui_operatorviewmodel_operatorviewmodel_markpendingstartafterpermission",
+      "ui_operatorviewmodel_operatorviewmodel_onburstcomplete",
+      "ui_operatorviewmodel_operatorviewmodel_oncleared",
+      "ui_operatorviewmodel_operatorviewmodel_onexposurereadout",
+      "ui_operatorviewmodel_operatorviewmodel_onfaceresult",
+      "ui_operatorviewmodel_operatorviewmodel_onphotodelivered",
+      "ui_operatorviewmodel_operatorviewmodel_resolvearmed",
+      "ui_operatorviewmodel_operatorviewmodel_setarmthreshold",
+      "ui_operatorviewmodel_operatorviewmodel_setcapturemode",
+      "ui_operatorviewmodel_operatorviewmodel_setfirethreshold",
+      "ui_operatorviewmodel_operatorviewmodel_startcapture",
+      "ui_operatorviewmodel_operatorviewmodel_stopcapture"
+    ],
+    "3": [
+      "androidapp_src_main_kotlin_com_autobots_ui_afgridoverlay_kt",
+      "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "docs_operator_ui",
+      "ui_afgridoverlay_afgriddefaults",
+      "ui_afgridoverlay_afgridoverlay",
+      "ui_operatorshellscreen_capturemodechip",
+      "ui_operatorshellscreen_capturesettingscard",
+      "ui_operatorshellscreen_observationpage",
+      "ui_operatorshellscreen_operatorcontrolspage",
+      "ui_operatorshellscreen_operatorshellpreview",
+      "ui_operatorshellscreen_operatorshellscreen",
+      "ui_operatorshellscreen_overlaypageindicator",
+      "ui_operatorshellscreen_overlaypages",
+      "ui_operatorshellscreen_statusreadout",
+      "ui_operatorshellscreen_thermalcolor",
+      "ui_operatorshellscreen_thresholdsliders",
+      "ui_operatorviewmodel_operatoruistate"
+    ],
+    "4": [
+      "camera_passagethresholds_passagethresholds",
+      "camera_passagethresholds_passagethresholds_armrelease",
+      "context_arm_threshold",
+      "context_face_lock",
+      "context_face_proximity",
+      "context_fire_threshold",
+      "context_subject_face",
+      "detection_subjectface_faceframeresult",
+      "detection_subjectface_normalizedfacebox",
+      "detection_subjectface_subjectfaceselector",
+      "detection_subjectface_subjectfaceselector_select",
+      "shared_src_commonmain_kotlin_com_autobots_camera_detection_subjectface_kt",
+      "shared_src_commonmain_kotlin_com_autobots_camera_passagethresholds_kt"
+    ],
+    "5": [
+      "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadreader_kt",
+      "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadsnapshot_kt",
+      "context_device_load_readout",
+      "context_operator_controls",
+      "context_operator_preview",
+      "load_deviceloadreader_deviceloadreader",
+      "load_deviceloadreader_deviceloadreader_labelfor",
+      "load_deviceloadreader_deviceloadreader_readthermal",
+      "load_deviceloadreader_deviceloadreader_sample",
+      "load_deviceloadreader_deviceloadreader_start",
+      "load_deviceloadreader_deviceloadreader_stop",
+      "load_deviceloadreader_thermalreading",
+      "load_deviceloadsnapshot_deviceloadsnapshot"
+    ],
+    "6": [
+      "delivery_photodeliveryservice_kt",
+      "delivery_photodeliveryservice_localphotodeliveryservice",
+      "delivery_photodeliveryservice_localphotodeliveryservice_close",
+      "delivery_photodeliveryservice_localphotodeliveryservice_enqueueall",
+      "delivery_photodeliveryservice_localphotodeliveryservice_ensurewritequeue",
+      "delivery_photodeliveryservice_localphotodeliveryservice_setphotodeliveredlistener",
+      "delivery_photodeliveryservice_photodeliveryservice",
+      "delivery_photodeliveryservice_photodeliveryservice_close",
+      "delivery_photodeliveryservice_photodeliveryservice_enqueueall",
+      "delivery_photodeliveryservice_photodeliveryservice_setphotodeliveredlistener"
+    ],
+    "7": [
+      "androidapp_src_main_kotlin_com_autobots_mainactivity_kt",
+      "androidapp_src_main_kotlin_com_autobots_ui_camerapreviewpane_kt",
+      "autobots_mainactivity_mainactivity",
+      "autobots_mainactivity_mainactivity_oncreate",
+      "autobots_mainactivity_mainactivity_onstop",
+      "ui_camerapreviewpane_camerapermissionstate",
+      "ui_camerapreviewpane_remembercamerapermissionstate"
+    ],
+    "8": [
+      "androidapp_src_main_kotlin_com_autobots_camera_captureresolutions_kt",
+      "camera_captureresolutions_captureresolutions",
+      "camera_captureresolutions_captureresolutions_capturemodequality",
+      "camera_captureresolutions_captureresolutions_format",
+      "camera_captureresolutions_captureresolutions_imagecaptureselector",
+      "camera_captureresolutions_captureresolutions_label",
+      "camera_captureresolutions_captureresolutions_maxjpegsize"
+    ],
+    "9": [
+      "androidapp_src_main_kotlin_com_autobots_camera_focus_facefocuscontroller_kt",
+      "focus_facefocuscontroller_facefocuscontroller",
+      "focus_facefocuscontroller_facefocuscontroller_attach",
+      "focus_facefocuscontroller_facefocuscontroller_cancel",
+      "focus_facefocuscontroller_facefocuscontroller_detach",
+      "focus_facefocuscontroller_facefocuscontroller_lockonface"
+    ],
+    "10": [
+      "androidapp_src_main_kotlin_com_autobots_camera_detection_mlkitfaceanalyzer_kt",
+      "detection_mlkitfaceanalyzer_mlkitfaceanalyzer",
+      "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_analyze",
+      "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_close",
+      "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_publishmapped"
+    ],
+    "11": [
+      "androidapp_src_main_kotlin_com_autobots_camera_delivery_writequeue_kt",
+      "delivery_writequeue_writequeue",
+      "delivery_writequeue_writequeue_close",
+      "delivery_writequeue_writequeue_enqueue",
+      "delivery_writequeue_writequeue_enqueueall"
+    ],
+    "12": [
+      "androidapp_src_main_kotlin_com_autobots_camera_delivery_gallerylauncher_kt",
+      "delivery_gallerylauncher_gallerylauncher",
+      "delivery_gallerylauncher_gallerylauncher_open"
+    ],
+    "13": [
+      "camera_autobotsapp_autobotsapp",
+      "shared_src_commonmain_kotlin_com_autobots_camera_autobotsapp_kt"
+    ],
+    "14": [
+      "build_gradle_kts"
+    ],
+    "15": [
+      "settings_gradle_kts"
+    ],
+    "16": [
+      "shared_build_gradle_kts"
+    ],
+    "17": [
+      "androidapp_build_gradle_kts"
+    ],
+    "18": [
+      "docs_implementation_phases"
+    ],
+    "19": [
+      "docs_post_mvp"
+    ]
+  },
+  "cohesion": {
+    "0": 0.08,
+    "1": 0.11,
+    "2": 0.13,
+    "3": 0.18,
+    "4": 0.21,
+    "5": 0.22,
+    "6": 0.24,
+    "7": 0.33,
+    "8": 0.38,
+    "9": 0.4,
+    "10": 0.6,
+    "11": 0.5,
+    "12": 0.67,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0,
+    "16": 1.0,
+    "17": 1.0,
+    "18": 1.0,
+    "19": 1.0
+  },
+  "gods": [
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller",
+      "label": "PreviewCameraController",
+      "degree": 19
+    },
+    {
+      "id": "ui_operatorviewmodel_operatorviewmodel",
+      "label": "OperatorViewModel",
+      "degree": 16
+    },
+    {
+      "id": "docs_architecture_decisions",
+      "label": "Architecture Decisions",
+      "degree": 10
+    },
+    {
+      "id": "ui_operatorshellscreen_operatorshellscreen",
+      "label": "OperatorShellScreen()",
+      "degree": 9
+    },
+    {
+      "id": "ui_camerapreviewpane_camerapreviewpane",
+      "label": "CameraPreviewPane()",
+      "degree": 8
+    },
+    {
+      "id": "focus_facefocuscontroller_facefocuscontroller",
+      "label": "FaceFocusController",
+      "degree": 7
+    },
+    {
+      "id": "load_deviceloadreader_deviceloadreader",
+      "label": "DeviceLoadReader",
+      "degree": 7
+    },
+    {
+      "id": "camera_captureresolutions_captureresolutions",
+      "label": "CaptureResolutions",
+      "degree": 6
+    },
+    {
+      "id": "delivery_writequeue_writequeue",
+      "label": "WriteQueue",
+      "degree": 6
+    },
+    {
+      "id": "capture_leanburstcapturer_leanburstcapturer",
+      "label": "LeanBurstCapturer",
+      "degree": 5
+    }
+  ],
+  "surprises": [
+    {
+      "source": "OperatorViewModel",
+      "target": "Operator UI",
+      "source_files": [
+        "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+        "docs/DOCS.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "conceptually_related_to",
+      "why": "crosses file types (code \u2194 doc); connects across different repos/directories; bridges separate communities; peripheral node `Operator UI` unexpectedly reaches hub `OperatorViewModel`"
+    },
+    {
+      "source": "OperatorShellScreen()",
+      "target": "Operator Preview",
+      "source_files": [
+        "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+        "CONTEXT.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "implements",
+      "why": "crosses file types (code \u2194 doc); connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "OperatorShellScreen()",
+      "target": "Operator UI",
+      "source_files": [
+        "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+        "docs/DOCS.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "conceptually_related_to",
+      "why": "crosses file types (code \u2194 doc); connects across different repos/directories; peripheral node `Operator UI` unexpectedly reaches hub `OperatorShellScreen()`"
+    },
+    {
+      "source": "PreviewCameraController",
+      "target": "Runtime Pipeline",
+      "source_files": [
+        "PreviewCameraController.kt",
+        "docs/ARCHITECTURE.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "conceptually_related_to",
+      "why": "crosses file types (code \u2194 doc); connects across different repos/directories; peripheral node `Runtime Pipeline` unexpectedly reaches hub `PreviewCameraController`"
+    },
+    {
+      "source": "PreviewCameraController",
+      "target": "Package Descriptions",
+      "source_files": [
+        "PreviewCameraController.kt",
+        "docs/STRUCTURE.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "references",
+      "why": "crosses file types (code \u2194 doc); connects across different repos/directories; peripheral node `Package Descriptions` unexpectedly reaches hub `PreviewCameraController`"
+    }
+  ],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `PreviewCameraController` connect `Camera Controller & Exposure` to `Operator ViewModel & Preview`?",
+      "why": "High betweenness centrality (0.247) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `OperatorShellScreen()` connect `Face Detection & Thresholds` to `Operator ViewModel & Preview`, `Device Load & Performance Readout`, `Main Activity & Permissions`?",
+      "why": "High betweenness centrality (0.219) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `CameraPreviewPane()` connect `Operator ViewModel & Preview` to `Camera Controller & Exposure`, `Face Detection & Thresholds`, `Main Activity & Permissions`?",
+      "why": "High betweenness centrality (0.188) - this node is a cross-community bridge."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 2 inferred relationships involving `OperatorShellScreen()` (e.g. with `.onCreate()` and `CameraPreviewPane()`) actually correct?",
+      "why": "`OperatorShellScreen()` has 2 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "verify_inferred",
+      "question": "Are the 7 inferred relationships involving `CameraPreviewPane()` (e.g. with `PreviewCameraController` and `.onPhotoDelivered()`) actually correct?",
+      "why": "`CameraPreviewPane()` has 7 INFERRED edges - model-reasoned connections that need verification."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `AutobotsApp`, `AfGridDefaults`, `OverlayPages` to the rest of the system?",
+      "why": "15 weakly-connected nodes found - possible documentation gaps or missing edges."
+    },
+    {
+      "type": "low_cohesion",
+      "question": "Should `Capture Pipeline & Delivery` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.08 - nodes in this community are weakly interconnected."
+    }
+  ]
+}

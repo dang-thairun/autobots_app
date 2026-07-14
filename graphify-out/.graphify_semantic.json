@@ -1,0 +1,972 @@
+{
+  "nodes": [
+    {
+      "id": "context_passage",
+      "label": "Passage",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_burst",
+      "label": "Burst",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_candidate_shot",
+      "label": "Candidate Shot",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_kept_photo",
+      "label": "Kept Photo",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_passage_outcome",
+      "label": "Passage Outcome",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_lean_burst",
+      "label": "Lean Burst",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_keep_all_policy",
+      "label": "Keep-All Policy",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_passage_gate",
+      "label": "Passage Gate",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_subject_face",
+      "label": "Subject Face",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_face_proximity",
+      "label": "Face Proximity",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_arm_threshold",
+      "label": "Arm Threshold",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_fire_threshold",
+      "label": "Fire Threshold",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_frame_scoring",
+      "label": "Frame Scoring",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_deferred_score_flags",
+      "label": "Deferred Score Flags",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_still_photo_product",
+      "label": "Still Photo Product",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_local_delivery",
+      "label": "Local Delivery",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_future_remote_delivery",
+      "label": "Future Remote Delivery",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_android_first_runtime",
+      "label": "Android-First Runtime",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_standard_capture_mode",
+      "label": "Standard Capture Mode",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_max_sensor_capture_mode",
+      "label": "Max-Sensor Capture Mode",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_capture_mode_option",
+      "label": "Capture Mode Option",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_thermal_throttling",
+      "label": "Thermal Throttling",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_operator_preview",
+      "label": "Operator Preview",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_device_load_readout",
+      "label": "Device Load Readout",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_operator_controls",
+      "label": "Operator Controls",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_write_queue",
+      "label": "Write Queue",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context_face_lock",
+      "label": "Face Lock",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_mvp_spec",
+      "label": "MVP Spec",
+      "file_type": "document",
+      "source_file": "docs/PRD.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_architecture",
+      "label": "Architecture",
+      "file_type": "document",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_runtime_pipeline",
+      "label": "Runtime Pipeline",
+      "file_type": "document",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_architecture_decisions",
+      "label": "Architecture Decisions",
+      "file_type": "document",
+      "source_file": "docs/ARCHITECTURE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_structure",
+      "label": "Codebase Structure",
+      "file_type": "document",
+      "source_file": "docs/STRUCTURE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_package_descriptions",
+      "label": "Package Descriptions",
+      "file_type": "document",
+      "source_file": "docs/STRUCTURE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_implementation_phases",
+      "label": "Implementation Phases",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docs_post_mvp",
+      "label": "Post-MVP",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "context_passage",
+      "target": "context_kept_photo",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_passage",
+      "target": "context_passage_outcome",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_burst",
+      "target": "context_candidate_shot",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_candidate_shot",
+      "target": "context_kept_photo",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_passage_outcome",
+      "target": "context_lean_burst",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_passage_outcome",
+      "target": "context_keep_all_policy",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_lean_burst",
+      "target": "context_keep_all_policy",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_passage_gate",
+      "target": "context_passage",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_subject_face",
+      "target": "context_passage",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_subject_face",
+      "target": "context_face_proximity",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_arm_threshold",
+      "target": "context_face_proximity",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_arm_threshold",
+      "target": "context_face_lock",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_fire_threshold",
+      "target": "context_face_proximity",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_fire_threshold",
+      "target": "context_lean_burst",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_frame_scoring",
+      "target": "context_kept_photo",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_frame_scoring",
+      "target": "context_deferred_score_flags",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_local_delivery",
+      "target": "context_kept_photo",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_future_remote_delivery",
+      "target": "context_local_delivery",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_standard_capture_mode",
+      "target": "context_lean_burst",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_max_sensor_capture_mode",
+      "target": "context_candidate_shot",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_capture_mode_option",
+      "target": "context_standard_capture_mode",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_capture_mode_option",
+      "target": "context_max_sensor_capture_mode",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_operator_preview",
+      "target": "context_device_load_readout",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_operator_controls",
+      "target": "context_operator_preview",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_write_queue",
+      "target": "context_local_delivery",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_face_lock",
+      "target": "context_subject_face",
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_subject_face",
+      "target": "detection_subjectface_subjectfaceselector",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_face_proximity",
+      "target": "detection_subjectface_normalizedfacebox",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_arm_threshold",
+      "target": "camera_passagethresholds_passagethresholds",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_fire_threshold",
+      "target": "camera_passagethresholds_passagethresholds",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_lean_burst",
+      "target": "capture_leanburstcapturer_leanburstcapturer",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_face_lock",
+      "target": "focus_facefocuscontroller_facefocuscontroller",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_device_load_readout",
+      "target": "load_deviceloadreader_deviceloadreader",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_device_load_readout",
+      "target": "load_deviceloadsnapshot_deviceloadsnapshot",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_write_queue",
+      "target": "delivery_writequeue_writequeue",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_local_delivery",
+      "target": "delivery_localdeliverywriter_localdeliverywriter",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_operator_preview",
+      "target": "ui_operatorshellscreen_operatorshellscreen",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context_capture_mode_option",
+      "target": "camera_capturemode_capturemode",
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture",
+      "target": "docs_runtime_pipeline",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_mvp_spec",
+      "target": "context_passage",
+      "relation": "references",
+      "source_file": "docs/PRD.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_runtime_pipeline",
+      "target": "camera_previewcameracontroller_previewcameracontroller",
+      "relation": "conceptually_related_to",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_keep_all_policy",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_passage_gate",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_still_photo_product",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_local_delivery",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_android_first_runtime",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_standard_capture_mode",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_thermal_throttling",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_write_queue",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_face_lock",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_architecture_decisions",
+      "target": "context_device_load_readout",
+      "relation": "references",
+      "source_file": "docs/ARCHITECTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_structure",
+      "target": "docs_package_descriptions",
+      "relation": "references",
+      "source_file": "docs/STRUCTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_structure",
+      "target": "shared_build_gradle_kts",
+      "relation": "references",
+      "source_file": "docs/STRUCTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_structure",
+      "target": "androidapp_build_gradle_kts",
+      "relation": "references",
+      "source_file": "docs/STRUCTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docs_package_descriptions",
+      "target": "camera_previewcameracontroller_previewcameracontroller",
+      "relation": "references",
+      "source_file": "docs/STRUCTURE.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "passage_capture_flow",
+      "label": "Passage Capture Flow",
+      "nodes": [
+        "context_passage",
+        "context_face_lock",
+        "context_lean_burst",
+        "context_passage_gate"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "CONTEXT.md"
+    },
+    {
+      "id": "operator_interface_components",
+      "label": "Operator Interface Components",
+      "nodes": [
+        "context_operator_preview",
+        "context_device_load_readout",
+        "context_operator_controls"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "CONTEXT.md"
+    }
+  ],
+  "input_tokens": 1400,
+  "output_tokens": 920
+}

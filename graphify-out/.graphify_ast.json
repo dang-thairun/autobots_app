@@ -1,0 +1,450 @@
+{
+  "nodes": [
+    {
+      "id": "previewcameracontroller_kt",
+      "label": "PreviewCameraController.kt",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L1"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller",
+      "label": "PreviewCameraController",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L44"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_setphotodeliveredlistener",
+      "label": ".setPhotoDeliveredListener()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L67"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_setexposurereadoutlistener",
+      "label": ".setExposureReadoutListener()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L71"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_setarmthreshold",
+      "label": ".setArmThreshold()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L75"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_setfirethreshold",
+      "label": ".setFireThreshold()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L79"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_setburstshotcount",
+      "label": ".setBurstShotCount()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L83"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "label": ".setCaptureMode()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L87"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "label": ".bindPreview()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L91"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_triggerburst",
+      "label": ".triggerBurst()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L126"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "label": ".bindInternal()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L140"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_publishexposure",
+      "label": ".publishExposure()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L265"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "label": ".applyFaceLock()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L279"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "label": ".unbind()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L289"
+    },
+    {
+      "id": "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "label": ".shutdown()",
+      "file_type": "code",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L312"
+    },
+    {
+      "id": "delivery_photodeliveryservice_kt",
+      "label": "PhotoDeliveryService.kt",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L1"
+    },
+    {
+      "id": "delivery_photodeliveryservice_photodeliveryservice",
+      "label": "PhotoDeliveryService",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L8"
+    },
+    {
+      "id": "delivery_photodeliveryservice_photodeliveryservice_setphotodeliveredlistener",
+      "label": ".setPhotoDeliveredListener()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L9"
+    },
+    {
+      "id": "delivery_photodeliveryservice_photodeliveryservice_enqueueall",
+      "label": ".enqueueAll()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L10"
+    },
+    {
+      "id": "delivery_photodeliveryservice_photodeliveryservice_close",
+      "label": ".close()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L11"
+    },
+    {
+      "id": "delivery_photodeliveryservice_localphotodeliveryservice",
+      "label": "LocalPhotoDeliveryService",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L14"
+    },
+    {
+      "id": "delivery_photodeliveryservice_localphotodeliveryservice_setphotodeliveredlistener",
+      "label": ".setPhotoDeliveredListener()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L23"
+    },
+    {
+      "id": "delivery_photodeliveryservice_localphotodeliveryservice_ensurewritequeue",
+      "label": ".ensureWriteQueue()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L28"
+    },
+    {
+      "id": "delivery_photodeliveryservice_localphotodeliveryservice_enqueueall",
+      "label": ".enqueueAll()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L41"
+    },
+    {
+      "id": "delivery_photodeliveryservice_localphotodeliveryservice_close",
+      "label": ".close()",
+      "file_type": "code",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L45"
+    }
+  ],
+  "edges": [
+    {
+      "source": "previewcameracontroller_kt",
+      "target": "camera_previewcameracontroller_previewcameracontroller",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L44",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setphotodeliveredlistener",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L67",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setexposurereadoutlistener",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L71",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setarmthreshold",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L75",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setfirethreshold",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L79",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setburstshotcount",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L83",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L87",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L91",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_triggerburst",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L126",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L140",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_publishexposure",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L265",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L279",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L289",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L312",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "target": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L110",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L186",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L200",
+      "weight": 1.0
+    },
+    {
+      "source": "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "target": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "PreviewCameraController.kt",
+      "source_location": "L314",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_kt",
+      "target": "delivery_photodeliveryservice_photodeliveryservice",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L8",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_photodeliveryservice",
+      "target": "delivery_photodeliveryservice_photodeliveryservice_setphotodeliveredlistener",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L9",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_photodeliveryservice",
+      "target": "delivery_photodeliveryservice_photodeliveryservice_enqueueall",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L10",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_photodeliveryservice",
+      "target": "delivery_photodeliveryservice_photodeliveryservice_close",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L11",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_kt",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L14",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_localphotodeliveryservice",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice_setphotodeliveredlistener",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L23",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_localphotodeliveryservice",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice_ensurewritequeue",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L28",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_localphotodeliveryservice",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice_enqueueall",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L41",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_localphotodeliveryservice",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice_close",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L45",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_localphotodeliveryservice_setphotodeliveredlistener",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice_ensurewritequeue",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L25",
+      "weight": 1.0
+    },
+    {
+      "source": "delivery_photodeliveryservice_localphotodeliveryservice_enqueueall",
+      "target": "delivery_photodeliveryservice_localphotodeliveryservice_ensurewritequeue",
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "delivery/PhotoDeliveryService.kt",
+      "source_location": "L42",
+      "weight": 1.0
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

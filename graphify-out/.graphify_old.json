@@ -1,0 +1,3651 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {
+    "hyperedges": [
+      {
+        "id": "passage_capture_flow",
+        "label": "Passage Capture Flow",
+        "nodes": [
+          "context_passage",
+          "context_face_lock",
+          "context_lean_burst",
+          "context_passage_gate"
+        ],
+        "relation": "participate_in",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "source_file": "CONTEXT.md"
+      },
+      {
+        "id": "operator_interface_components",
+        "label": "Operator Interface Components",
+        "nodes": [
+          "context_operator_preview",
+          "context_device_load_readout",
+          "context_operator_controls"
+        ],
+        "relation": "participate_in",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "source_file": "CONTEXT.md"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "label": "build.gradle.kts",
+      "file_type": "code",
+      "source_file": "build.gradle.kts",
+      "source_location": "L1",
+      "id": "build_gradle_kts",
+      "community": 12,
+      "norm_label": "build.gradle.kts"
+    },
+    {
+      "label": "settings.gradle.kts",
+      "file_type": "code",
+      "source_file": "settings.gradle.kts",
+      "source_location": "L1",
+      "id": "settings_gradle_kts",
+      "community": 13,
+      "norm_label": "settings.gradle.kts"
+    },
+    {
+      "label": "build.gradle.kts",
+      "file_type": "code",
+      "source_file": "shared/build.gradle.kts",
+      "source_location": "L1",
+      "id": "shared_build_gradle_kts",
+      "community": 14,
+      "norm_label": "build.gradle.kts"
+    },
+    {
+      "label": "PassageThresholds.kt",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/PassageThresholds.kt",
+      "source_location": "L1",
+      "id": "shared_src_commonmain_kotlin_com_autobots_camera_passagethresholds_kt",
+      "community": 3,
+      "norm_label": "passagethresholds.kt"
+    },
+    {
+      "label": "PassageThresholds",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/PassageThresholds.kt",
+      "source_location": "L7",
+      "id": "camera_passagethresholds_passagethresholds",
+      "community": 3,
+      "norm_label": "passagethresholds"
+    },
+    {
+      "label": ".armRelease()",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/PassageThresholds.kt",
+      "source_location": "L16",
+      "id": "camera_passagethresholds_passagethresholds_armrelease",
+      "community": 3,
+      "norm_label": ".armrelease()"
+    },
+    {
+      "label": "AutobotsApp.kt",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/AutobotsApp.kt",
+      "source_location": "L1",
+      "id": "shared_src_commonmain_kotlin_com_autobots_camera_autobotsapp_kt",
+      "community": 11,
+      "norm_label": "autobotsapp.kt"
+    },
+    {
+      "label": "AutobotsApp",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/AutobotsApp.kt",
+      "source_location": "L7",
+      "id": "camera_autobotsapp_autobotsapp",
+      "community": 11,
+      "norm_label": "autobotsapp"
+    },
+    {
+      "label": "CaptureMode.kt",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/CaptureMode.kt",
+      "source_location": "L1",
+      "id": "shared_src_commonmain_kotlin_com_autobots_camera_capturemode_kt",
+      "community": 0,
+      "norm_label": "capturemode.kt"
+    },
+    {
+      "label": "CaptureMode",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/CaptureMode.kt",
+      "source_location": "L7",
+      "id": "camera_capturemode_capturemode",
+      "community": 0,
+      "norm_label": "capturemode"
+    },
+    {
+      "label": "SubjectFace.kt",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L1",
+      "id": "shared_src_commonmain_kotlin_com_autobots_camera_detection_subjectface_kt",
+      "community": 3,
+      "norm_label": "subjectface.kt"
+    },
+    {
+      "label": "NormalizedFaceBox",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L7",
+      "id": "detection_subjectface_normalizedfacebox",
+      "community": 3,
+      "norm_label": "normalizedfacebox"
+    },
+    {
+      "label": "FaceFrameResult",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L19",
+      "id": "detection_subjectface_faceframeresult",
+      "community": 3,
+      "norm_label": "faceframeresult"
+    },
+    {
+      "label": "SubjectFaceSelector",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L27",
+      "id": "detection_subjectface_subjectfaceselector",
+      "community": 3,
+      "norm_label": "subjectfaceselector"
+    },
+    {
+      "label": ".select()",
+      "file_type": "code",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L28",
+      "id": "detection_subjectface_subjectfaceselector_select",
+      "community": 3,
+      "norm_label": ".select()"
+    },
+    {
+      "label": "build.gradle.kts",
+      "file_type": "code",
+      "source_file": "androidApp/build.gradle.kts",
+      "source_location": "L1",
+      "id": "androidapp_build_gradle_kts",
+      "community": 15,
+      "norm_label": "build.gradle.kts"
+    },
+    {
+      "label": "MainActivity.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_mainactivity_kt",
+      "community": 6,
+      "norm_label": "mainactivity.kt"
+    },
+    {
+      "label": "MainActivity",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L18",
+      "id": "autobots_mainactivity_mainactivity",
+      "community": 6,
+      "norm_label": "mainactivity"
+    },
+    {
+      "label": ".onCreate()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L21",
+      "id": "autobots_mainactivity_mainactivity_oncreate",
+      "community": 6,
+      "norm_label": ".oncreate()"
+    },
+    {
+      "label": ".onStop()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L69",
+      "id": "autobots_mainactivity_mainactivity_onstop",
+      "community": 6,
+      "norm_label": ".onstop()"
+    },
+    {
+      "label": "CameraPreviewPane.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_ui_camerapreviewpane_kt",
+      "community": 6,
+      "norm_label": "camerapreviewpane.kt"
+    },
+    {
+      "label": "CameraPreviewPane()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L35",
+      "id": "ui_camerapreviewpane_camerapreviewpane",
+      "community": 2,
+      "norm_label": "camerapreviewpane()"
+    },
+    {
+      "label": "CameraPermissionState",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L140",
+      "id": "ui_camerapreviewpane_camerapermissionstate",
+      "community": 6,
+      "norm_label": "camerapermissionstate"
+    },
+    {
+      "label": "rememberCameraPermissionState()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L145",
+      "id": "ui_camerapreviewpane_remembercamerapermissionstate",
+      "community": 6,
+      "norm_label": "remembercamerapermissionstate()"
+    },
+    {
+      "label": "FaceOverlay.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/FaceOverlay.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_ui_faceoverlay_kt",
+      "community": 2,
+      "norm_label": "faceoverlay.kt"
+    },
+    {
+      "label": "FaceOverlay()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/FaceOverlay.kt",
+      "source_location": "L13",
+      "id": "ui_faceoverlay_faceoverlay",
+      "community": 2,
+      "norm_label": "faceoverlay()"
+    },
+    {
+      "label": "AfGridOverlay.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/AfGridOverlay.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_ui_afgridoverlay_kt",
+      "community": 4,
+      "norm_label": "afgridoverlay.kt"
+    },
+    {
+      "label": "AfGridOverlay()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/AfGridOverlay.kt",
+      "source_location": "L17",
+      "id": "ui_afgridoverlay_afgridoverlay",
+      "community": 4,
+      "norm_label": "afgridoverlay()"
+    },
+    {
+      "label": "AfGridDefaults",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/AfGridOverlay.kt",
+      "source_location": "L102",
+      "id": "ui_afgridoverlay_afgriddefaults",
+      "community": 4,
+      "norm_label": "afgriddefaults"
+    },
+    {
+      "label": "OperatorShellScreen.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "community": 4,
+      "norm_label": "operatorshellscreen.kt"
+    },
+    {
+      "label": "OverlayPages",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L50",
+      "id": "ui_operatorshellscreen_overlaypages",
+      "community": 4,
+      "norm_label": "overlaypages"
+    },
+    {
+      "label": "OperatorShellScreen()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L57",
+      "id": "ui_operatorshellscreen_operatorshellscreen",
+      "community": 4,
+      "norm_label": "operatorshellscreen()"
+    },
+    {
+      "label": "ObservationPage()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L144",
+      "id": "ui_operatorshellscreen_observationpage",
+      "community": 4,
+      "norm_label": "observationpage()"
+    },
+    {
+      "label": "OperatorControlsPage()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L181",
+      "id": "ui_operatorshellscreen_operatorcontrolspage",
+      "community": 4,
+      "norm_label": "operatorcontrolspage()"
+    },
+    {
+      "label": "OverlayPageIndicator()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L273",
+      "id": "ui_operatorshellscreen_overlaypageindicator",
+      "community": 4,
+      "norm_label": "overlaypageindicator()"
+    },
+    {
+      "label": "CaptureSettingsCard()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L299",
+      "id": "ui_operatorshellscreen_capturesettingscard",
+      "community": 4,
+      "norm_label": "capturesettingscard()"
+    },
+    {
+      "label": "CaptureModeChip()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L382",
+      "id": "ui_operatorshellscreen_capturemodechip",
+      "community": 4,
+      "norm_label": "capturemodechip()"
+    },
+    {
+      "label": "ThresholdSliders()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L411",
+      "id": "ui_operatorshellscreen_thresholdsliders",
+      "community": 4,
+      "norm_label": "thresholdsliders()"
+    },
+    {
+      "label": "StatusReadout()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L442",
+      "id": "ui_operatorshellscreen_statusreadout",
+      "community": 4,
+      "norm_label": "statusreadout()"
+    },
+    {
+      "label": "thermalColor()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L483",
+      "id": "ui_operatorshellscreen_thermalcolor",
+      "community": 4,
+      "norm_label": "thermalcolor()"
+    },
+    {
+      "label": "OperatorShellPreview()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L491",
+      "id": "ui_operatorshellscreen_operatorshellpreview",
+      "community": 4,
+      "norm_label": "operatorshellpreview()"
+    },
+    {
+      "label": "OperatorViewModel.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_ui_operatorviewmodel_kt",
+      "community": 4,
+      "norm_label": "operatorviewmodel.kt"
+    },
+    {
+      "label": "OperatorUiState",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L22",
+      "id": "ui_operatorviewmodel_operatoruistate",
+      "community": 4,
+      "norm_label": "operatoruistate"
+    },
+    {
+      "label": "formatRam()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L64",
+      "id": "ui_operatorviewmodel_formatram",
+      "community": 4,
+      "norm_label": "formatram()"
+    },
+    {
+      "label": "OperatorViewModel",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L73",
+      "id": "ui_operatorviewmodel_operatorviewmodel",
+      "community": 2,
+      "norm_label": "operatorviewmodel"
+    },
+    {
+      "label": ".onCleared()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L99",
+      "id": "ui_operatorviewmodel_operatorviewmodel_oncleared",
+      "community": 2,
+      "norm_label": ".oncleared()"
+    },
+    {
+      "label": ".markPendingStartAfterPermission()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L104",
+      "id": "ui_operatorviewmodel_operatorviewmodel_markpendingstartafterpermission",
+      "community": 2,
+      "norm_label": ".markpendingstartafterpermission()"
+    },
+    {
+      "label": ".consumePendingStart()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L108",
+      "id": "ui_operatorviewmodel_operatorviewmodel_consumependingstart",
+      "community": 2,
+      "norm_label": ".consumependingstart()"
+    },
+    {
+      "label": ".startCapture()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L112",
+      "id": "ui_operatorviewmodel_operatorviewmodel_startcapture",
+      "community": 2,
+      "norm_label": ".startcapture()"
+    },
+    {
+      "label": ".stopCapture()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L132",
+      "id": "ui_operatorviewmodel_operatorviewmodel_stopcapture",
+      "community": 2,
+      "norm_label": ".stopcapture()"
+    },
+    {
+      "label": ".onFaceResult()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L153",
+      "id": "ui_operatorviewmodel_operatorviewmodel_onfaceresult",
+      "community": 2,
+      "norm_label": ".onfaceresult()"
+    },
+    {
+      "label": ".onBurstComplete()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L197",
+      "id": "ui_operatorviewmodel_operatorviewmodel_onburstcomplete",
+      "community": 2,
+      "norm_label": ".onburstcomplete()"
+    },
+    {
+      "label": ".onPhotoDelivered()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L208",
+      "id": "ui_operatorviewmodel_operatorviewmodel_onphotodelivered",
+      "community": 2,
+      "norm_label": ".onphotodelivered()"
+    },
+    {
+      "label": ".resolveArmed()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L217",
+      "id": "ui_operatorviewmodel_operatorviewmodel_resolvearmed",
+      "community": 2,
+      "norm_label": ".resolvearmed()"
+    },
+    {
+      "label": ".setArmThreshold()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L230",
+      "id": "ui_operatorviewmodel_operatorviewmodel_setarmthreshold",
+      "community": 2,
+      "norm_label": ".setarmthreshold()"
+    },
+    {
+      "label": ".setFireThreshold()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L240",
+      "id": "ui_operatorviewmodel_operatorviewmodel_setfirethreshold",
+      "community": 2,
+      "norm_label": ".setfirethreshold()"
+    },
+    {
+      "label": ".setCaptureMode()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L249",
+      "id": "ui_operatorviewmodel_operatorviewmodel_setcapturemode",
+      "community": 2,
+      "norm_label": ".setcapturemode()"
+    },
+    {
+      "label": ".onExposureReadout()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L253",
+      "id": "ui_operatorviewmodel_operatorviewmodel_onexposurereadout",
+      "community": 2,
+      "norm_label": ".onexposurereadout()"
+    },
+    {
+      "label": ".applyDeviceLoad()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L257",
+      "id": "ui_operatorviewmodel_operatorviewmodel_applydeviceload",
+      "community": 2,
+      "norm_label": ".applydeviceload()"
+    },
+    {
+      "label": "PreviewCameraController.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_previewcameracontroller_kt",
+      "community": 1,
+      "norm_label": "previewcameracontroller.kt"
+    },
+    {
+      "label": "PreviewCameraController",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L44",
+      "id": "camera_previewcameracontroller_previewcameracontroller",
+      "community": 1,
+      "norm_label": "previewcameracontroller"
+    },
+    {
+      "label": ".setPhotoDeliveredListener()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L68",
+      "id": "camera_previewcameracontroller_previewcameracontroller_setphotodeliveredlistener",
+      "community": 1,
+      "norm_label": ".setphotodeliveredlistener()"
+    },
+    {
+      "label": ".setExposureReadoutListener()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L73",
+      "id": "camera_previewcameracontroller_previewcameracontroller_setexposurereadoutlistener",
+      "community": 1,
+      "norm_label": ".setexposurereadoutlistener()"
+    },
+    {
+      "label": ".setArmThreshold()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L77",
+      "id": "camera_previewcameracontroller_previewcameracontroller_setarmthreshold",
+      "community": 1,
+      "norm_label": ".setarmthreshold()"
+    },
+    {
+      "label": ".setFireThreshold()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L81",
+      "id": "camera_previewcameracontroller_previewcameracontroller_setfirethreshold",
+      "community": 1,
+      "norm_label": ".setfirethreshold()"
+    },
+    {
+      "label": ".setBurstShotCount()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L85",
+      "id": "camera_previewcameracontroller_previewcameracontroller_setburstshotcount",
+      "community": 1,
+      "norm_label": ".setburstshotcount()"
+    },
+    {
+      "label": ".setCaptureMode()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L89",
+      "id": "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "community": 1,
+      "norm_label": ".setcapturemode()"
+    },
+    {
+      "label": ".bindPreview()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L93",
+      "id": "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "community": 1,
+      "norm_label": ".bindpreview()"
+    },
+    {
+      "label": ".triggerBurst()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L128",
+      "id": "camera_previewcameracontroller_previewcameracontroller_triggerburst",
+      "community": 1,
+      "norm_label": ".triggerburst()"
+    },
+    {
+      "label": ".ensureWriteQueue()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L143",
+      "id": "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "community": 1,
+      "norm_label": ".ensurewritequeue()"
+    },
+    {
+      "label": ".bindInternal()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L155",
+      "id": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "community": 1,
+      "norm_label": ".bindinternal()"
+    },
+    {
+      "label": ".publishExposure()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L280",
+      "id": "camera_previewcameracontroller_previewcameracontroller_publishexposure",
+      "community": 1,
+      "norm_label": ".publishexposure()"
+    },
+    {
+      "label": ".applyFaceLock()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L294",
+      "id": "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "community": 1,
+      "norm_label": ".applyfacelock()"
+    },
+    {
+      "label": ".unbind()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L304",
+      "id": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "community": 1,
+      "norm_label": ".unbind()"
+    },
+    {
+      "label": ".shutdown()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L327",
+      "id": "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "community": 1,
+      "norm_label": ".shutdown()"
+    },
+    {
+      "label": "CameraExposureReadout.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CameraExposureReadout.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_cameraexposurereadout_kt",
+      "community": 1,
+      "norm_label": "cameraexposurereadout.kt"
+    },
+    {
+      "label": "CameraExposureReadout",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CameraExposureReadout.kt",
+      "source_location": "L6",
+      "id": "camera_cameraexposurereadout_cameraexposurereadout",
+      "community": 1,
+      "norm_label": "cameraexposurereadout"
+    },
+    {
+      "label": "formatShutter()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CameraExposureReadout.kt",
+      "source_location": "L20",
+      "id": "camera_cameraexposurereadout_formatshutter",
+      "community": 1,
+      "norm_label": "formatshutter()"
+    },
+    {
+      "label": "CaptureResolutions.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_captureresolutions_kt",
+      "community": 7,
+      "norm_label": "captureresolutions.kt"
+    },
+    {
+      "label": "CaptureResolutions",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L16",
+      "id": "camera_captureresolutions_captureresolutions",
+      "community": 7,
+      "norm_label": "captureresolutions"
+    },
+    {
+      "label": ".label()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L20",
+      "id": "camera_captureresolutions_captureresolutions_label",
+      "community": 7,
+      "norm_label": ".label()"
+    },
+    {
+      "label": ".imageCaptureSelector()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L25",
+      "id": "camera_captureresolutions_captureresolutions_imagecaptureselector",
+      "community": 7,
+      "norm_label": ".imagecaptureselector()"
+    },
+    {
+      "label": ".captureModeQuality()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L39",
+      "id": "camera_captureresolutions_captureresolutions_capturemodequality",
+      "community": 7,
+      "norm_label": ".capturemodequality()"
+    },
+    {
+      "label": ".format()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L44",
+      "id": "camera_captureresolutions_captureresolutions_format",
+      "community": 7,
+      "norm_label": ".format()"
+    },
+    {
+      "label": ".maxJpegSize()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L46",
+      "id": "camera_captureresolutions_captureresolutions_maxjpegsize",
+      "community": 7,
+      "norm_label": ".maxjpegsize()"
+    },
+    {
+      "label": "LeanBurstCapturer.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_capture_leanburstcapturer_kt",
+      "community": 0,
+      "norm_label": "leanburstcapturer.kt"
+    },
+    {
+      "label": "LeanBurstCapturer",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L18",
+      "id": "capture_leanburstcapturer_leanburstcapturer",
+      "community": 0,
+      "norm_label": "leanburstcapturer"
+    },
+    {
+      "label": ".capture()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L26",
+      "id": "capture_leanburstcapturer_leanburstcapturer_capture",
+      "community": 0,
+      "norm_label": ".capture()"
+    },
+    {
+      "label": ".cancelPending()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L78",
+      "id": "capture_leanburstcapturer_leanburstcapturer_cancelpending",
+      "community": 0,
+      "norm_label": ".cancelpending()"
+    },
+    {
+      "label": "FaceFocusController.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_focus_facefocuscontroller_kt",
+      "community": 8,
+      "norm_label": "facefocuscontroller.kt"
+    },
+    {
+      "label": "FaceFocusController",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L14",
+      "id": "focus_facefocuscontroller_facefocuscontroller",
+      "community": 8,
+      "norm_label": "facefocuscontroller"
+    },
+    {
+      "label": ".attach()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L22",
+      "id": "focus_facefocuscontroller_facefocuscontroller_attach",
+      "community": 8,
+      "norm_label": ".attach()"
+    },
+    {
+      "label": ".detach()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L26",
+      "id": "focus_facefocuscontroller_facefocuscontroller_detach",
+      "community": 8,
+      "norm_label": ".detach()"
+    },
+    {
+      "label": ".lockOnFace()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L31",
+      "id": "focus_facefocuscontroller_facefocuscontroller_lockonface",
+      "community": 8,
+      "norm_label": ".lockonface()"
+    },
+    {
+      "label": ".cancel()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L64",
+      "id": "focus_facefocuscontroller_facefocuscontroller_cancel",
+      "community": 8,
+      "norm_label": ".cancel()"
+    },
+    {
+      "label": "DeviceLoadReader.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadreader_kt",
+      "community": 5,
+      "norm_label": "deviceloadreader.kt"
+    },
+    {
+      "label": "DeviceLoadReader",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L14",
+      "id": "load_deviceloadreader_deviceloadreader",
+      "community": 5,
+      "norm_label": "deviceloadreader"
+    },
+    {
+      "label": ".sample()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L27",
+      "id": "load_deviceloadreader_deviceloadreader_sample",
+      "community": 5,
+      "norm_label": ".sample()"
+    },
+    {
+      "label": ".start()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L43",
+      "id": "load_deviceloadreader_deviceloadreader_start",
+      "community": 5,
+      "norm_label": ".start()"
+    },
+    {
+      "label": ".stop()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L66",
+      "id": "load_deviceloadreader_deviceloadreader_stop",
+      "community": 5,
+      "norm_label": ".stop()"
+    },
+    {
+      "label": ".readThermal()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L79",
+      "id": "load_deviceloadreader_deviceloadreader_readthermal",
+      "community": 5,
+      "norm_label": ".readthermal()"
+    },
+    {
+      "label": ".labelFor()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L92",
+      "id": "load_deviceloadreader_deviceloadreader_labelfor",
+      "community": 5,
+      "norm_label": ".labelfor()"
+    },
+    {
+      "label": "ThermalReading",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L103",
+      "id": "load_deviceloadreader_thermalreading",
+      "community": 5,
+      "norm_label": "thermalreading"
+    },
+    {
+      "label": "DeviceLoadSnapshot.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadSnapshot.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadsnapshot_kt",
+      "community": 5,
+      "norm_label": "deviceloadsnapshot.kt"
+    },
+    {
+      "label": "DeviceLoadSnapshot",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadSnapshot.kt",
+      "source_location": "L6",
+      "id": "load_deviceloadsnapshot_deviceloadsnapshot",
+      "community": 5,
+      "norm_label": "deviceloadsnapshot"
+    },
+    {
+      "label": "WriteQueue.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_delivery_writequeue_kt",
+      "community": 9,
+      "norm_label": "writequeue.kt"
+    },
+    {
+      "label": "WriteQueue",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L17",
+      "id": "delivery_writequeue_writequeue",
+      "community": 9,
+      "norm_label": "writequeue"
+    },
+    {
+      "label": ".enqueue()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L50",
+      "id": "delivery_writequeue_writequeue_enqueue",
+      "community": 9,
+      "norm_label": ".enqueue()"
+    },
+    {
+      "label": ".enqueueAll()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L62",
+      "id": "delivery_writequeue_writequeue_enqueueall",
+      "community": 9,
+      "norm_label": ".enqueueall()"
+    },
+    {
+      "label": ".close()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L64",
+      "id": "delivery_writequeue_writequeue_close",
+      "community": 9,
+      "norm_label": ".close()"
+    },
+    {
+      "label": "LocalDeliveryWriter.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/LocalDeliveryWriter.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_delivery_localdeliverywriter_kt",
+      "community": 0,
+      "norm_label": "localdeliverywriter.kt"
+    },
+    {
+      "label": "LocalDeliveryWriter",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/LocalDeliveryWriter.kt",
+      "source_location": "L14",
+      "id": "delivery_localdeliverywriter_localdeliverywriter",
+      "community": 0,
+      "norm_label": "localdeliverywriter"
+    },
+    {
+      "label": ".publish()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/LocalDeliveryWriter.kt",
+      "source_location": "L19",
+      "id": "delivery_localdeliverywriter_localdeliverywriter_publish",
+      "community": 0,
+      "norm_label": ".publish()"
+    },
+    {
+      "label": "GalleryLauncher.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/GalleryLauncher.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_delivery_gallerylauncher_kt",
+      "community": 10,
+      "norm_label": "gallerylauncher.kt"
+    },
+    {
+      "label": "GalleryLauncher",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/GalleryLauncher.kt",
+      "source_location": "L10",
+      "id": "delivery_gallerylauncher_gallerylauncher",
+      "community": 10,
+      "norm_label": "gallerylauncher"
+    },
+    {
+      "label": ".open()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/GalleryLauncher.kt",
+      "source_location": "L11",
+      "id": "delivery_gallerylauncher_gallerylauncher_open",
+      "community": 10,
+      "norm_label": ".open()"
+    },
+    {
+      "label": "MlKitFaceAnalyzer.kt",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L1",
+      "id": "androidapp_src_main_kotlin_com_autobots_camera_detection_mlkitfaceanalyzer_kt",
+      "community": 3,
+      "norm_label": "mlkitfaceanalyzer.kt"
+    },
+    {
+      "label": "MlKitFaceAnalyzer",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L24",
+      "id": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer",
+      "community": 3,
+      "norm_label": "mlkitfaceanalyzer"
+    },
+    {
+      "label": ".analyze()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L43",
+      "id": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_analyze",
+      "community": 3,
+      "norm_label": ".analyze()"
+    },
+    {
+      "label": ".publishMapped()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L85",
+      "id": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_publishmapped",
+      "community": 3,
+      "norm_label": ".publishmapped()"
+    },
+    {
+      "label": ".close()",
+      "file_type": "code",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L120",
+      "id": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_close",
+      "community": 3,
+      "norm_label": ".close()"
+    },
+    {
+      "label": "Passage",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_passage",
+      "community": 0,
+      "norm_label": "passage"
+    },
+    {
+      "label": "Burst",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_burst",
+      "community": 0,
+      "norm_label": "burst"
+    },
+    {
+      "label": "Candidate Shot",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_candidate_shot",
+      "community": 0,
+      "norm_label": "candidate shot"
+    },
+    {
+      "label": "Kept Photo",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_kept_photo",
+      "community": 0,
+      "norm_label": "kept photo"
+    },
+    {
+      "label": "Passage Outcome",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_passage_outcome",
+      "community": 0,
+      "norm_label": "passage outcome"
+    },
+    {
+      "label": "Lean Burst",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_lean_burst",
+      "community": 0,
+      "norm_label": "lean burst"
+    },
+    {
+      "label": "Keep-All Policy",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_keep_all_policy",
+      "community": 0,
+      "norm_label": "keep-all policy"
+    },
+    {
+      "label": "Passage Gate",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_passage_gate",
+      "community": 0,
+      "norm_label": "passage gate"
+    },
+    {
+      "label": "Subject Face",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_subject_face",
+      "community": 3,
+      "norm_label": "subject face"
+    },
+    {
+      "label": "Face Proximity",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_face_proximity",
+      "community": 3,
+      "norm_label": "face proximity"
+    },
+    {
+      "label": "Arm Threshold",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_arm_threshold",
+      "community": 3,
+      "norm_label": "arm threshold"
+    },
+    {
+      "label": "Fire Threshold",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_fire_threshold",
+      "community": 3,
+      "norm_label": "fire threshold"
+    },
+    {
+      "label": "Frame Scoring",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_frame_scoring",
+      "community": 0,
+      "norm_label": "frame scoring"
+    },
+    {
+      "label": "Deferred Score Flags",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_deferred_score_flags",
+      "community": 0,
+      "norm_label": "deferred score flags"
+    },
+    {
+      "label": "Still Photo Product",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_still_photo_product",
+      "community": 0,
+      "norm_label": "still photo product"
+    },
+    {
+      "label": "Local Delivery",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_local_delivery",
+      "community": 0,
+      "norm_label": "local delivery"
+    },
+    {
+      "label": "Future Remote Delivery",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_future_remote_delivery",
+      "community": 0,
+      "norm_label": "future remote delivery"
+    },
+    {
+      "label": "Android-First Runtime",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_android_first_runtime",
+      "community": 0,
+      "norm_label": "android-first runtime"
+    },
+    {
+      "label": "Standard Capture Mode",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_standard_capture_mode",
+      "community": 0,
+      "norm_label": "standard capture mode"
+    },
+    {
+      "label": "Max-Sensor Capture Mode",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_max_sensor_capture_mode",
+      "community": 0,
+      "norm_label": "max-sensor capture mode"
+    },
+    {
+      "label": "Capture Mode Option",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_capture_mode_option",
+      "community": 0,
+      "norm_label": "capture mode option"
+    },
+    {
+      "label": "Thermal Throttling",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_thermal_throttling",
+      "community": 0,
+      "norm_label": "thermal throttling"
+    },
+    {
+      "label": "Operator Preview",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_operator_preview",
+      "community": 5,
+      "norm_label": "operator preview"
+    },
+    {
+      "label": "Device Load Readout",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_device_load_readout",
+      "community": 5,
+      "norm_label": "device load readout"
+    },
+    {
+      "label": "Operator Controls",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_operator_controls",
+      "community": 5,
+      "norm_label": "operator controls"
+    },
+    {
+      "label": "Write Queue",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_write_queue",
+      "community": 0,
+      "norm_label": "write queue"
+    },
+    {
+      "label": "Face Lock",
+      "file_type": "document",
+      "source_file": "CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "context_face_lock",
+      "community": 3,
+      "norm_label": "face lock"
+    },
+    {
+      "label": "Architecture",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_architecture",
+      "community": 1,
+      "norm_label": "architecture"
+    },
+    {
+      "label": "MVP Spec",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_mvp_spec",
+      "community": 0,
+      "norm_label": "mvp spec"
+    },
+    {
+      "label": "Runtime Pipeline",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_runtime_pipeline",
+      "community": 1,
+      "norm_label": "runtime pipeline"
+    },
+    {
+      "label": "Operator UI",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_operator_ui",
+      "community": 2,
+      "norm_label": "operator ui"
+    },
+    {
+      "label": "Architecture Decisions",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_architecture_decisions",
+      "community": 0,
+      "norm_label": "architecture decisions"
+    },
+    {
+      "label": "Implementation Phases",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_implementation_phases",
+      "community": 16,
+      "norm_label": "implementation phases"
+    },
+    {
+      "label": "Post-MVP",
+      "file_type": "document",
+      "source_file": "docs/DOCS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "id": "docs_post_mvp",
+      "community": 17,
+      "norm_label": "post-mvp"
+    }
+  ],
+  "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/PassageThresholds.kt",
+      "source_location": "L7",
+      "weight": 1.0,
+      "source": "shared_src_commonmain_kotlin_com_autobots_camera_passagethresholds_kt",
+      "target": "camera_passagethresholds_passagethresholds",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/PassageThresholds.kt",
+      "source_location": "L16",
+      "weight": 1.0,
+      "source": "camera_passagethresholds_passagethresholds",
+      "target": "camera_passagethresholds_passagethresholds_armrelease",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_arm_threshold",
+      "target": "camera_passagethresholds_passagethresholds"
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_fire_threshold",
+      "target": "camera_passagethresholds_passagethresholds"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/AutobotsApp.kt",
+      "source_location": "L7",
+      "weight": 1.0,
+      "source": "shared_src_commonmain_kotlin_com_autobots_camera_autobotsapp_kt",
+      "target": "camera_autobotsapp_autobotsapp",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/CaptureMode.kt",
+      "source_location": "L7",
+      "weight": 1.0,
+      "source": "shared_src_commonmain_kotlin_com_autobots_camera_capturemode_kt",
+      "target": "camera_capturemode_capturemode",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_capture_mode_option",
+      "target": "camera_capturemode_capturemode"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L7",
+      "weight": 1.0,
+      "source": "shared_src_commonmain_kotlin_com_autobots_camera_detection_subjectface_kt",
+      "target": "detection_subjectface_normalizedfacebox",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L19",
+      "weight": 1.0,
+      "source": "shared_src_commonmain_kotlin_com_autobots_camera_detection_subjectface_kt",
+      "target": "detection_subjectface_faceframeresult",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L27",
+      "weight": 1.0,
+      "source": "shared_src_commonmain_kotlin_com_autobots_camera_detection_subjectface_kt",
+      "target": "detection_subjectface_subjectfaceselector",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L104",
+      "weight": 1.0,
+      "source": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_publishmapped",
+      "target": "detection_subjectface_normalizedfacebox"
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_face_proximity",
+      "target": "detection_subjectface_normalizedfacebox"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L30",
+      "weight": 1.0,
+      "source": "detection_subjectface_subjectfaceselector_select",
+      "target": "detection_subjectface_faceframeresult",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "shared/src/commonMain/kotlin/com/autobots/camera/detection/SubjectFace.kt",
+      "source_location": "L28",
+      "weight": 1.0,
+      "source": "detection_subjectface_subjectfaceselector",
+      "target": "detection_subjectface_subjectfaceselector_select",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_subject_face",
+      "target": "detection_subjectface_subjectfaceselector"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L18",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_mainactivity_kt",
+      "target": "autobots_mainactivity_mainactivity",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L21",
+      "weight": 1.0,
+      "source": "autobots_mainactivity_mainactivity",
+      "target": "autobots_mainactivity_mainactivity_oncreate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L69",
+      "weight": 1.0,
+      "source": "autobots_mainactivity_mainactivity",
+      "target": "autobots_mainactivity_mainactivity_onstop",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L27",
+      "weight": 1.0,
+      "source": "autobots_mainactivity_mainactivity_oncreate",
+      "target": "ui_camerapreviewpane_remembercamerapermissionstate"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/MainActivity.kt",
+      "source_location": "L39",
+      "weight": 1.0,
+      "source": "autobots_mainactivity_mainactivity_oncreate",
+      "target": "ui_operatorshellscreen_operatorshellscreen"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L35",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_camerapreviewpane_kt",
+      "target": "ui_camerapreviewpane_camerapreviewpane",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L140",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_camerapreviewpane_kt",
+      "target": "ui_camerapreviewpane_camerapermissionstate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L145",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_camerapreviewpane_kt",
+      "target": "ui_camerapreviewpane_remembercamerapermissionstate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L53",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_camerapreviewpane",
+      "target": "camera_previewcameracontroller_previewcameracontroller"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L59",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_camerapreviewpane",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onphotodelivered"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L62",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_camerapreviewpane",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onexposurereadout"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L90",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_camerapreviewpane",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onfaceresult"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L93",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_camerapreviewpane",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onburstcomplete"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L116",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_camerapreviewpane",
+      "target": "ui_faceoverlay_faceoverlay"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L82",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorshellscreen",
+      "target": "ui_camerapreviewpane_camerapreviewpane"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/CameraPreviewPane.kt",
+      "source_location": "L158",
+      "weight": 1.0,
+      "source": "ui_camerapreviewpane_remembercamerapermissionstate",
+      "target": "ui_camerapreviewpane_camerapermissionstate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/FaceOverlay.kt",
+      "source_location": "L13",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_faceoverlay_kt",
+      "target": "ui_faceoverlay_faceoverlay",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/AfGridOverlay.kt",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_afgridoverlay_kt",
+      "target": "ui_afgridoverlay_afgridoverlay",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/AfGridOverlay.kt",
+      "source_location": "L102",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_afgridoverlay_kt",
+      "target": "ui_afgridoverlay_afgriddefaults",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L148",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_observationpage",
+      "target": "ui_afgridoverlay_afgridoverlay"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L50",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_overlaypages",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L57",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_operatorshellscreen",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L144",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_observationpage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L181",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_operatorcontrolspage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L273",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_overlaypageindicator",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L299",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_capturesettingscard",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L382",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_capturemodechip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L411",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_thresholdsliders",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L442",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_statusreadout",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L483",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_thermalcolor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L491",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorshellscreen_kt",
+      "target": "ui_operatorshellscreen_operatorshellpreview",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L112",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorshellscreen",
+      "target": "ui_operatorshellscreen_operatorcontrolspage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L128",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorshellscreen",
+      "target": "ui_operatorshellscreen_observationpage",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L133",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorshellscreen",
+      "target": "ui_operatorshellscreen_overlaypageindicator",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L495",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorshellpreview",
+      "target": "ui_operatorshellscreen_operatorshellscreen",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_operator_preview",
+      "target": "ui_operatorshellscreen_operatorshellscreen"
+    },
+    {
+      "relation": "conceptually_related_to",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_operator_ui",
+      "target": "ui_operatorshellscreen_operatorshellscreen"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L209",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorcontrolspage",
+      "target": "ui_operatorshellscreen_statusreadout",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L228",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorcontrolspage",
+      "target": "ui_operatorshellscreen_capturesettingscard",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L354",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_capturesettingscard",
+      "target": "ui_operatorshellscreen_thresholdsliders",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L364",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_capturesettingscard",
+      "target": "ui_operatorshellscreen_capturemodechip",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L476",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_statusreadout",
+      "target": "ui_operatorshellscreen_thermalcolor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt",
+      "source_location": "L496",
+      "weight": 1.0,
+      "source": "ui_operatorshellscreen_operatorshellpreview",
+      "target": "ui_operatorviewmodel_operatoruistate"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L22",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorviewmodel_kt",
+      "target": "ui_operatorviewmodel_operatoruistate",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L64",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorviewmodel_kt",
+      "target": "ui_operatorviewmodel_formatram",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L73",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_ui_operatorviewmodel_kt",
+      "target": "ui_operatorviewmodel_operatorviewmodel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L99",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_oncleared",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L104",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_markpendingstartafterpermission",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L108",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_consumependingstart",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L112",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_startcapture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L132",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_stopcapture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L153",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onfaceresult",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L197",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onburstcomplete",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L208",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onphotodelivered",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L217",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_resolvearmed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L230",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_setarmthreshold",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L240",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_setfirethreshold",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L249",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_setcapturemode",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L253",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onexposurereadout",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L257",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel",
+      "target": "ui_operatorviewmodel_operatorviewmodel_applydeviceload",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "conceptually_related_to",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_operator_ui",
+      "target": "ui_operatorviewmodel_operatorviewmodel"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L129",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel_startcapture",
+      "target": "ui_operatorviewmodel_operatorviewmodel_applydeviceload",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L157",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel_onfaceresult",
+      "target": "ui_operatorviewmodel_operatorviewmodel_resolvearmed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L216",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "ui_operatorviewmodel_operatorviewmodel_onfaceresult"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt",
+      "source_location": "L205",
+      "weight": 1.0,
+      "source": "ui_operatorviewmodel_operatorviewmodel_onburstcomplete",
+      "target": "ui_operatorviewmodel_operatorviewmodel_applydeviceload",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L44",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_previewcameracontroller_kt",
+      "target": "camera_previewcameracontroller_previewcameracontroller",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L68",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setphotodeliveredlistener",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L73",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setexposurereadoutlistener",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L77",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setarmthreshold",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L81",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setfirethreshold",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L85",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setburstshotcount",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L89",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L93",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L128",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_triggerburst",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L143",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L155",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L280",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_publishexposure",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L294",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L304",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L327",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller",
+      "target": "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "conceptually_related_to",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_runtime_pipeline",
+      "target": "camera_previewcameracontroller_previewcameracontroller"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L70",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_setphotodeliveredlistener",
+      "target": "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L201",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "camera_previewcameracontroller_previewcameracontroller_setcapturemode",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L112",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindpreview",
+      "target": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L137",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_triggerburst",
+      "target": "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L145",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "target": "delivery_writequeue_writequeue"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L146",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_ensurewritequeue",
+      "target": "delivery_localdeliverywriter_localdeliverywriter"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L215",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "camera_previewcameracontroller_previewcameracontroller_applyfacelock",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L206",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "capture_leanburstcapturer_leanburstcapturer"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L210",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "focus_facefocuscontroller_facefocuscontroller"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L214",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_bindinternal",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L286",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_publishexposure",
+      "target": "camera_cameraexposurereadout_cameraexposurereadout"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L329",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_shutdown",
+      "target": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/PreviewCameraController.kt",
+      "source_location": "L316",
+      "weight": 1.0,
+      "source": "camera_previewcameracontroller_previewcameracontroller_unbind",
+      "target": "camera_cameraexposurereadout_cameraexposurereadout"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CameraExposureReadout.kt",
+      "source_location": "L6",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_cameraexposurereadout_kt",
+      "target": "camera_cameraexposurereadout_cameraexposurereadout",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CameraExposureReadout.kt",
+      "source_location": "L20",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_cameraexposurereadout_kt",
+      "target": "camera_cameraexposurereadout_formatshutter",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L16",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_captureresolutions_kt",
+      "target": "camera_captureresolutions_captureresolutions",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L20",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions",
+      "target": "camera_captureresolutions_captureresolutions_label",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L25",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions",
+      "target": "camera_captureresolutions_captureresolutions_imagecaptureselector",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L39",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions",
+      "target": "camera_captureresolutions_captureresolutions_capturemodequality",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L44",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions",
+      "target": "camera_captureresolutions_captureresolutions_format",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L46",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions",
+      "target": "camera_captureresolutions_captureresolutions_maxjpegsize",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L21",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions_label",
+      "target": "camera_captureresolutions_captureresolutions_format",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/CaptureResolutions.kt",
+      "source_location": "L22",
+      "weight": 1.0,
+      "source": "camera_captureresolutions_captureresolutions_label",
+      "target": "camera_captureresolutions_captureresolutions_maxjpegsize",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L18",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_capture_leanburstcapturer_kt",
+      "target": "capture_leanburstcapturer_leanburstcapturer",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L26",
+      "weight": 1.0,
+      "source": "capture_leanburstcapturer_leanburstcapturer",
+      "target": "capture_leanburstcapturer_leanburstcapturer_capture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/capture/LeanBurstCapturer.kt",
+      "source_location": "L78",
+      "weight": 1.0,
+      "source": "capture_leanburstcapturer_leanburstcapturer",
+      "target": "capture_leanburstcapturer_leanburstcapturer_cancelpending",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_lean_burst",
+      "target": "capture_leanburstcapturer_leanburstcapturer"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L14",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_focus_facefocuscontroller_kt",
+      "target": "focus_facefocuscontroller_facefocuscontroller",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L22",
+      "weight": 1.0,
+      "source": "focus_facefocuscontroller_facefocuscontroller",
+      "target": "focus_facefocuscontroller_facefocuscontroller_attach",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L26",
+      "weight": 1.0,
+      "source": "focus_facefocuscontroller_facefocuscontroller",
+      "target": "focus_facefocuscontroller_facefocuscontroller_detach",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L31",
+      "weight": 1.0,
+      "source": "focus_facefocuscontroller_facefocuscontroller",
+      "target": "focus_facefocuscontroller_facefocuscontroller_lockonface",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L64",
+      "weight": 1.0,
+      "source": "focus_facefocuscontroller_facefocuscontroller",
+      "target": "focus_facefocuscontroller_facefocuscontroller_cancel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_face_lock",
+      "target": "focus_facefocuscontroller_facefocuscontroller"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/focus/FaceFocusController.kt",
+      "source_location": "L27",
+      "weight": 1.0,
+      "source": "focus_facefocuscontroller_facefocuscontroller_detach",
+      "target": "focus_facefocuscontroller_facefocuscontroller_cancel",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L14",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadreader_kt",
+      "target": "load_deviceloadreader_deviceloadreader",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L103",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadreader_kt",
+      "target": "load_deviceloadreader_thermalreading",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L27",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader",
+      "target": "load_deviceloadreader_deviceloadreader_sample",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L43",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader",
+      "target": "load_deviceloadreader_deviceloadreader_start",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L66",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader",
+      "target": "load_deviceloadreader_deviceloadreader_stop",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L79",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader",
+      "target": "load_deviceloadreader_deviceloadreader_readthermal",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L92",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader",
+      "target": "load_deviceloadreader_deviceloadreader_labelfor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_device_load_readout",
+      "target": "load_deviceloadreader_deviceloadreader"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L28",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader_sample",
+      "target": "load_deviceloadreader_deviceloadreader_readthermal",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L45",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader_start",
+      "target": "load_deviceloadreader_deviceloadreader_sample",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L34",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader_sample",
+      "target": "load_deviceloadsnapshot_deviceloadsnapshot"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L81",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader_readthermal",
+      "target": "load_deviceloadreader_thermalreading",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadReader.kt",
+      "source_location": "L85",
+      "weight": 1.0,
+      "source": "load_deviceloadreader_deviceloadreader_readthermal",
+      "target": "load_deviceloadreader_deviceloadreader_labelfor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/load/DeviceLoadSnapshot.kt",
+      "source_location": "L6",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_load_deviceloadsnapshot_kt",
+      "target": "load_deviceloadsnapshot_deviceloadsnapshot",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_device_load_readout",
+      "target": "load_deviceloadsnapshot_deviceloadsnapshot"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_delivery_writequeue_kt",
+      "target": "delivery_writequeue_writequeue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L50",
+      "weight": 1.0,
+      "source": "delivery_writequeue_writequeue",
+      "target": "delivery_writequeue_writequeue_enqueue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L62",
+      "weight": 1.0,
+      "source": "delivery_writequeue_writequeue",
+      "target": "delivery_writequeue_writequeue_enqueueall",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L64",
+      "weight": 1.0,
+      "source": "delivery_writequeue_writequeue",
+      "target": "delivery_writequeue_writequeue_close",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_write_queue",
+      "target": "delivery_writequeue_writequeue"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt",
+      "source_location": "L62",
+      "weight": 1.0,
+      "source": "delivery_writequeue_writequeue_enqueueall",
+      "target": "delivery_writequeue_writequeue_enqueue",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/LocalDeliveryWriter.kt",
+      "source_location": "L14",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_delivery_localdeliverywriter_kt",
+      "target": "delivery_localdeliverywriter_localdeliverywriter",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/LocalDeliveryWriter.kt",
+      "source_location": "L19",
+      "weight": 1.0,
+      "source": "delivery_localdeliverywriter_localdeliverywriter",
+      "target": "delivery_localdeliverywriter_localdeliverywriter_publish",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_local_delivery",
+      "target": "delivery_localdeliverywriter_localdeliverywriter"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/GalleryLauncher.kt",
+      "source_location": "L10",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_delivery_gallerylauncher_kt",
+      "target": "delivery_gallerylauncher_gallerylauncher",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/delivery/GalleryLauncher.kt",
+      "source_location": "L11",
+      "weight": 1.0,
+      "source": "delivery_gallerylauncher_gallerylauncher",
+      "target": "delivery_gallerylauncher_gallerylauncher_open",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L24",
+      "weight": 1.0,
+      "source": "androidapp_src_main_kotlin_com_autobots_camera_detection_mlkitfaceanalyzer_kt",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L43",
+      "weight": 1.0,
+      "source": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_analyze",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L85",
+      "weight": 1.0,
+      "source": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_publishmapped",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L120",
+      "weight": 1.0,
+      "source": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_close",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L46",
+      "weight": 1.0,
+      "source": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_analyze",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_close",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "androidApp/src/main/kotlin/com/autobots/camera/detection/MlKitFaceAnalyzer.kt",
+      "source_location": "L69",
+      "weight": 1.0,
+      "source": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_analyze",
+      "target": "detection_mlkitfaceanalyzer_mlkitfaceanalyzer_publishmapped",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_passage",
+      "target": "context_kept_photo"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_passage",
+      "target": "context_passage_outcome"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_passage_gate",
+      "target": "context_passage"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_subject_face",
+      "target": "context_passage"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_mvp_spec",
+      "target": "context_passage"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_burst",
+      "target": "context_candidate_shot"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_candidate_shot",
+      "target": "context_kept_photo"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_max_sensor_capture_mode",
+      "target": "context_candidate_shot"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_frame_scoring",
+      "target": "context_kept_photo"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_local_delivery",
+      "target": "context_kept_photo"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_passage_outcome",
+      "target": "context_lean_burst"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_passage_outcome",
+      "target": "context_keep_all_policy"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_lean_burst",
+      "target": "context_keep_all_policy"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_fire_threshold",
+      "target": "context_lean_burst"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_standard_capture_mode",
+      "target": "context_lean_burst"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_keep_all_policy"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_passage_gate"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_subject_face",
+      "target": "context_face_proximity"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_face_lock",
+      "target": "context_subject_face"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_arm_threshold",
+      "target": "context_face_proximity"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_fire_threshold",
+      "target": "context_face_proximity"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_arm_threshold",
+      "target": "context_face_lock"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_frame_scoring",
+      "target": "context_deferred_score_flags"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_still_photo_product"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_future_remote_delivery",
+      "target": "context_local_delivery"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_write_queue",
+      "target": "context_local_delivery"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_local_delivery"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_android_first_runtime"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_capture_mode_option",
+      "target": "context_standard_capture_mode"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_standard_capture_mode"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_capture_mode_option",
+      "target": "context_max_sensor_capture_mode"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_thermal_throttling"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_operator_preview",
+      "target": "context_device_load_readout"
+    },
+    {
+      "relation": "references",
+      "source_file": "CONTEXT.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "context_operator_controls",
+      "target": "context_operator_preview"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_device_load_readout"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_write_queue"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture_decisions",
+      "target": "context_face_lock"
+    },
+    {
+      "relation": "references",
+      "source_file": "docs/DOCS.md",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_location": null,
+      "weight": 1.0,
+      "source": "docs_architecture",
+      "target": "docs_runtime_pipeline"
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "passage_capture_flow",
+      "label": "Passage Capture Flow",
+      "nodes": [
+        "context_passage",
+        "context_face_lock",
+        "context_lean_burst",
+        "context_passage_gate"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "CONTEXT.md"
+    },
+    {
+      "id": "operator_interface_components",
+      "label": "Operator Interface Components",
+      "nodes": [
+        "context_operator_preview",
+        "context_device_load_readout",
+        "context_operator_controls"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "CONTEXT.md"
+    }
+  ],
+  "built_at_commit": "79c9a98fa0f8d075ea91076c4292f3cbc6c56c6b"
+}

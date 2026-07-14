@@ -25,8 +25,8 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.autobots.camera.capture.LeanBurstCapturer
-import com.autobots.camera.delivery.LocalDeliveryWriter
-import com.autobots.camera.delivery.WriteQueue
+import com.autobots.camera.delivery.PhotoDeliveryService
+import com.autobots.camera.delivery.LocalPhotoDeliveryService
 import com.autobots.camera.detection.FaceFrameResult
 import com.autobots.camera.detection.MlKitFaceAnalyzer
 import com.autobots.camera.focus.FaceFocusController
@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicReference
 @OptIn(ExperimentalCamera2Interop::class)
 class PreviewCameraController(
     private val context: Context,
+    private val deliveryService: PhotoDeliveryService = LocalPhotoDeliveryService(context.applicationContext),
 ) {
     private val providerRef = AtomicReference<ProcessCameraProvider?>(null)
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -53,8 +54,6 @@ class PreviewCameraController(
     private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
     private var burstCapturer: LeanBurstCapturer? = null
-    private var writeQueue: WriteQueue? = null
-    private var onPhotoDelivered: ((Uri) -> Unit)? = null
     private var onExposureReadout: ((CameraExposureReadout) -> Unit)? = null
     private val armThresholdRef = AtomicReference(PassageThresholds.ARM_HALF_BODY)
     private val fireThresholdRef = AtomicReference(PassageThresholds.FIRE_HALF_BODY)
@@ -65,13 +64,18 @@ class PreviewCameraController(
     private val lastExposurePublishMs = AtomicLong(0L)
     private val burstOutputDir = File(context.cacheDir, "autobots_burst")
 
+    private var onFrameEncoded: ((ByteArray) -> Unit)? = null
+
     fun setPhotoDeliveredListener(listener: (Uri) -> Unit) {
-        onPhotoDelivered = listener
-        ensureWriteQueue()
+        deliveryService.setPhotoDeliveredListener(listener)
     }
 
     fun setExposureReadoutListener(listener: (CameraExposureReadout) -> Unit) {
         onExposureReadout = listener
+    }
+
+    fun setFrameEncodedListener(listener: (ByteArray) -> Unit) {
+        onFrameEncoded = listener
     }
 
     fun setArmThreshold(threshold: Float) {
@@ -134,22 +138,9 @@ class PreviewCameraController(
         }
         capturer.capture(shotCount = burstShotCountRef.get()) { saved, files ->
             mainExecutor.execute { onBurstFinished(saved) }
-            val queue = ensureWriteQueue()
-            val enqueued = queue.enqueueAll(files)
+            val enqueued = deliveryService.enqueueAll(files)
             Log.i(TAG, "Burst captured=$saved enqueued=$enqueued → DCIM/AutoBots")
         }
-    }
-
-    private fun ensureWriteQueue(): WriteQueue {
-        writeQueue?.let { return it }
-        val queue = WriteQueue(
-            writer = LocalDeliveryWriter(context),
-            onDelivered = { uri ->
-                mainExecutor.execute { onPhotoDelivered?.invoke(uri) }
-            },
-        )
-        writeQueue = queue
-        return queue
     }
 
     private fun bindInternal(
@@ -211,10 +202,14 @@ class PreviewCameraController(
             faceFocus = focus
 
             faceAnalyzer?.close()
-            val analyzer = MlKitFaceAnalyzer(previewView) { result ->
-                applyFaceLock(result)
-                onFaceResult(result)
-            }
+            val analyzer = MlKitFaceAnalyzer(
+                previewView = previewView,
+                onFrameEncoded = { jpeg -> onFrameEncoded?.invoke(jpeg) },
+                onResult = { result ->
+                    applyFaceLock(result)
+                    onFaceResult(result)
+                }
+            )
             faceAnalyzer = analyzer
 
             val resolutionSelector = ResolutionSelector.Builder()
@@ -327,8 +322,7 @@ class PreviewCameraController(
     fun shutdown() {
         shutdown.set(true)
         unbind()
-        writeQueue?.close()
-        writeQueue = null
+        deliveryService.close()
         analysisExecutor.shutdown()
     }
 

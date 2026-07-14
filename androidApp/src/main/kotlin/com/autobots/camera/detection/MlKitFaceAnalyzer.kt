@@ -1,8 +1,11 @@
 package com.autobots.camera.detection
 
 import android.annotation.SuppressLint
+import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.YuvImage
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -14,6 +17,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -23,11 +27,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class MlKitFaceAnalyzer(
     private val previewView: PreviewView,
+    private val onFrameEncoded: ((ByteArray) -> Unit)? = null,
     private val onResult: (FaceFrameResult) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     private val closed = AtomicBoolean(false)
     private val mainExecutor: Executor = ContextCompat.getMainExecutor(previewView.context)
+    private var lastFrameTime = 0L
 
     private val detector: FaceDetector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
@@ -45,6 +51,18 @@ class MlKitFaceAnalyzer(
         if (closed.get()) {
             imageProxy.close()
             return
+        }
+
+        // Throttle and encode preview frames for remote streaming
+        if (onFrameEncoded != null) {
+            val now = System.currentTimeMillis()
+            if (now - lastFrameTime >= 66) { // Max ~15 FPS
+                lastFrameTime = now
+                val jpeg = imageProxy.toJpeg()
+                if (jpeg != null) {
+                    onFrameEncoded.invoke(jpeg)
+                }
+            }
         }
 
         val mediaImage = imageProxy.image
@@ -126,4 +144,61 @@ class MlKitFaceAnalyzer(
     companion object {
         private const val TAG = "MlKitFaceAnalyzer"
     }
+}
+
+/**
+ * Extension helper to convert YUV_420_888 ImageProxy to JPEG ByteArray.
+ */
+fun ImageProxy.toJpeg(): ByteArray? {
+    try {
+        if (format != ImageFormat.YUV_420_888) return null
+        
+        val yBuffer = planes[0].buffer.duplicate()
+        val uBuffer = planes[1].buffer.duplicate()
+        val vBuffer = planes[2].buffer.duplicate()
+
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + uSize + vSize)
+
+        yBuffer.get(nv21, 0, ySize)
+
+        val uPixels = ByteArray(uBuffer.remaining())
+        val vPixels = ByteArray(vBuffer.remaining())
+        uBuffer.get(uPixels)
+        vBuffer.get(vPixels)
+
+        val uPixelStride = planes[1].pixelStride
+        val vPixelStride = planes[2].pixelStride
+        val uRowStride = planes[1].rowStride
+        val vRowStride = planes[2].rowStride
+
+        var nvIdx = ySize
+        val gridWidth = width / 2
+        val gridHeight = height / 2
+
+        for (row in 0 until gridHeight) {
+            for (col in 0 until gridWidth) {
+                val vIndex = row * vRowStride + col * vPixelStride
+                val uIndex = row * uRowStride + col * uPixelStride
+
+                if (vIndex < vPixels.size) {
+                    nv21[nvIdx++] = vPixels[vIndex]
+                }
+                if (uIndex < uPixels.size) {
+                    nv21[nvIdx++] = uPixels[uIndex]
+                }
+            }
+        }
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 60, out)
+        return out.toByteArray()
+    } catch (e: Exception) {
+        Log.e("MlKitFaceAnalyzer", "YUV conversion failed", e)
+    }
+    return null
 }

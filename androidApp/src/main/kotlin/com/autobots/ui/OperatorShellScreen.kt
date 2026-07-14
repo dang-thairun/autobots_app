@@ -68,6 +68,7 @@ fun OperatorShellScreen(
     onArmThreshold: (Float) -> Unit,
     onFireThreshold: (Float) -> Unit,
     onOpenGallery: () -> Unit,
+    onFrameEncoded: ((ByteArray) -> Unit)? = null,
 ) {
     val previewActive = state.isCapturing && cameraPermissionGranted
     var settingsExpanded by remember { mutableStateOf(false) }
@@ -91,6 +92,7 @@ fun OperatorShellScreen(
             onBurstComplete = onBurstComplete,
             onPhotoDelivered = onPhotoDelivered,
             onExposureReadout = onExposureReadout,
+            onFrameEncoded = onFrameEncoded,
             showFaceOverlay = pagerState.currentPage != OverlayPages.CleanPreview,
             modifier = Modifier.fillMaxSize(),
         )
@@ -204,6 +206,12 @@ private fun OperatorControlsPage(
                 text = AutobotsApp.banner,
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "IP Address: ${state.serverIp}",
+                color = Color(0xFF69F0AE),
+                style = MaterialTheme.typography.labelMedium,
             )
             Spacer(modifier = Modifier.height(8.dp))
             StatusReadout(state)

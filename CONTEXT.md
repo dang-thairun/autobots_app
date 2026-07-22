@@ -37,19 +37,27 @@ A Passage allows at most one Lean Burst. After that burst, the system stays clos
 _Avoid_: time-only cooldown as the sole Passage boundary, re-trigger while face still large in frame
 
 **Subject Face**:
-The single face that owns the current Passage — always the largest face in the analysis frame (highest proximity / face area). AF/AE lock, burst trigger, and Passage Gate all follow this face only.
+The single face that owns the current Passage — always the largest face in the analysis frame (highest proximity / face area). AE, Fire timing, and Passage Gate all follow this face only.
 _Avoid_: first-seen face, multi-subject Passage, runner ID (no identity in MVP)
 
 **Face Proximity**:
-How large the Subject Face is in the analysis frame, as a fraction of frame area. Used only to arm focus and to fire the burst — not a runner identity signal.
+How large the Subject Face is in the analysis frame, as a fraction of frame area. Used for **Early Arm** (and min size checks). Fire timing prefers **Capture Zone** over proximity alone once P10 is wired.
 _Avoid_: distance in meters, confidence score, tracking ID
 
+**Capture Zone**:
+A rectangular band of cells on the observation grid (default 9×11) that defines the composition sweet spot. Fire when the Subject Face center is inside this zone (and size ≥ minimum).
+_Avoid_: using the full grid as the zone, treating the grid as hardware PDAF
+
+**Focus Strategy**:
+How focus is obtained. **Fixed** (default on tripod): distance locked at setup for the Fire sweet-spot. **FaceAf** (fallback): hardware AF on Subject Face after Arm.
+_Avoid_: estimating focus distance from face size without calibration
+
 **Arm Threshold**:
-Face Proximity level at which AF/AE begin locking onto the Subject Face (default ~10%), before any Burst fires.
+Face Proximity level at which face-weighted AE begins (and AF if FaceAf). Target ~2–3% for short zones; current field default may still be ~4%.
 _Avoid_: soft trigger, pre-capture (vague)
 
 **Fire Threshold**:
-Face Proximity level at which a Lean Burst fires for the open Passage (default ~40%), expected after Arm has had time to settle.
+Legacy proximity level for Lean Burst. Being superseded by Capture Zone Fire (Flow 17); may remain as a minimum size floor.
 _Avoid_: shutter threshold, capture threshold (ambiguous with ImageCapture API)
 
 **Frame Scoring**:
@@ -109,5 +117,5 @@ A bounded on-device queue that drains Kept Photos to Local Delivery storage asyn
 _Avoid_: blocking the camera thread on disk I/O, unbounded in-memory photo buffers
 
 **Face Lock**:
-Once Face Proximity crosses the Arm Threshold, AF and AE are driven to the Subject Face so focus and exposure can settle before Fire. Required in MVP.
-_Avoid_: relying only on default camera AF/AE at shutter time, arm-without-lock
+Once Face Proximity crosses the Arm Threshold, face-weighted AE is driven to the Subject Face (and AF if Focus Strategy is FaceAf). On Fixed Focus, Arm does not re-AF — exposure settles on the face before Fire.
+_Avoid_: relying only on default full-frame AE at shutter time, arm-without-metering

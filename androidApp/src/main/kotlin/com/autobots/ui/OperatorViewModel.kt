@@ -5,6 +5,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobots.camera.CaptureMode
+import com.autobots.camera.PassageFireEvaluator
 import com.autobots.camera.PassageThresholds
 import com.autobots.camera.detection.FaceFrameResult
 import com.autobots.camera.detection.NormalizedFaceBox
@@ -39,7 +40,9 @@ data class OperatorUiState(
     val subjectIndex: Int? = null,
     val proximity: Float = 0f,
     val faceCount: Int = 0,
+    val inCaptureZone: Boolean = false,
     val armThreshold: Float = PassageThresholds.ARM_HALF_BODY,
+    /** Minimum face size for Fire (Capture Zone is the primary trigger). */
     val fireThreshold: Float = PassageThresholds.FIRE_HALF_BODY,
     val exposureLine: String = "—mm  ·  —  ·  ISO —",
     val serverIp: String = "—",
@@ -82,6 +85,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     /** Authoritative Passage Gate — closed after Fire until face leaves. */
     private val passageGateOpen = AtomicBoolean(true)
     private val bursting = AtomicBoolean(false)
+    private var fireTracker = PassageFireEvaluator.Tracker()
 
     private val deviceLoadReader = DeviceLoadReader(
         context = application,
@@ -117,6 +121,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     fun startCapture() {
         passageGateOpen.set(true)
         bursting.set(false)
+        fireTracker = PassageFireEvaluator.Tracker()
         _state.update {
             it.copy(
                 isCapturing = true,
@@ -129,6 +134,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 subjectIndex = null,
                 proximity = 0f,
                 faceCount = 0,
+                inCaptureZone = false,
             )
         }
         applyDeviceLoad(deviceLoadReader.sample())
@@ -137,6 +143,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     fun stopCapture() {
         passageGateOpen.set(true)
         bursting.set(false)
+        fireTracker = PassageFireEvaluator.Tracker()
         _state.update {
             it.copy(
                 isCapturing = false,
@@ -147,6 +154,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 subjectIndex = null,
                 proximity = 0f,
                 faceCount = 0,
+                inCaptureZone = false,
                 exposureLine = "—mm  ·  —  ·  ISO —",
             )
         }
@@ -174,14 +182,25 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         }
 
         var shouldFire = false
-        if (passageGateOpen.get() &&
-            !bursting.get() &&
-            result.subjectIndex != null &&
-            result.proximity >= current.fireThreshold
-        ) {
-            if (passageGateOpen.compareAndSet(true, false) && bursting.compareAndSet(false, true)) {
-                shouldFire = true
+        var inZone = false
+        if (passageGateOpen.get() && !bursting.get() && result.subjectIndex != null) {
+            val (ready, nextTracker) = PassageFireEvaluator.evaluate(
+                result = result,
+                armed = armed,
+                nowMs = System.currentTimeMillis(),
+                minFaceSize = current.fireThreshold,
+                tracker = fireTracker,
+            )
+            fireTracker = nextTracker
+            inZone = nextTracker.zoneStreak > 0
+            if (ready) {
+                if (passageGateOpen.compareAndSet(true, false) && bursting.compareAndSet(false, true)) {
+                    shouldFire = true
+                    fireTracker = PassageFireEvaluator.Tracker()
+                }
             }
+        } else if (!armed) {
+            fireTracker = PassageFireEvaluator.Tracker()
         }
 
         _state.update {
@@ -191,6 +210,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 proximity = result.proximity,
                 faceCount = result.faces.size,
                 isArmed = armed,
+                inCaptureZone = inZone,
                 passageGateOpen = passageGateOpen.get(),
                 lastFired = if (shouldFire) true else it.lastFired,
                 isBursting = bursting.get(),

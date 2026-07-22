@@ -17,9 +17,16 @@ autobots_app/
 │
 ├── docs/                      # Project Documentation
 │   ├── DOCS.md                # Documentation entry point
-│   ├── PRD.md                 # Product Requirements Document
-│   ├── ARCHITECTURE.md        # Architecture design & ADRs
-│   └── STRUCTURE.md           # [This File] Codebase structure
+│   ├── CONVENTIONS.md         # How to write & name docs (Phase / Flow / …)
+│   ├── PRD.md                 # Product requirements
+│   ├── architecture.md        # Architecture + Design Flows
+│   ├── IMPLEMENTATION.md      # P9 / P10 build slices
+│   ├── FIELD_SETUP.md         # Tripod setup checklist
+│   ├── SCREEN.md              # Operator UI layout (ASCII)
+│   ├── PLATFORM_APIS.md       # CV / camera / native API inventory
+│   ├── BUILD.md               # Build APK + adb install
+│   ├── STRUCTURE.md           # [This file] Codebase structure
+│   └── ROADMAP.md             # Unscheduled ideas
 │
 ├── shared/                    # KMP common module (shared contracts)
 │   ├── build.gradle.kts       # Shared module gradle build
@@ -27,6 +34,8 @@ autobots_app/
 │       └── commonMain/kotlin/com/autobots/camera/
 │           ├── AutobotsApp.kt         # Smoke banner constants
 │           ├── CaptureMode.kt         # Standard / Max-Sensor enums
+│           ├── FocusStrategy.kt       # Fixed (default) / FaceAf
+│           ├── CaptureZone.kt         # Grid zone + Fire evaluator
 │           ├── PassageThresholds.kt   # Arming / firing defaults
 │           └── detection/
 │               └── SubjectFace.kt     # Face boundary & selection contracts
@@ -70,6 +79,8 @@ autobots_app/
 ### 2.1. Shared Package (`com.autobots.camera`)
 Holds core logic, data structures, and thresholds that are platform-independent:
 * **`CaptureMode`**: Defines Standard vs Max-Sensor capture configurations.
+* **`FocusStrategy`**: Fixed (tripod default) vs FaceAf (fallback).
+* **`CaptureZone` / `CaptureZoneEvaluator`**: Grid composition zone for Fire (wired in P10).
 * **`PassageThresholds`**: Houses default and release thresholds (e.g. `ARM_HALF_BODY = 0.04f`, `FIRE_HALF_BODY = 0.10f`).
 * **`SubjectFaceSelector`**: Decides which face qualifies as the runner. Selection logic focuses on the largest face area.
 
@@ -101,3 +112,5 @@ The application uses standard modern Gradle plugins to manage dependencies:
   * `camera-view`: Provides `PreviewView` for rendering.
 * **Google ML Kit Face Detection (`com.google.mlkit:face-detection`)**: Used for CPU-efficient face boundary calculations on preview analysis frames.
 * **Kotlin Coroutines (`org.jetbrains.kotlinx:kotlinx-coroutines-*`)**: Provides Channel buffers for asynchronous task scheduling.
+
+For a **per-library API inventory** (which functions/options are actually called), see [PLATFORM_APIS.md](./PLATFORM_APIS.md).

@@ -9,9 +9,17 @@ object PassageThresholds {
     const val ARM_DOC_DEFAULT: Float = 0.10f
     const val FIRE_DOC_DEFAULT: Float = 0.40f
 
-    /** Sensible starting point for half-body / full-body stills. */
-    const val ARM_HALF_BODY: Float = 0.04f
-    const val FIRE_HALF_BODY: Float = 0.10f
+    /** Early Arm for short 1.5–3 s zones (tripod). */
+    const val ARM_EARLY: Float = 0.025f
+
+    /** Minimum face size floor for Fire (zone is the primary trigger). */
+    const val FIRE_MIN_SIZE: Float = 0.06f
+
+    /** @see ARM_EARLY */
+    const val ARM_HALF_BODY: Float = ARM_EARLY
+
+    /** @see FIRE_MIN_SIZE */
+    const val FIRE_HALF_BODY: Float = FIRE_MIN_SIZE
 
     fun armRelease(arm: Float): Float = (arm * 0.7f).coerceAtLeast(0.005f)
 }

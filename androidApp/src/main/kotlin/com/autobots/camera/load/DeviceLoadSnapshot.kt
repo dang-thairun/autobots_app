@@ -1,7 +1,7 @@
 package com.autobots.camera.load
 
 /**
- * Lightweight device load snapshot for Operator UI (display-only, ADR 0011).
+ * Lightweight device load snapshot for Operator UI (display-only, Flow 11).
  */
 data class DeviceLoadSnapshot(
     val thermalLabel: String,

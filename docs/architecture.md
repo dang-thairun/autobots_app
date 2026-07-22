@@ -1,121 +1,256 @@
-# AutoBots Sports Camera — Architecture Guide
+# Architecture
 
-Detailed system architecture, runtime pipelines, module design, and consolidated Architectural Decision Records (ADRs).
+System design for AutoBots Sports Camera — modules, runtime pipeline, and **Design Flows**.
 
----
-
-## 1. Modular System Overview
-
-The project is structured as a Kotlin Multiplatform (KMP) codebase containing:
-* **`shared/` (KMP commonMain)**: Core domain contracts, thresholds, and business rules (e.g. `CaptureMode`, `PassageThresholds`, `SubjectFaceSelector`). Keep-all and passage gate policies live here.
-* **`androidApp/` (Android application)**: CameraX setup, ML Kit face detection integration, asynchronous Write Queue, MediaStore publishing, and Operator Compose UI screens.
+Domain: [CONTEXT.md](../CONTEXT.md) · Requirements: [PRD.md](./PRD.md) · Phases: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
 
 ---
 
-## 2. Runtime Pipeline
+## 1. Modules
 
-The sequence below illustrates the data flow from camera analysis to final disk writing:
+| Module | Role |
+|--------|------|
+| `shared/` | Domain contracts: `CaptureMode`, `FocusStrategy`, `CaptureZone`, `PassageThresholds`, `SubjectFaceSelector` |
+| `androidApp/` | CameraX, ML Kit, burst, Write Queue, MediaStore, Compose Operator UI |
+
+---
+
+## 2. Runtime pipeline (tripod target)
 
 ```
 [Camera Sensor]
-      │ (ImageAnalysis ~640x360)
+      │ ImageAnalysis ~640×360
       ▼
-[MlKitFaceAnalyzer]
+[MlKitFaceAnalyzer] → [SubjectFaceSelector] → box + proximity
       │
-      ▼
-[SubjectFaceSelector] ──(Largest face selected)──► [SubjectFace / Face Proximity]
-                                                               │
-      ┌────────────────────────────────────────────────────────┤
-      │ (Proximity >= Arm Threshold)                           │ (Proximity >= Fire Threshold)
-      ▼                                                        ▼
-[FaceFocusController]                                 [LeanBurstCapturer]
-  * Locks AF/AE targeted at Face                               │
-  * Settles focus/exposure                                     ▼ (Capture JPEGs)
-                                                      [PhotoDeliveryService]
-                                                               │ (enqueueAll)
-                                                               ▼
-                                                        [WriteQueue]
-                                                               │ (async drain)
-                                                               ▼
-                                                      [LocalDeliveryWriter]
-                                                               │ (publish)
-                                                               ▼
-                                                      [DCIM/AutoBots/]
+      ├─ Arm (early, size only) ──► Face AE on subject  (Flow 10 / 18)
+      │                              Fixed Focus already set at setup (Flow 15)
+      │
+      └─ Fire when center ∈ Capture Zone + min size + settle (Flow 17)
+                              ▼
+                       [LeanBurstCapturer] → JPEGs
+                              ▼
+                       [WriteQueue] → [LocalDeliveryWriter] → DCIM/AutoBots
 ```
 
----
-
-## 3. Subsystem Breakdown
-
-### 3.1. Camera Controlling Subsystem
-* **`PreviewCameraController`**: Coordinates lifecycle binding, PreviewView attachment, ImageAnalysis setup, and binds capture/focus listeners. Delegates photo delivery to the `PhotoDeliveryService`.
-
-### 3.2. Detection Subsystem
-* **`MlKitFaceAnalyzer`**: Processes low-resolution frames (~640×360) via Google ML Kit Face Detection, publishing mapped bounding boxes.
-* **`SubjectFaceSelector`**: Selects the largest face (highest proximity) from the detected list.
-
-### 3.3. Focus Subsystem
-* **`FaceFocusController`**: Drives CameraX focus and metering action to the face coordinates, lock-holding parameters before the burst triggers.
-
-### 3.4. Capture Subsystem
-* **`LeanBurstCapturer`**: Triggers a fast sequential photo capture (default 3 shots, ~200ms apart) or a single max-sensor capture, writing intermediate JPEGs to a temporary cache.
-
-### 3.5. Delivery Subsystem
-* **`PhotoDeliveryService`** (Interface): Abstracts the delivery queue from the camera controller, improving unit testing and decoupling.
-* **`LocalPhotoDeliveryService`**: Coordinates the local writing and queue lifecycle, executing completion callbacks on the Main thread.
-* **`WriteQueue`**: A bounded queue using Kotlin Coroutine channels to drain cache files in a background worker thread.
-* **`LocalDeliveryWriter`**: Publishes files into the Android MediaStore under `DCIM/AutoBots`, making files visible in external galleries.
+**Passage Gate** (Flow 2): one burst until Subject Face leaves.
 
 ---
 
-## 4. Architectural Decision Records (ADRs)
+## 3. Subsystems
 
-These records outline the fundamental architectural design decisions for the codebase:
+| Subsystem | Key types | Role |
+|-----------|-----------|------|
+| Camera | `PreviewCameraController` | Bind preview, analysis, capture; exposure readout |
+| Detection | `MlKitFaceAnalyzer`, `SubjectFaceSelector` | Faces + largest = Subject |
+| Focus | `FocusStrategy`, Fixed Focus / `FaceFocusController` | Default = fixed distance; FaceAf = fallback |
+| Zone | `CaptureZone` | Composition sweet spot for Fire |
+| Capture | `LeanBurstCapturer` | Sequential stills (~200 ms gap) |
+| Delivery | `WriteQueue`, `LocalDeliveryWriter` | Bounded async drain to gallery |
+| Load | `DeviceLoadReader` | Thermal + RAM (display only) |
 
-### ADR 0001: Keep-All Policy (Lean Burst)
-* **Decision**: All photos captured in a Lean Burst are saved. No on-device quality, smile, or pose ranking takes place.
-* **Rationale**: Out-of-the-box still photos captured in shut order are lightweight to save. Scoring on-device introduces processing latency, thermal load, and increased power usage.
+Operator UI: Layer 1 = preview; Layer 2 pager = Controls | Clean preview | Grid / Capture Zone observation.
 
-### ADR 0002: Proximity-Based Passage Gate
-* **Decision**: The Passage Gate closes once a burst fires and opens only when the tracked runner's face exits the proximity zone or falls below the arm release. Time-based cooldown is not used.
-* **Rationale**: Prevents double-triggering on the same runner who remains in focus.
+---
 
-### ADR 0003: Subject Face Focus
-* **Decision**: Proximity, AF/AE lock, and triggers only track the single largest face (highest frame coverage) in the analysis zone.
-* **Rationale**: MVP focuses on tripod marathon approaches where runners approach one-by-one. Person tracking IDs are deferred.
+## 4. Design Flows
 
-### ADR 0004: Still JPEG Format
-* **Decision**: Strictly capture JPEGs. Video capture is out of scope.
-* **Rationale**: Prevents Android device overheating, file sizing problems, and excessive memory allocations during continuous multi-hour runs.
+Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
-### ADR 0005: Local Storage Success Criteria
-* **Decision**: MVP success is defined as saving images to `DCIM/AutoBots`. Remote/cloud uploading is out of scope.
-* **Rationale**: Cloud upload logic requires network connectivity which is unreliable at remote running events. Files are copied manually by operators.
+### Flow 1 — Keep-All Lean Burst
 
-### ADR 0006: Android-First Kotlin Multiplatform Layout
-* **Decision**: Target Android OS first. The directory layout is prepared for KMP (`shared` commons) to share models if iOS is added.
-* **Rationale**: Operator App runs on Android phone hardware mounted on tripods.
+**Rule:** Every shot in a Lean Burst is kept; no on-device scoring on the default path.
 
-### ADR 0007: Standard vs Max-Sensor Modes
-* **Decision**: Standard Mode captures ~3 standard stills. Max-Sensor Mode captures 1 high-resolution (e.g. 50MP) still. Never Standard 3-shot bursts at max-sensor quality.
-* **Rationale**: Writing multiple 50MP images in rapid succession exceeds memory buffers and causes write locks/OOM errors.
+**Why:** Scoring adds latency, RAM, and heat; burst order is enough for MVP.
 
-### ADR 0008: Deferred Thermal Auto-Throttling
-* **Decision**: Do not automatically throttle capture frequency during thermal buildup. Show a thermal level indicator on the screen instead.
-* **Rationale**: Operators should make the decision to pause capturing rather than the app silently missing runner approaches.
+**In code:** `LeanBurstCapturer` → all files enqueued.
 
-### ADR 0009: Bounded Write Queue
-* **Decision**: Bounded buffer (capacity 8) to write images asynchronously in IO scope. Drop incoming frames if the queue fills.
-* **Rationale**: Protects UI thread response and limits RAM footprint.
+---
 
-### ADR 0010: Proactive Face Lock at Arming
-* **Decision**: Trigger focus and exposure lock on the face bounding box at Arm Proximity (~10%) before Fire Proximity (~40%) is reached.
-* **Rationale**: Focus needs a few hundred milliseconds to settle before taking a picture.
+### Flow 2 — Passage Gate on face exit
 
-### ADR 0011: Display-Only Device Load Readout
-* **Decision**: Show RAM usage and thermal conditions in Compose UI but perform no automated actions based on it.
-* **Rationale**: Gives operators field visibility on hardware performance.
+**Rule:** One burst per Passage; gate re-opens only when Subject Face leaves or drops below arm release — not a time-only cooldown.
 
-### ADR 0012: Photo Delivery Service Abstraction
-* **Decision**: Encapsulate MediaStore writing and write queue management under a `PhotoDeliveryService` interface.
-* **Rationale**: Decouples the Camera Controller from the I/O storage subsystem, enabling easier module splitting and simulation of mock delivery for test validations.
+**Why:** Prevents duplicate bursts on the same runner still in frame.
+
+**In code:** `OperatorViewModel` `passageGateOpen`.
+
+---
+
+### Flow 3 — Subject Face = largest only
+
+**Rule:** AE, Fire, and Gate follow the single largest face in the analysis frame.
+
+**Why:** One runner at a time on a tripod lane; no tracking IDs.
+
+**In code:** `SubjectFaceSelector` in `shared`.
+
+---
+
+### Flow 4 — Still JPEG only
+
+**Rule:** No video capture in product scope.
+
+**Why:** Thermal, storage, and battery for multi-hour deployment.
+
+---
+
+### Flow 5 — Local delivery = success
+
+**Rule:** Passage success = Kept Photos on device (`DCIM/AutoBots`). Cloud upload is out of scope.
+
+**Why:** Field network is unreliable; operator retrieves files locally.
+
+**In code:** `LocalDeliveryWriter`, MediaStore.
+
+---
+
+### Flow 6 — Android-first KMP
+
+**Rule:** Ship on Android; `shared` holds contracts; iOS not required for MVP.
+
+**Why:** CameraX + ML Kit path must work before cross-platform parity.
+
+---
+
+### Flow 7 — Standard vs Max-Sensor
+
+**Rule:** Standard ≈ 1920×1080 ×3 Keep-All. Max-Sensor = ×1 at highest resolution. Never ×3 at max sensor.
+
+**Why:** RAM and write latency; 50MP ×3 risks OOM.
+
+**In code:** `CaptureMode`, `CaptureResolutions`.
+
+---
+
+### Flow 8 — No thermal auto-throttle (MVP)
+
+**Rule:** Show load readout; do not automatically reduce capture or analysis rate.
+
+**Why:** Operator decides when to pause; silent throttle would miss runners.
+
+**In code:** `DeviceLoadReader` — display only.
+
+---
+
+### Flow 9 — Bounded Write Queue
+
+**Rule:** Async bounded queue (capacity 8) between burst cache and disk.
+
+**Why:** Keep-All ×3 and large Max-Sensor frames must not block the camera thread.
+
+**In code:** `WriteQueue`.
+
+---
+
+### Flow 10 — Arm starts face-weighted AE (revised)
+
+**Rule:** Crossing Arm drives **AE** (and AF only if `FocusStrategy.FaceAf`) onto Subject Face. Detector supplies the metering region — it does not set focus distance.
+
+**Why:** Outdoor backgrounds skew global metering; face must be exposed correctly before Fire.
+
+**In code:** `FaceFocusController` (FaceAf path); Fixed Focus skips AF (Flow 15).
+
+---
+
+### Flow 11 — Device Load Readout
+
+**Rule:** Show thermal + approx RAM on Operator UI; no automated action.
+
+**Why:** Long tripod runs; operator visibility without hidden backoff.
+
+**In code:** `DeviceLoadReader`, status card.
+
+---
+
+### Flow 12 — Delivery abstraction
+
+**Rule:** Camera controller enqueues files; delivery layer owns MediaStore writes.
+
+**Why:** Decouples capture from I/O for testing and future upload path.
+
+**In code:** `WriteQueue` + `LocalDeliveryWriter`.
+
+---
+
+### Flow 13 — Sustained lock through Passage
+
+**Rule:** After Arm, do not auto-cancel AE/AF metering on a short timeout. Cancel only when Passage ends, capture stops, or strategy changes.
+
+**Why:** Runner may stay in the 1.5–3 s zone longer than a 3 s auto-cancel.
+
+**In code:** `FaceFocusController` — no `setAutoCancelDuration` on the live path.
+
+---
+
+### Flow 14 — Settle gate before Fire
+
+**Rule:** Fire only after a short settle window after Arm (or AE stable), e.g. ~150 ms field-tuned — especially important on FaceAf; Fixed Focus mainly waits on AE.
+
+**Why:** Proximity/zone can be ready before exposure converges.
+
+**In code:** P9/P10 — `OperatorViewModel` / focus ready flag (not fully wired yet).
+
+---
+
+### Flow 15 — Fixed Focus default (tripod)
+
+**Rule:** Default `FocusStrategy.Fixed`: focus distance set once at setup for the Fire sweet-spot. Detector does not drive AF each Passage.
+
+**Why:** Tripod + fixed lane — AF hunt wastes the short zone and can miss sharpness.
+
+**In code:** `FocusStrategy` in `shared`; Camera2 / CameraX wiring in P9c.
+
+---
+
+### Flow 16 — Proximity-calibrated focus (optional / later)
+
+**Rule:** If estimating focus distance from face size, require a calibrated curve for that lens + tripod point — never map box size to diopter without calibration.
+
+**Why:** Face size is not depth. Prefer Flow 15 for this product.
+
+**In code:** Not scheduled.
+
+---
+
+### Flow 17 — Capture Zone Fire
+
+**Rule:** Fire when Subject Face center is inside the operator Capture Zone (grid cells) and size ≥ minimum; Arm does **not** require zone entry.
+
+**Why:** Composition like a still photographer — not “face large enough anywhere in frame.”
+
+**In code:** `CaptureZone` / evaluator in `shared`; wire in P10.
+
+---
+
+### Flow 18 — Face-weighted exposure
+
+**Rule:** AE meters on Subject Face after Arm; optional EV bias for the shooting point. Do not rely on full-frame metering for face brightness.
+
+**Why:** Backlight / bright pavement must not crush or blow the face.
+
+**In code:** Face metering today; EV slider in P9d.
+
+---
+
+## 5. Defaults (field-tuned)
+
+| Parameter | Value | Notes |
+|-----------|--------|--------|
+| Focus strategy | Fixed (target) | FaceAf = fallback |
+| Arm | ~2.5% | Early Arm |
+| Fire min size | ~6% | Floor; zone is primary trigger |
+| Burst interval | ~150 ms | 1080p Standard |
+| Standard burst | 3 shots | |
+| Analysis | ~640×360 | |
+| Detector | ML Kit FAST (interim) | |
+
+---
+
+## 6. Related docs
+
+- Implementation slices: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
+- Field checklist: [FIELD_SETUP.md](./FIELD_SETUP.md)
+- APIs: [PLATFORM_APIS.md](./PLATFORM_APIS.md)
+- Code layout: [STRUCTURE.md](./STRUCTURE.md)
+- Later ideas: [ROADMAP.md](./ROADMAP.md)

@@ -10,7 +10,8 @@ The goal of the AutoBots Sports Camera is to automatically capture high-quality,
 
 ### Key Objectives
 * **Automated approach-based capture**: Capture photos when runners enter the designated proximity zone.
-* **Proactive focus/exposure settling**: Lock focus and exposure onto the runner's face before triggering the shutter.
+* **Proactive exposure settling**: Face-weighted AE (and Fixed Focus at setup) so faces are sharp and well-exposed before the shutter.
+* **Composition-timed Fire**: Capture when the face enters the operator Capture Zone — not proximity alone (P10).
 * **Low on-device processing footprint**: Minimize capture delays, RAM spikes, battery drain, and thermal buildup by using a keep-all policy for small bursts.
 
 ---
@@ -42,15 +43,17 @@ To align development and product design, the following terminology must be stric
 * **Passage Gate**: A gate that limits capture to at most one lean burst per passage. The gate remains closed until the tracked face leaves the capture zone or drops below the arm threshold.
 * **Subject Face**: The single face that owns the current passage — always the largest face in the analysis frame (highest proximity). All tracking, lock, and trigger logic follows this face.
 * **Face Proximity**: How large the subject face is in the analysis frame, expressed as a fraction of the frame area (e.g., 0.10 for 10% frame area).
-* **Arm Threshold**: The face proximity level (default 10%) at which Auto Focus (AF) and Auto Exposure (AE) lock onto the subject face.
-* **Fire Threshold**: The face proximity level (default 40%) at which the lean burst triggers, after focus and exposure have settled.
-* **Face Lock**: The action of driving AF and AE to the subject face bounding box once the arm threshold is crossed.
+* **Arm Threshold**: Face proximity at which face-weighted AE starts (target ~2–3%; field ~4% today).
+* **Fire Threshold**: Legacy proximity Fire floor (~10%); Capture Zone becomes primary Fire signal in P10.
+* **Capture Zone**: Grid sweet spot for Fire composition (Flow 17).
+* **Focus Strategy**: Fixed (tripod default) vs FaceAf fallback (Flow 15).
+* **Face Lock**: Drive AE (and AF if FaceAf) to the subject face once Arm is crossed.
 
 ### Operations & Output
 * **Still Photo Product**: The system captures and stores still JPEGs only. Video recording is out of scope.
 * **Standard Capture Mode**: Lean burst of ~3 still JPEGs per passage at normal full quality.
-* **Max-Sensor Capture Mode**: Single high-resolution shot (e.g. 50MP) per passage to respect RAM and I/O constraints.
-* **Capture Mode Option**: Operator-selectable toggle between Standard and Max-Sensor modes.
+* **Max-Sensor Capture Mode**: Single high-resolution shot per passage (Flow 7).
+* **Capture Mode Option**: Operator toggle Standard vs Max-Sensor.
 * **Local Delivery**: The write phase committing JPEGs directly into the device's external storage gallery path (`DCIM/AutoBots`).
 * **Write Queue**: A bounded asynchronous write queue that drains kept photos to storage, preventing UI freeze and OOM crashes.
 * **Operator Preview**: The on-screen live camera view displaying status indicators (armed, fired, thermal levels, photo counts).
@@ -87,16 +90,21 @@ To align development and product design, the following terminology must be stric
 ## 5. Behavioral Acceptance Criteria
 
 ### Standard Passage Flow
+
+Runtime **steps** for one runner (not the same as **Flow** design rules in architecture.md):
+
 1. Operator taps **Start Capture**.
-2. Runner approaches → Face Proximity crosses **Arm Threshold**.
-3. System applies **Face Lock** (AF/AE targeted at the face bounding box).
-4. Runner gets closer → Face Proximity crosses **Fire Threshold**.
-5. System triggers **Lean Burst** (captures 3 JPEGs at ~200ms interval).
-6. 3 Candidate Shots are queued in the **Write Queue**.
-7. **Passage Gate** closes; no further burst is allowed for this passage.
-8. Bounded Write Queue asynchronously writes JPEGs to `DCIM/AutoBots` (**Local Delivery**).
-9. Runner leaves the frame → Face Proximity falls below Arm Threshold.
-10. **Passage Gate** re-opens for the next runner.
+2. Runner approaches → proximity crosses **Arm**.
+3. **Face Lock** (AF/AE on Subject Face).
+4. Runner closer → proximity crosses **Fire**.
+5. **Lean Burst** — 3 JPEGs at ~200 ms interval (Standard).
+6. Candidate shots enter **Write Queue**.
+7. **Passage Gate** closes.
+8. Write Queue drains to `DCIM/AutoBots`.
+9. Runner leaves → proximity below arm release.
+10. **Passage Gate** re-opens.
+
+Design rules behind steps 3, 5, 7: see [architecture.md — Design Flows](./architecture.md#4-design-flows).
 
 ### Max-Sensor Passage Flow
 1. Flow matches Standard Passage Flow except Step 5 and 6:

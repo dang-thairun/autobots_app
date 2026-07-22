@@ -240,6 +240,7 @@ struct ContentView: View {
     @StateObject private var client = AutoBotsClient()
     @State private var ipAddress = "192.168.1.129:8080"
     @State private var selectedPhoto: PhotoItem? = nil
+    @State private var activePhotoId = UUID()
     
     private let columns = [
         GridItem(.flexible(), spacing: 10),
@@ -372,6 +373,7 @@ struct ContentView: View {
                                             .clipped()
                                             .cornerRadius(8)
                                             .onTapGesture {
+                                                activePhotoId = photo.id
                                                 selectedPhoto = photo
                                             }
                                         
@@ -529,22 +531,36 @@ struct ContentView: View {
         }
         .edgesIgnoringSafeArea(.bottom)
         .preferredColorScheme(.dark)
-        // Light-box sheet for full-screen photo inspect
-        .sheet(item: $selectedPhoto) { photo in
-            ZStack(alignment: .topTrailing) {
+        // Full-screen lightbox for photo inspect
+        .fullScreenCover(item: $selectedPhoto) { photo in
+            ZStack {
                 Color.black.edgesIgnoringSafeArea(.all)
-                Image(uiImage: photo.image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .edgesIgnoringSafeArea(.all)
                 
-                Button(action: {
-                    selectedPhoto = nil
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundColor(.white.opacity(0.8))
-                        .padding()
+                TabView(selection: $activePhotoId) {
+                    ForEach(client.latestPhotos) { item in
+                        Image(uiImage: item.image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .tag(item.id)
+                            .edgesIgnoringSafeArea(.all)
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .edgesIgnoringSafeArea(.all)
+                
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            selectedPhoto = nil
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.white.opacity(0.8))
+                                .padding(24)
+                        }
+                    }
+                    Spacer()
                 }
             }
         }

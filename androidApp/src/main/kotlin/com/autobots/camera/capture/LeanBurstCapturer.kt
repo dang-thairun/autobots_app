@@ -83,7 +83,7 @@ class LeanBurstCapturer(
     companion object {
         private const val TAG = "LeanBurst"
         const val DEFAULT_SHOTS = 3
-        /** Gap between stills — ~5 capture/s peak; below ~200ms often fails or duplicates. */
-        const val DEFAULT_INTERVAL_MS = 200L
+        /** Gap between stills — 150 ms @ 1080p on most devices; 200 ms if drops occur. */
+        const val DEFAULT_INTERVAL_MS = 150L
     }
 }

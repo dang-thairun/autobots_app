@@ -34,7 +34,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
 import com.autobots.camera.CaptureMode
 import com.autobots.camera.CaptureResolutions
@@ -194,36 +196,13 @@ private fun OperatorControlsPage(
     onOpenGallery: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(
+        CompactStatusCard(
+            state = state,
+            cameraPermissionGranted = cameraPermissionGranted,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
-                .clip(CardShape)
-                .background(CardBg)
-                .padding(12.dp),
-        ) {
-            Text(
-                text = AutobotsApp.banner,
-                color = Color.White,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "IP Address: ${state.serverIp}",
-                color = Color(0xFF69F0AE),
-                style = MaterialTheme.typography.labelMedium,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            StatusReadout(state)
-            if (state.isCapturing && !cameraPermissionGranted) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Camera permission required",
-                    color = Color(0xFFFFAB91),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -242,37 +221,44 @@ private fun OperatorControlsPage(
                 onFireThreshold = onFireThreshold,
             )
 
-            Button(
-                onClick = {
-                    when {
-                        state.isCapturing -> onToggleCapture()
-                        cameraPermissionGranted -> onToggleCapture()
-                        else -> onRequestCameraPermission()
-                    }
-                },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    when {
-                        state.isCapturing -> "Stop Capture"
-                        cameraPermissionGranted -> "Start Capture"
-                        else -> "Allow Camera & Start"
+                Button(
+                    onClick = {
+                        when {
+                            state.isCapturing -> onToggleCapture()
+                            cameraPermissionGranted -> onToggleCapture()
+                            else -> onRequestCameraPermission()
+                        }
                     },
-                )
-            }
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = when {
+                            state.isCapturing -> "Stop"
+                            cameraPermissionGranted -> "Start"
+                            else -> "Allow & Start"
+                        },
+                        maxLines = 1,
+                    )
+                }
 
-            Button(
-                onClick = onOpenGallery,
-                enabled = state.keptPhotoCount > 0 || state.lastGalleryUri != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    if (state.keptPhotoCount > 0) {
-                        "Open Gallery (${state.keptPhotoCount})"
-                    } else {
-                        "Open Gallery"
-                    },
-                )
+                Button(
+                    onClick = onOpenGallery,
+                    enabled = state.keptPhotoCount > 0 || state.lastGalleryUri != null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = if (state.keptPhotoCount > 0) {
+                            "Gallery (${state.keptPhotoCount})"
+                        } else {
+                            "Gallery"
+                        },
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -339,7 +325,7 @@ private fun CaptureSettingsCard(
                 )
                 if (!expanded) {
                     Text(
-                        text = "$modeShort · Arm ${(state.armThreshold * 100).toInt()}% · Fire ${(state.fireThreshold * 100).toInt()}%",
+                        text = "$modeShort · Arm ${(state.armThreshold * 100).toInt()}% · Min ${(state.fireThreshold * 100).toInt()}% · Zone ${if (state.inCaptureZone) "IN" else "—"}",
                         color = Color(0xFF90A4AE),
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -435,7 +421,7 @@ private fun ThresholdSliders(
             valueRange = 0.01f..0.25f,
         )
         Text(
-            text = "Fire (Burst)  ${(fireThreshold * 100).toInt()}%",
+            text = "Min size (Fire)  ${(fireThreshold * 100).toInt()}%",
             color = Color(0xFFB0BEC5),
             style = MaterialTheme.typography.bodySmall,
         )
@@ -448,46 +434,162 @@ private fun ThresholdSliders(
 }
 
 @Composable
-private fun StatusReadout(state: OperatorUiState) {
-    val gateLabel = if (state.passageGateOpen) "OPEN" else "closed"
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = "Faces: ${state.faceCount}  ·  Proximity: ${(state.proximity * 100).toInt()}%",
-            color = Color(0xFF69F0AE),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            text = "Armed: ${if (state.isArmed) "YES" else "no"}  ·  Fired: ${if (state.lastFired) "YES" else "no"}  ·  Gate: $gateLabel",
-            color = if (state.isArmed || state.lastFired) Color(0xFF69F0AE) else Color.White,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            text = "Kept (gallery): ${state.keptPhotoCount}" +
-                if (state.lastBurstSaved > 0) "  (last burst ${state.lastBurstSaved} shots)" else "",
-            color = Color.White,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        if (state.isBursting) {
+private fun CompactStatusCard(
+    state: OperatorUiState,
+    cameraPermissionGranted: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clip(CardShape)
+            .background(CardBg)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = "Burst in progress…",
-                color = Color(0xFFFFF176),
-                style = MaterialTheme.typography.bodySmall,
+                text = AutobotsApp.banner,
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                text = "IP ${state.serverIp}",
+                color = Color(0xFF69F0AE),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            StatChip("F", "${state.faceCount}", modifier = Modifier.weight(1f))
+            StatChip(
+                label = "Px",
+                value = "${(state.proximity * 100).toInt()}%",
+                highlight = state.isArmed,
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "Arm",
+                value = if (state.isArmed) "●" else "○",
+                highlight = state.isArmed,
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "Fir",
+                value = if (state.lastFired) "●" else if (state.isBursting) "…" else "○",
+                highlight = state.lastFired || state.isBursting,
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "Gate",
+                value = if (state.passageGateOpen) "O" else "C",
+                highlight = state.passageGateOpen,
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "Zn",
+                value = if (state.inCaptureZone) "IN" else "—",
+                highlight = state.inCaptureZone,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatChip(
+                label = "K",
+                value = "${state.keptPhotoCount}",
+                modifier = Modifier.weight(0.7f),
+            )
+            StatChip(
+                label = "Th",
+                value = state.thermalLabel,
+                valueColor = thermalColor(state.thermalLevel),
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "RAM",
+                value = compactRamPair(state.usedRamMb, state.totalRamMb),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
         Text(
             text = state.exposureLine,
             color = Color(0xFFE0E0E0),
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        if (state.isCapturing && !cameraPermissionGranted) {
+            Text(
+                text = "Need camera permission",
+                color = Color(0xFFFFAB91),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatChip(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    highlight: Boolean = false,
+    valueColor: Color? = null,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color.Black.copy(alpha = 0.32f))
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = label,
+            color = Color(0xFF90A4AE),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 9.sp,
+            lineHeight = 10.sp,
         )
         Text(
-            text = state.deviceLoadLine,
-            color = thermalColor(state.thermalLevel),
-            style = MaterialTheme.typography.bodySmall,
+            text = value,
+            color = valueColor ?: if (highlight) Color(0xFF69F0AE) else Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+            maxLines = 1,
         )
     }
 }
 
-/** Operator-friendly thermal colors (ADR 0011 readout). */
+private fun compactRamPair(usedMb: Long, totalMb: Long): String {
+    if (totalMb <= 0L) return "—"
+    return "${formatRamShort(usedMb)}/${formatRamShort(totalMb)}"
+}
+
+private fun formatRamShort(mb: Long): String {
+    return if (mb >= 1000L) {
+        String.format("%.1fG", mb / 1024.0)
+    } else {
+        "${mb}M"
+    }
+}
+
+/** Operator-friendly thermal colors (Flow 11 readout). */
 private fun thermalColor(level: Int): Color = when (level) {
     PowerManager.THERMAL_STATUS_NONE, -1 -> Color.White
     PowerManager.THERMAL_STATUS_LIGHT -> Color(0xFF26A69A)

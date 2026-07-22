@@ -7,6 +7,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.YuvImage
 import android.util.Log
+import android.os.SystemClock
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.view.PreviewView
@@ -46,6 +47,15 @@ class MlKitFaceAnalyzer(
         isUsingRotationDegrees = true
     }
 
+    private val timingLock = Any()
+    private var timingWindowStartMs = 0L
+    private var timingFrameCount = 0
+    private var timingInferSumMs = 0L
+    private var timingInferMinMs = Long.MAX_VALUE
+    private var timingInferMaxMs = 0L
+    private var timingMapSumMs = 0L
+    private var timingTotalSumMs = 0L
+
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy) {
         if (closed.get()) {
@@ -78,17 +88,26 @@ class MlKitFaceAnalyzer(
             transformFactory.getOutputTransform(imageProxy)
         }.getOrNull()
 
+        val startedNs = System.nanoTime()
+
         detector.process(image)
             .addOnSuccessListener { faces ->
                 if (closed.get()) return@addOnSuccessListener
+                val inferMs = nanosToMs(System.nanoTime() - startedNs)
                 // PreviewView / outputTransform must be touched on the main thread.
                 mainExecutor.execute {
                     if (closed.get()) return@execute
+                    val mapStartNs = System.nanoTime()
                     publishMapped(faces.map { it.boundingBox }, sourceTransform)
+                    val mapMs = nanosToMs(System.nanoTime() - mapStartNs)
+                    val totalMs = nanosToMs(System.nanoTime() - startedNs)
+                    recordTiming(inferMs, mapMs, totalMs, faces.size)
                 }
             }
             .addOnFailureListener { e ->
-                Log.w(TAG, "Face detect failed", e)
+                val inferMs = nanosToMs(System.nanoTime() - startedNs)
+                recordTiming(inferMs, mapMs = 0L, totalMs = inferMs, faceCount = 0)
+                Log.w(TAG, "Face detect failed (${inferMs}ms)", e)
                 if (!closed.get()) {
                     mainExecutor.execute {
                         if (!closed.get()) onResult(SubjectFaceSelector.select(emptyList()))
@@ -135,6 +154,41 @@ class MlKitFaceAnalyzer(
         }
     }
 
+    private fun recordTiming(inferMs: Long, mapMs: Long, totalMs: Long, faceCount: Int) {
+        synchronized(timingLock) {
+            val now = SystemClock.elapsedRealtime()
+            if (timingWindowStartMs == 0L) timingWindowStartMs = now
+
+            timingFrameCount++
+            timingInferSumMs += inferMs
+            timingInferMinMs = minOf(timingInferMinMs, inferMs)
+            timingInferMaxMs = maxOf(timingInferMaxMs, inferMs)
+            timingMapSumMs += mapMs
+            timingTotalSumMs += totalMs
+
+            if (now - timingWindowStartMs < TIMING_LOG_INTERVAL_MS) return
+
+            val n = timingFrameCount
+            Log.i(
+                TAG,
+                "analyze timing 1s: n=$n (~${n}fps) " +
+                    "infer avg=${timingInferSumMs / n}ms min=$timingInferMinMs max=$timingInferMaxMs " +
+                    "map avg=${timingMapSumMs / n}ms total avg=${timingTotalSumMs / n}ms " +
+                    "last faces=$faceCount",
+            )
+
+            timingWindowStartMs = now
+            timingFrameCount = 0
+            timingInferSumMs = 0L
+            timingInferMinMs = Long.MAX_VALUE
+            timingInferMaxMs = 0L
+            timingMapSumMs = 0L
+            timingTotalSumMs = 0L
+        }
+    }
+
+    private fun nanosToMs(nanos: Long): Long = nanos / 1_000_000L
+
     fun close() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { detector.close() }
@@ -143,6 +197,8 @@ class MlKitFaceAnalyzer(
 
     companion object {
         private const val TAG = "MlKitFaceAnalyzer"
+        /** Rolling summary interval — filter logcat: `adb logcat -s MlKitFaceAnalyzer` */
+        private const val TIMING_LOG_INTERVAL_MS = 1_000L
     }
 }
 

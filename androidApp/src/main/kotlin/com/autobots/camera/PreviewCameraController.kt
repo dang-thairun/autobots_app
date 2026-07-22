@@ -59,6 +59,7 @@ class PreviewCameraController(
     private val fireThresholdRef = AtomicReference(PassageThresholds.FIRE_HALF_BODY)
     private val burstShotCountRef = AtomicInteger(LeanBurstCapturer.DEFAULT_SHOTS)
     private val captureModeRef = AtomicReference(CaptureMode.Standard)
+    private val focusStrategyRef = AtomicReference(FocusStrategy.Fixed)
     private val bindGeneration = AtomicReference(0)
     private val shutdown = AtomicBoolean(false)
     private val lastExposurePublishMs = AtomicLong(0L)
@@ -293,7 +294,10 @@ class PreviewCameraController(
             return
         }
         val subject = result.faces.getOrNull(subjectIndex) ?: return
-        focus.lockOnFace(subject)
+        when (focusStrategyRef.get()) {
+            FocusStrategy.Fixed -> focus.meterExposureOnFace(subject)
+            FocusStrategy.FaceAf -> focus.lockOnFace(subject)
+        }
     }
 
     fun unbind() {

@@ -1,11 +1,21 @@
 package com.autobots.camera
 
 /**
- * Phase 0 smoke API — proves shared ↔ androidApp linkage.
- * Real domain types arrive in later phases.
+ * App identity shared across KMP modules.
+ *
+ * **Version:** keep [version] in sync with `appVersionName` in root `gradle.properties`
+ * (Android APK uses gradle; this constant is for UI, docs, and iOS/common).
  */
 object AutobotsApp {
     const val name: String = "AutoBots"
+
+    /** Sync with `gradle.properties` → `appVersionName`. */
+    const val version: String = "0.1"
+
+    val versionLabel: String get() = "v$version"
+
+    /** Last completed implementation milestone (see docs/DOCS.md). */
     const val phase: String = "P8"
-    val banner: String get() = "$name · $phase · shared OK"
+
+    val banner: String get() = "$name $versionLabel"
 }

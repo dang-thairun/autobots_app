@@ -14,12 +14,45 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
  * Capture still targets shown in Operator UI and applied to ImageCapture.
  */
 object CaptureResolutions {
-    /** Standard mode still target (16:9). */
+    /** Standard mode still / stream 1080p target (16:9). */
     val STANDARD: Size = Size(1920, 1080)
+
+    /** Stream grab 4K target (16:9). */
+    val UHD_4K: Size = Size(3840, 2160)
+
+    /** Face detection input cap — analysis may be 1080p/4K but ML Kit runs smaller. */
+    val DETECT: Size = Size(640, 360)
 
     fun label(context: Context, mode: CaptureMode): String = when (mode) {
         CaptureMode.Standard -> format(STANDARD)
         CaptureMode.MaxSensor -> maxJpegSize(context)?.let(::format) ?: "Max sensor"
+    }
+
+    fun streamLabel(resolution: StreamResolution): String = when (resolution) {
+        StreamResolution.Hd1080 -> format(STANDARD)
+        StreamResolution.Uhd4K -> format(UHD_4K)
+    }
+
+    fun analysisSelector(
+        pipeline: CapturePipeline,
+        streamResolution: StreamResolution,
+    ): ResolutionSelector {
+        val target = when (pipeline) {
+            CapturePipeline.StillBurst -> DETECT
+            CapturePipeline.StreamGrab -> when (streamResolution) {
+                StreamResolution.Hd1080 -> STANDARD
+                StreamResolution.Uhd4K -> UHD_4K
+            }
+        }
+        return ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    target,
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                ),
+            )
+            .build()
     }
 
     fun imageCaptureSelector(mode: CaptureMode): ResolutionSelector {

@@ -1,6 +1,8 @@
 package com.autobots.camera.detection
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
@@ -21,6 +23,7 @@ import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * P3 interim face detector (ML Kit).
@@ -28,11 +31,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class MlKitFaceAnalyzer(
     private val previewView: PreviewView,
+    private val detectMaxWidth: Int = Int.MAX_VALUE,
     private val onFrameEncoded: ((ByteArray) -> Unit)? = null,
+    private val streamGrabEnabled: () -> Boolean = { false },
+    private val onStreamFrame: ((ByteArray) -> Unit)? = null,
     private val onResult: (FaceFrameResult) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     private val closed = AtomicBoolean(false)
+    private val detectInFlight = AtomicBoolean(false)
+    private val lastStreamGrabMs = AtomicLong(0L)
     private val mainExecutor: Executor = ContextCompat.getMainExecutor(previewView.context)
     private var lastFrameTime = 0L
 
@@ -62,13 +70,18 @@ class MlKitFaceAnalyzer(
             imageProxy.close()
             return
         }
+        if (!detectInFlight.compareAndSet(false, true)) {
+            imageProxy.close()
+            return
+        }
+        val analyzeStartedNs = System.nanoTime()
 
-        // Throttle and encode preview frames for remote streaming
+        // Throttle and encode preview frames for remote streaming (always downscaled).
         if (onFrameEncoded != null) {
             val now = System.currentTimeMillis()
             if (now - lastFrameTime >= 66) { // Max ~15 FPS
                 lastFrameTime = now
-                val jpeg = imageProxy.toJpeg()
+                val jpeg = imageProxy.toPreviewJpeg(quality = PREVIEW_JPEG_QUALITY)
                 if (jpeg != null) {
                     onFrameEncoded.invoke(jpeg)
                 }
@@ -77,28 +90,74 @@ class MlKitFaceAnalyzer(
 
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
+            detectInFlight.set(false)
             imageProxy.close()
             return
         }
 
-        val rotation = imageProxy.imageInfo.rotationDegrees
-        val image = InputImage.fromMediaImage(mediaImage, rotation)
+
+        val detectInput = buildDetectInput(imageProxy) ?: run {
+            detectInFlight.set(false)
+            imageProxy.close()
+            return
+        }
 
         val sourceTransform = runCatching {
             transformFactory.getOutputTransform(imageProxy)
         }.getOrNull()
 
         val startedNs = System.nanoTime()
+        val grabThisFrame = streamGrabEnabled() && onStreamFrame != null
+        if (grabThisFrame) {
+            val preDetectMs = nanosToMs(startedNs - analyzeStartedNs)
+            Log.w(
+                TAG,
+                "test -> pre-detect: ${imageProxy.width}x${imageProxy.height} preDetect=${preDetectMs}ms",
+            )
+        }
 
-        detector.process(image)
+        detector.process(detectInput.image)
             .addOnSuccessListener { faces ->
                 if (closed.get()) return@addOnSuccessListener
                 val inferMs = nanosToMs(System.nanoTime() - startedNs)
+                if (grabThisFrame && faces.isNotEmpty()) {
+                    val now = SystemClock.elapsedRealtime()
+                    val lastGrab = lastStreamGrabMs.get()
+                    val sinceLastMs = if (lastGrab == 0L) 0L else now - lastGrab
+                    if (lastGrab == 0L || sinceLastMs >= STREAM_GRAB_INTERVAL_MS) {
+                        lastStreamGrabMs.set(now)
+                        val jpeg = imageProxy.toJpeg(quality = STREAM_JPEG_QUALITY)
+                        if (jpeg != null) {
+                            Log.w(
+                                TAG,
+                                "stream grab OK: ${imageProxy.width}x${imageProxy.height} " +
+                                    "jpeg=${jpeg.size}B sinceLast=${sinceLastMs}ms infer=${inferMs}ms",
+                            )
+                            onStreamFrame?.invoke(jpeg)
+                        } else {
+                            Log.w(TAG, "stream grab skip: toJpeg failed infer=${inferMs}ms")
+                        }
+                    } else {
+                        val waitMs = STREAM_GRAB_INTERVAL_MS - sinceLastMs
+                        Log.w(
+                            TAG,
+                            "stream grab throttle: wait ${waitMs}ms more " +
+                                "(sinceLast=${sinceLastMs}ms interval=${STREAM_GRAB_INTERVAL_MS}ms)",
+                        )
+                    }
+                } else if (grabThisFrame && faces.isEmpty()) {
+                    if (lastStreamGrabMs.getAndSet(0L) != 0L) {
+                        Log.w(TAG, "stream grab reset: no face in frame")
+                    }
+                }
+                val scaledBoxes = faces.map { face ->
+                    scaleBox(face.boundingBox, detectInput.boxScaleX, detectInput.boxScaleY)
+                }
                 // PreviewView / outputTransform must be touched on the main thread.
                 mainExecutor.execute {
                     if (closed.get()) return@execute
                     val mapStartNs = System.nanoTime()
-                    publishMapped(faces.map { it.boundingBox }, sourceTransform)
+                    publishMapped(scaledBoxes, sourceTransform)
                     val mapMs = nanosToMs(System.nanoTime() - mapStartNs)
                     val totalMs = nanosToMs(System.nanoTime() - startedNs)
                     recordTiming(inferMs, mapMs, totalMs, faces.size)
@@ -115,9 +174,66 @@ class MlKitFaceAnalyzer(
                 }
             }
             .addOnCompleteListener {
+                detectInFlight.set(false)
                 imageProxy.close()
             }
     }
+
+    private fun buildDetectInput(imageProxy: ImageProxy): DetectInput? {
+        val mediaImage = imageProxy.image ?: return null
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        if (imageProxy.width <= detectMaxWidth) {
+            return DetectInput(
+                image = InputImage.fromMediaImage(mediaImage, rotation),
+                boxScaleX = 1f,
+                boxScaleY = 1f,
+            )
+        }
+
+        val rawJpeg = imageProxy.yuvToJpegBytes(quality = DETECT_JPEG_QUALITY) ?: return DetectInput(
+            image = InputImage.fromMediaImage(mediaImage, rotation),
+            boxScaleX = 1f,
+            boxScaleY = 1f,
+        )
+
+        val sampleSize = computeInSampleSize(imageProxy.width, detectMaxWidth)
+        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val bitmap = BitmapFactory.decodeByteArray(rawJpeg, 0, rawJpeg.size, options) ?: return DetectInput(
+            image = InputImage.fromMediaImage(mediaImage, rotation),
+            boxScaleX = 1f,
+            boxScaleY = 1f,
+        )
+
+        return DetectInput(
+            image = InputImage.fromBitmap(bitmap, rotation),
+            boxScaleX = imageProxy.width.toFloat() / bitmap.width.toFloat(),
+            boxScaleY = imageProxy.height.toFloat() / bitmap.height.toFloat(),
+        )
+    }
+
+    private fun scaleBox(box: Rect, scaleX: Float, scaleY: Float): Rect {
+        if (scaleX == 1f && scaleY == 1f) return box
+        return Rect(
+            (box.left * scaleX).toInt(),
+            (box.top * scaleY).toInt(),
+            (box.right * scaleX).toInt(),
+            (box.bottom * scaleY).toInt(),
+        )
+    }
+
+    private fun computeInSampleSize(width: Int, maxWidth: Int): Int {
+        var sample = 1
+        while (width / sample > maxWidth) {
+            sample *= 2
+        }
+        return sample
+    }
+
+    private data class DetectInput(
+        val image: InputImage,
+        val boxScaleX: Float,
+        val boxScaleY: Float,
+    )
 
     private fun publishMapped(
         bounds: List<android.graphics.Rect>,
@@ -199,16 +315,50 @@ class MlKitFaceAnalyzer(
         private const val TAG = "MlKitFaceAnalyzer"
         /** Rolling summary interval — filter logcat: `adb logcat -s MlKitFaceAnalyzer` */
         private const val TIMING_LOG_INTERVAL_MS = 1_000L
+        private const val PREVIEW_JPEG_QUALITY = 60
+        private const val STREAM_JPEG_QUALITY = 92
+        private const val DETECT_JPEG_QUALITY = 75
+        /** Min gap between stream grabs while a face stays in frame. */
+        private const val STREAM_GRAB_INTERVAL_MS = 150L
     }
 }
+
+private const val REMOTE_PREVIEW_MAX_WIDTH = 640
 
 /**
  * Extension helper to convert YUV_420_888 ImageProxy to JPEG ByteArray.
  */
-fun ImageProxy.toJpeg(): ByteArray? {
+fun ImageProxy.toJpeg(quality: Int = 60): ByteArray? {
+    try {
+        val raw = yuvToJpegBytes(quality) ?: return null
+        return rotateJpegToDisplayOrientation(raw, imageInfo.rotationDegrees, quality)
+    } catch (e: Exception) {
+        Log.e("MlKitFaceAnalyzer", "YUV conversion failed", e)
+    }
+    return null
+}
+
+/** Remote preview — capped width, portrait-corrected. */
+fun ImageProxy.toPreviewJpeg(quality: Int = 60): ByteArray? {
+    val raw = yuvToJpegBytes(quality) ?: return null
+    val rotated = rotateJpegToDisplayOrientation(raw, imageInfo.rotationDegrees, quality)
+    val bitmap = BitmapFactory.decodeByteArray(rotated, 0, rotated.size) ?: return rotated
+    if (bitmap.width <= REMOTE_PREVIEW_MAX_WIDTH) return rotated
+    val scale = REMOTE_PREVIEW_MAX_WIDTH.toFloat() / bitmap.width.toFloat()
+    val targetH = (bitmap.height * scale).toInt().coerceAtLeast(1)
+    val scaled = Bitmap.createScaledBitmap(bitmap, REMOTE_PREVIEW_MAX_WIDTH, targetH, true)
+    if (scaled !== bitmap) bitmap.recycle()
+    return ByteArrayOutputStream().use { out ->
+        scaled.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)
+        scaled.recycle()
+        out.toByteArray()
+    }
+}
+
+internal fun ImageProxy.yuvToJpegBytes(quality: Int): ByteArray? {
     try {
         if (format != ImageFormat.YUV_420_888) return null
-        
+
         val yBuffer = planes[0].buffer.duplicate()
         val uBuffer = planes[1].buffer.duplicate()
         val vBuffer = planes[2].buffer.duplicate()
@@ -251,10 +401,34 @@ fun ImageProxy.toJpeg(): ByteArray? {
 
         val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 60, out)
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), quality.coerceIn(1, 100), out)
         return out.toByteArray()
     } catch (e: Exception) {
         Log.e("MlKitFaceAnalyzer", "YUV conversion failed", e)
     }
     return null
+}
+
+/**
+ * Sensor buffers are landscape; apply [rotationDegrees] so saved JPEG matches portrait UI.
+ * ImageCapture does this automatically — stream grab must do it explicitly.
+ */
+internal fun rotateJpegToDisplayOrientation(
+    jpeg: ByteArray,
+    rotationDegrees: Int,
+    quality: Int,
+): ByteArray {
+    if (rotationDegrees == 0 || jpeg.isEmpty()) return jpeg
+    val normalized = ((rotationDegrees % 360) + 360) % 360
+    if (normalized == 0) return jpeg
+
+    val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return jpeg
+    val matrix = Matrix().apply { postRotate(normalized.toFloat()) }
+    val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    if (rotated !== bitmap) bitmap.recycle()
+    return ByteArrayOutputStream().use { out ->
+        rotated.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)
+        rotated.recycle()
+        out.toByteArray()
+    }
 }

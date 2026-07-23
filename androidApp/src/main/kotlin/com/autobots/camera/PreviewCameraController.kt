@@ -25,6 +25,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.autobots.camera.capture.LeanBurstCapturer
+import com.autobots.camera.capture.StreamFrameCapturer
 import com.autobots.camera.delivery.PhotoDeliveryService
 import com.autobots.camera.delivery.LocalPhotoDeliveryService
 import com.autobots.camera.detection.FaceFrameResult
@@ -54,11 +55,15 @@ class PreviewCameraController(
     private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
     private var burstCapturer: LeanBurstCapturer? = null
+    private var streamCapturer: StreamFrameCapturer? = null
+    private val streamGrabActive = AtomicBoolean(false)
     private var onExposureReadout: ((CameraExposureReadout) -> Unit)? = null
     private val armThresholdRef = AtomicReference(PassageThresholds.ARM_HALF_BODY)
     private val fireThresholdRef = AtomicReference(PassageThresholds.FIRE_HALF_BODY)
     private val burstShotCountRef = AtomicInteger(LeanBurstCapturer.DEFAULT_SHOTS)
     private val captureModeRef = AtomicReference(CaptureMode.Standard)
+    private val capturePipelineRef = AtomicReference(CapturePipeline.StreamGrab)
+    private val streamResolutionRef = AtomicReference(StreamResolution.Hd1080)
     private val focusStrategyRef = AtomicReference(FocusStrategy.Fixed)
     private val bindGeneration = AtomicReference(0)
     private val shutdown = AtomicBoolean(false)
@@ -93,6 +98,21 @@ class PreviewCameraController(
 
     fun setCaptureMode(mode: CaptureMode) {
         captureModeRef.set(mode)
+    }
+
+    fun setCapturePipeline(pipeline: CapturePipeline) {
+        capturePipelineRef.set(pipeline)
+    }
+
+    fun setStreamResolution(resolution: StreamResolution) {
+        streamResolutionRef.set(resolution)
+    }
+
+    fun setStreamGrabActive(active: Boolean) {
+        streamGrabActive.set(active)
+        if (active) {
+            streamCapturer?.resetSession()
+        }
     }
 
     fun bindPreview(
@@ -190,38 +210,59 @@ class PreviewCameraController(
                 .also { it.surfaceProvider = previewView.surfaceProvider }
 
             val mode = captureModeRef.get()
-            val capture = ImageCapture.Builder()
-                .setCaptureMode(CaptureResolutions.captureModeQuality(mode))
-                .setResolutionSelector(CaptureResolutions.imageCaptureSelector(mode))
-                .build()
-            imageCapture = capture
-            burstCapturer = LeanBurstCapturer(capture, mainExecutor, burstOutputDir)
-            Log.i(TAG, "ImageCapture mode=$mode target=${CaptureResolutions.label(context, mode)}")
+            val pipeline = capturePipelineRef.get()
+            val streamResolution = streamResolutionRef.get()
+            var capture: ImageCapture? = null
+            if (pipeline == CapturePipeline.StillBurst) {
+                capture = ImageCapture.Builder()
+                    .setCaptureMode(CaptureResolutions.captureModeQuality(mode))
+                    .setResolutionSelector(CaptureResolutions.imageCaptureSelector(mode))
+                    .build()
+                imageCapture = capture
+                burstCapturer = LeanBurstCapturer(capture, mainExecutor, burstOutputDir)
+                streamCapturer = null
+                Log.i(TAG, "ImageCapture mode=$mode target=${CaptureResolutions.label(context, mode)}")
+            } else {
+                imageCapture = null
+                burstCapturer = null
+                streamCapturer = StreamFrameCapturer(
+                    executor = analysisExecutor,
+                    outputDir = burstOutputDir,
+                    deliveryService = deliveryService,
+                )
+                Log.i(
+                    TAG,
+                    "StreamGrab pipeline — analysis target=${CaptureResolutions.streamLabel(streamResolution)}",
+                )
+            }
 
             faceFocus?.detach()
             val focus = FaceFocusController(previewView)
             faceFocus = focus
 
             faceAnalyzer?.close()
+            val streamSaver = streamCapturer
+            val detectMaxWidth = if (pipeline == CapturePipeline.StreamGrab) {
+                CaptureResolutions.DETECT.width
+            } else {
+                Int.MAX_VALUE
+            }
             val analyzer = MlKitFaceAnalyzer(
                 previewView = previewView,
+                detectMaxWidth = detectMaxWidth,
                 onFrameEncoded = { jpeg -> onFrameEncoded?.invoke(jpeg) },
+                streamGrabEnabled = { streamGrabActive.get() },
+                onStreamFrame = streamSaver?.let { capturer ->
+                    { jpeg -> capturer.saveJpeg(jpeg) }
+                },
                 onResult = { result ->
                     applyFaceLock(result)
                     onFaceResult(result)
-                }
+                },
             )
             faceAnalyzer = analyzer
 
-            val resolutionSelector = ResolutionSelector.Builder()
-                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-                .setResolutionStrategy(
-                    ResolutionStrategy(
-                        Size(640, 360),
-                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
-                    ),
-                )
-                .build()
+            val resolutionSelector = CaptureResolutions.analysisSelector(pipeline, streamResolution)
 
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(resolutionSelector)
@@ -229,6 +270,16 @@ class PreviewCameraController(
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .build()
                 .also { it.setAnalyzer(analysisExecutor, analyzer) }
+            Log.i(
+                TAG,
+                "ImageAnalysis pipeline=$pipeline target=${
+                    if (pipeline == CapturePipeline.StreamGrab) {
+                        CaptureResolutions.streamLabel(streamResolution)
+                    } else {
+                        CaptureResolutions.format(CaptureResolutions.DETECT)
+                    }
+                }",
+            )
 
             provider.unbindAll()
 
@@ -236,32 +287,41 @@ class PreviewCameraController(
                 val viewPort = previewView.viewPort
                 if (viewPort != null) {
                     try {
-                        val useCaseGroup = UseCaseGroup.Builder()
+                        val groupBuilder = UseCaseGroup.Builder()
                             .setViewPort(viewPort)
                             .addUseCase(preview)
                             .addUseCase(analysis)
-                            .addUseCase(capture)
-                            .build()
+                        capture?.let { groupBuilder.addUseCase(it) }
+                        val useCaseGroup = groupBuilder.build()
                         val cam = provider.bindToLifecycle(
                             lifecycleOwner,
                             CameraSelector.DEFAULT_BACK_CAMERA,
                             useCaseGroup,
                         )
-                        Log.i(TAG, "Bound Preview+Analysis+Capture with ViewPort")
+                        Log.i(TAG, "Bound Preview+Analysis${if (capture != null) "+Capture" else ""} with ViewPort")
                         return@run cam
                     } catch (t: Throwable) {
                         Log.w(TAG, "ViewPort bind failed, falling back", t)
                         provider.unbindAll()
                     }
                 }
-                val cam = provider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    analysis,
-                    capture,
-                )
-                Log.i(TAG, "bound Preview+Analysis+Capture (fallback)")
+                val cam = if (capture != null) {
+                    provider.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        analysis,
+                        capture,
+                    )
+                } else {
+                    provider.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        analysis,
+                    )
+                }
+                Log.i(TAG, "bound Preview+Analysis${if (capture != null) "+Capture" else ""} (fallback)")
                 cam
             }
 
@@ -304,6 +364,8 @@ class PreviewCameraController(
         bindGeneration.updateAndGet { it + 1 }
         burstCapturer?.cancelPending()
         burstCapturer = null
+        streamCapturer = null
+        streamGrabActive.set(false)
         imageCapture = null
         faceFocus?.detach()
         faceFocus = null

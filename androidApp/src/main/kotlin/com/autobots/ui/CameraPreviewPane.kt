@@ -25,7 +25,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.autobots.camera.CaptureMode
+import com.autobots.camera.CapturePipeline
 import com.autobots.camera.PreviewCameraController
+import com.autobots.camera.StreamResolution
 import com.autobots.camera.detection.FaceFrameResult
 import com.autobots.camera.detection.NormalizedFaceBox
 
@@ -41,6 +43,8 @@ fun CameraPreviewPane(
     fireThreshold: Float,
     burstShotCount: Int,
     captureMode: CaptureMode,
+    capturePipeline: CapturePipeline,
+    streamResolution: StreamResolution,
     onFaceResult: (FaceFrameResult) -> Boolean,
     onBurstComplete: (savedCount: Int) -> Unit,
     onPhotoDelivered: (uri: String) -> Unit,
@@ -81,14 +85,23 @@ fun CameraPreviewPane(
         controller.setCaptureMode(captureMode)
         controller.setBurstShotCount(burstShotCount)
     }
+    LaunchedEffect(capturePipeline) {
+        controller.setCapturePipeline(capturePipeline)
+    }
+    LaunchedEffect(streamResolution) {
+        controller.setStreamResolution(streamResolution)
+    }
 
-    LaunchedEffect(active, previewView, captureMode) {
+    LaunchedEffect(active, previewView, captureMode, capturePipeline, streamResolution) {
         val view = previewView ?: return@LaunchedEffect
         if (active) {
             controller.setArmThreshold(armThreshold)
             controller.setFireThreshold(fireThreshold)
             controller.setBurstShotCount(burstShotCount)
             controller.setCaptureMode(captureMode)
+            controller.setCapturePipeline(capturePipeline)
+            controller.setStreamResolution(streamResolution)
+            controller.setStreamGrabActive(capturePipeline == CapturePipeline.StreamGrab)
             controller.bindPreview(lifecycleOwner, view) { result ->
                 mainExecutor.execute {
                     val shouldFire = onFaceResult(result)
@@ -100,6 +113,7 @@ fun CameraPreviewPane(
                 }
             }
         } else {
+            controller.setStreamGrabActive(false)
             controller.unbind()
         }
     }

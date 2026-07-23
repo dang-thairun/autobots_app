@@ -39,7 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
 import com.autobots.camera.CaptureMode
+import com.autobots.camera.CapturePipeline
 import com.autobots.camera.CaptureResolutions
+import com.autobots.camera.StreamResolution
 import com.autobots.camera.detection.FaceFrameResult
 
 private val CardBg = Color.Gray.copy(alpha = 0.25f)
@@ -63,6 +65,8 @@ fun OperatorShellScreen(
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onCaptureMode: (CaptureMode) -> Unit,
+    onCapturePipeline: (CapturePipeline) -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
     onFaceResult: (FaceFrameResult) -> Boolean,
     onBurstComplete: (Int) -> Unit,
     onPhotoDelivered: (String) -> Unit,
@@ -90,6 +94,8 @@ fun OperatorShellScreen(
             fireThreshold = state.fireThreshold,
             burstShotCount = state.burstShotCount,
             captureMode = state.captureMode,
+            capturePipeline = state.capturePipeline,
+            streamResolution = state.streamResolution,
             onFaceResult = onFaceResult,
             onBurstComplete = onBurstComplete,
             onPhotoDelivered = onPhotoDelivered,
@@ -121,6 +127,8 @@ fun OperatorShellScreen(
                         onToggleCapture = onToggleCapture,
                         onRequestCameraPermission = onRequestCameraPermission,
                         onCaptureMode = onCaptureMode,
+                        onCapturePipeline = onCapturePipeline,
+                        onStreamResolution = onStreamResolution,
                         onArmThreshold = onArmThreshold,
                         onFireThreshold = onFireThreshold,
                         onOpenGallery = onOpenGallery,
@@ -191,6 +199,8 @@ private fun OperatorControlsPage(
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onCaptureMode: (CaptureMode) -> Unit,
+    onCapturePipeline: (CapturePipeline) -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
     onArmThreshold: (Float) -> Unit,
     onFireThreshold: (Float) -> Unit,
     onOpenGallery: () -> Unit,
@@ -217,6 +227,8 @@ private fun OperatorControlsPage(
                 onToggle = onSettingsToggle,
                 state = state,
                 onCaptureMode = onCaptureMode,
+                onCapturePipeline = onCapturePipeline,
+                onStreamResolution = onStreamResolution,
                 onArmThreshold = onArmThreshold,
                 onFireThreshold = onFireThreshold,
             )
@@ -296,6 +308,8 @@ private fun CaptureSettingsCard(
     onToggle: () -> Unit,
     state: OperatorUiState,
     onCaptureMode: (CaptureMode) -> Unit,
+    onCapturePipeline: (CapturePipeline) -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
     onArmThreshold: (Float) -> Unit,
     onFireThreshold: (Float) -> Unit,
 ) {
@@ -303,6 +317,11 @@ private fun CaptureSettingsCard(
         CaptureMode.Standard -> "Standard"
         CaptureMode.MaxSensor -> "Max-Sensor"
     }
+    val pipelineShort = when (state.capturePipeline) {
+        CapturePipeline.StillBurst -> "Still"
+        CapturePipeline.StreamGrab -> "Stream"
+    }
+    val streamShort = CaptureResolutions.streamLabel(state.streamResolution)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -325,7 +344,11 @@ private fun CaptureSettingsCard(
                 )
                 if (!expanded) {
                     Text(
-                        text = "$modeShort · Arm ${(state.armThreshold * 100).toInt()}% · Min ${(state.fireThreshold * 100).toInt()}% · Zone ${if (state.inCaptureZone) "IN" else "—"}",
+                        text = if (state.capturePipeline == CapturePipeline.StreamGrab) {
+                            "$pipelineShort $streamShort · Arm ${(state.armThreshold * 100).toInt()}%"
+                        } else {
+                            "$pipelineShort · $modeShort · Arm ${(state.armThreshold * 100).toInt()}% · Min ${(state.fireThreshold * 100).toInt()}%"
+                        },
                         color = Color(0xFF90A4AE),
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -355,17 +378,55 @@ private fun CaptureSettingsCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    CapturePipelineChip(
+                        pipeline = CapturePipeline.StreamGrab,
+                        selected = state.capturePipeline == CapturePipeline.StreamGrab,
+                        onClick = { onCapturePipeline(CapturePipeline.StreamGrab) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    CapturePipelineChip(
+                        pipeline = CapturePipeline.StillBurst,
+                        selected = state.capturePipeline == CapturePipeline.StillBurst,
+                        onClick = { onCapturePipeline(CapturePipeline.StillBurst) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (state.capturePipeline == CapturePipeline.StreamGrab) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StreamResolutionChip(
+                            resolution = StreamResolution.Hd1080,
+                            selected = state.streamResolution == StreamResolution.Hd1080,
+                            onClick = { onStreamResolution(StreamResolution.Hd1080) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        StreamResolutionChip(
+                            resolution = StreamResolution.Uhd4K,
+                            selected = state.streamResolution == StreamResolution.Uhd4K,
+                            onClick = { onStreamResolution(StreamResolution.Uhd4K) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     CaptureModeChip(
                         mode = CaptureMode.Standard,
                         selected = state.captureMode == CaptureMode.Standard,
                         onClick = { onCaptureMode(CaptureMode.Standard) },
                         modifier = Modifier.weight(1f),
+                        enabled = state.capturePipeline == CapturePipeline.StillBurst,
                     )
                     CaptureModeChip(
                         mode = CaptureMode.MaxSensor,
                         selected = state.captureMode == CaptureMode.MaxSensor,
                         onClick = { onCaptureMode(CaptureMode.MaxSensor) },
                         modifier = Modifier.weight(1f),
+                        enabled = state.capturePipeline == CapturePipeline.StillBurst,
                     )
                 }
             }
@@ -374,11 +435,65 @@ private fun CaptureSettingsCard(
 }
 
 @Composable
+private fun StreamResolutionChip(
+    resolution: StreamResolution,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = when (resolution) {
+        StreamResolution.Hd1080 -> "1080p"
+        StreamResolution.Uhd4K -> "4K"
+    }
+    val detail = CaptureResolutions.streamLabel(resolution)
+    Column(modifier = modifier) {
+        FilterChip(
+            selected = selected,
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(title) },
+        )
+        Text(
+            text = detail,
+            color = Color(0xFF90A4AE),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun CapturePipelineChip(
+    pipeline: CapturePipeline,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val label = when (pipeline) {
+        CapturePipeline.StreamGrab -> "Stream grab"
+        CapturePipeline.StillBurst -> "Still burst"
+    }
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
 private fun CaptureModeChip(
     mode: CaptureMode,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val context = LocalContext.current
     val title = when (mode) {
@@ -390,6 +505,7 @@ private fun CaptureModeChip(
         FilterChip(
             selected = selected,
             onClick = onClick,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
             label = { Text(title) },
         )
@@ -484,8 +600,13 @@ private fun CompactStatusCard(
             )
             StatChip(
                 label = "Fir",
-                value = if (state.lastFired) "●" else if (state.isBursting) "…" else "○",
-                highlight = state.lastFired || state.isBursting,
+                value = when {
+                    state.capturePipeline == CapturePipeline.StreamGrab && state.isStreamGrabbing -> "ON"
+                    state.lastFired -> "●"
+                    state.isBursting -> "…"
+                    else -> "○"
+                },
+                highlight = state.isStreamGrabbing || state.lastFired || state.isBursting,
                 modifier = Modifier.weight(1f),
             )
             StatChip(
@@ -608,6 +729,8 @@ private fun OperatorShellPreview() {
             onToggleCapture = {},
             onRequestCameraPermission = {},
             onCaptureMode = {},
+            onCapturePipeline = {},
+            onStreamResolution = {},
             onFaceResult = { false },
             onBurstComplete = {},
             onPhotoDelivered = {},

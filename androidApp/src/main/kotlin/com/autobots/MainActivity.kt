@@ -61,6 +61,8 @@ class MainActivity : ComponentActivity() {
                         cameraPermission.request()
                     },
                     onCaptureMode = operatorViewModel::setCaptureMode,
+                    onCapturePipeline = operatorViewModel::setCapturePipeline,
+                    onStreamResolution = operatorViewModel::setStreamResolution,
                     onFaceResult = operatorViewModel::onFaceResult,
                     onBurstComplete = operatorViewModel::onBurstComplete,
                     onPhotoDelivered = operatorViewModel::onPhotoDelivered,

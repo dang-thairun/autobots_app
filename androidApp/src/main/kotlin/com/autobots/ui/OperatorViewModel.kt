@@ -5,8 +5,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobots.camera.CaptureMode
+import com.autobots.camera.CapturePipeline
 import com.autobots.camera.PassageFireEvaluator
 import com.autobots.camera.PassageThresholds
+import com.autobots.camera.StreamResolution
 import com.autobots.camera.detection.FaceFrameResult
 import com.autobots.camera.detection.NormalizedFaceBox
 import com.autobots.camera.load.DeviceLoadReader
@@ -23,6 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 data class OperatorUiState(
     val isCapturing: Boolean = false,
     val captureMode: CaptureMode = CaptureMode.Standard,
+    val capturePipeline: CapturePipeline = CapturePipeline.StreamGrab,
+    val streamResolution: StreamResolution = StreamResolution.Hd1080,
+    val isStreamGrabbing: Boolean = false,
     val isArmed: Boolean = false,
     val lastFired: Boolean = false,
     /** Passage Gate open = may fire; closed after a Fire until face leaves. */
@@ -125,6 +130,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 isCapturing = true,
+                isStreamGrabbing = false,
                 isArmed = false,
                 lastFired = false,
                 passageGateOpen = true,
@@ -147,6 +153,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 isCapturing = false,
+                isStreamGrabbing = false,
                 isArmed = false,
                 isBursting = false,
                 passageGateOpen = true,
@@ -166,6 +173,24 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     fun onFaceResult(result: FaceFrameResult): Boolean {
         val current = _state.value
         if (!current.isCapturing) return false
+
+        if (current.capturePipeline == CapturePipeline.StreamGrab) {
+            val grabbing = result.faces.isNotEmpty()
+            _state.update {
+                it.copy(
+                    faces = result.faces,
+                    subjectIndex = result.subjectIndex,
+                    proximity = result.proximity,
+                    faceCount = result.faces.size,
+                    isArmed = grabbing,
+                    isStreamGrabbing = grabbing,
+                    inCaptureZone = false,
+                    passageGateOpen = true,
+                    lastFired = grabbing,
+                )
+            }
+            return false
+        }
 
         val armed = resolveArmed(
             wasArmed = current.isArmed,
@@ -273,6 +298,14 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
 
     fun setCaptureMode(mode: CaptureMode) {
         _state.update { it.copy(captureMode = mode) }
+    }
+
+    fun setCapturePipeline(pipeline: CapturePipeline) {
+        _state.update { it.copy(capturePipeline = pipeline) }
+    }
+
+    fun setStreamResolution(resolution: StreamResolution) {
+        _state.update { it.copy(streamResolution = resolution) }
     }
 
     fun onExposureReadout(line: String) {

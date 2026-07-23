@@ -2,6 +2,7 @@ package com.autobots.camera.pipeline
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.media.MediaMetadataRetriever
 import android.util.Log
 import com.autobots.camera.detection.OfflineFaceDetector
 import java.io.File
@@ -24,7 +25,10 @@ class VideoFaceProcessor(
 ) {
     private val detector = OfflineFaceDetector()
 
-    suspend fun process(file: File): VideoProcessResult {
+    suspend fun process(
+        file: File,
+        onProgress: (Int) -> Unit = {},
+    ): VideoProcessResult {
         val started = System.currentTimeMillis()
         facesDir.mkdirs()
         var kept = 0
@@ -32,8 +36,14 @@ class VideoFaceProcessor(
         val savedFiles = mutableListOf<File>()
         var bestInWindow: FrameCandidate? = null
         var windowStartUs = -1L
+        val estimatedFrames = estimateFrameCount(file)
+        var scannedFrames = 0
 
         VideoFrameSampler.sampleFrames(file, SAMPLE_INTERVAL_MS) { timestampUs, bitmap ->
+            scannedFrames++
+            val percent = ((scannedFrames * 100) / estimatedFrames).coerceIn(0, 99)
+            onProgress(percent)
+
             val candidate = evaluateFrame(bitmap, timestampUs)
             if (candidate == null) {
                 skipped++
@@ -66,6 +76,8 @@ class VideoFaceProcessor(
                 savedFiles.add(saved)
             } ?: run { skipped++ }
         }
+
+        onProgress(100)
 
         val durationMs = System.currentTimeMillis() - started
         Log.i(TAG, "Processed ${file.name}: kept=$kept skipped=$skipped ${durationMs}ms")
@@ -130,6 +142,23 @@ class VideoFaceProcessor(
 
     fun close() {
         detector.close()
+    }
+
+    private fun estimateFrameCount(file: File): Int {
+        val durationMs = readDurationMs(file) ?: return 1
+        return maxOf(1, (durationMs / SAMPLE_INTERVAL_MS).toInt())
+    }
+
+    private fun readDurationMs(file: File): Long? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        } catch (_: Throwable) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     private data class FrameCandidate(

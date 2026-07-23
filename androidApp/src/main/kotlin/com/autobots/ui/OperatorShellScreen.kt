@@ -46,7 +46,8 @@ private val CardShape = RoundedCornerShape(12.dp)
 private object OverlayPages {
     const val Controls = 0
     const val CleanPreview = 1
-    const val Count = 2
+    const val ChunkHistory = 2
+    const val Count = 3
 }
 
 @Composable
@@ -77,6 +78,7 @@ fun OperatorShellScreen(
             pipelineCoordinator = pipelineCoordinator,
             pipelinePaused = state.pipelinePaused,
             videoQueueDepth = state.videoQueueDepth,
+            isProcessing = state.isProcessing,
             onRecordingProgress = onRecordingProgress,
             onExposureReadout = onExposureReadout,
             modifier = Modifier.fillMaxSize(),
@@ -98,14 +100,18 @@ fun OperatorShellScreen(
                     OverlayPages.Controls -> OperatorControlsPage(
                         state = state,
                         cameraPermissionGranted = cameraPermissionGranted,
-                        settingsExpanded = settingsExpanded,
-                        onSettingsToggle = { settingsExpanded = !settingsExpanded },
+                        pipelineExpanded = settingsExpanded,
+                        onPipelineToggle = { settingsExpanded = !settingsExpanded },
                         onToggleCapture = onToggleCapture,
                         onRequestCameraPermission = onRequestCameraPermission,
                         onStreamResolution = onStreamResolution,
                         onOpenGallery = onOpenGallery,
                     )
                     OverlayPages.CleanPreview -> Box(modifier = Modifier.fillMaxSize())
+                    OverlayPages.ChunkHistory -> ChunkHistoryPage(
+                        chunks = state.chunkHistory,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                     else -> Box(modifier = Modifier.fillMaxSize())
                 }
             }
@@ -125,8 +131,8 @@ fun OperatorShellScreen(
 private fun OperatorControlsPage(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
-    settingsExpanded: Boolean,
-    onSettingsToggle: () -> Unit,
+    pipelineExpanded: Boolean,
+    onPipelineToggle: () -> Unit,
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
@@ -136,6 +142,9 @@ private fun OperatorControlsPage(
         CompactStatusCard(
             state = state,
             cameraPermissionGranted = cameraPermissionGranted,
+            pipelineExpanded = pipelineExpanded,
+            onPipelineToggle = onPipelineToggle,
+            onStreamResolution = onStreamResolution,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -149,12 +158,7 @@ private fun OperatorControlsPage(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PipelineSettingsCard(
-                expanded = settingsExpanded,
-                onToggle = onSettingsToggle,
-                state = state,
-                onStreamResolution = onStreamResolution,
-            )
+            ProcessingStatusCard(state = state)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -164,15 +168,17 @@ private fun OperatorControlsPage(
                     onClick = {
                         when {
                             state.isCapturing -> onToggleCapture()
-                            cameraPermissionGranted -> onToggleCapture()
-                            else -> onRequestCameraPermission()
+                            state.canStartCapture && cameraPermissionGranted -> onToggleCapture()
+                            !cameraPermissionGranted -> onRequestCameraPermission()
                         }
                     },
+                    enabled = state.isCapturing || state.canStartCapture || !cameraPermissionGranted,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
                         text = when {
                             state.isCapturing -> "Stop"
+                            state.isProcessing -> "Processing…"
                             cameraPermissionGranted -> "Start"
                             else -> "Allow & Start"
                         },
@@ -200,80 +206,45 @@ private fun OperatorControlsPage(
 }
 
 @Composable
-private fun PipelineSettingsCard(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    state: OperatorUiState,
-    onStreamResolution: (StreamResolution) -> Unit,
-) {
+private fun ProcessingStatusCard(state: OperatorUiState) {
+    val active = state.isProcessing
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(CardShape)
-            .background(CardBg),
+            .background(CardBg)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
+        Text(
+            text = "Face extraction",
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+            text = if (active) state.processingLine else "No processing",
+            color = if (active) Color(0xFF80CBC4) else Color(0xFF78909C),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 3,
+        )
+        LinearProgressIndicator(
+            progress = { if (active) state.processingPercent / 100f else 0f },
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Video pipeline",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                if (!expanded) {
-                    Text(
-                        text = if (state.isCapturing) "Recording" else state.streamResolution.label,
-                        color = Color(0xFF90A4AE),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
-            Text(
-                text = if (expanded) "Hide" else "Show",
-                color = Color(0xFFB0BEC5),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-
-        if (expanded) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = "Record 4K/1080p chunks (~20 MB) → extract sharp face frames",
-                    color = Color(0xFF90A4AE),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    StreamResolutionChip(
-                        resolution = StreamResolution.Fhd,
-                        selected = state.streamResolution == StreamResolution.Fhd,
-                        enabled = !state.isCapturing,
-                        onClick = { onStreamResolution(StreamResolution.Fhd) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    StreamResolutionChip(
-                        resolution = StreamResolution.Uhd,
-                        selected = state.streamResolution == StreamResolution.Uhd,
-                        enabled = !state.isCapturing,
-                        onClick = { onStreamResolution(StreamResolution.Uhd) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
+                .height(4.dp),
+            color = Color(0xFF26A69A),
+            trackColor = Color.White.copy(alpha = 0.2f),
+        )
+        Text(
+            text = if (active) {
+                "${state.processingPercent}% overall · faces found ${state.facesKept}"
+            } else {
+                "Idle · faces found ${state.facesKept}"
+            },
+            color = Color(0xFF78909C),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+        )
     }
 }
 
@@ -332,6 +303,9 @@ private fun OverlayPageIndicator(
 private fun CompactStatusCard(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
+    pipelineExpanded: Boolean,
+    onPipelineToggle: () -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var activeTooltip by remember { mutableStateOf<String?>(null) }
@@ -470,6 +444,58 @@ private fun CompactStatusCard(
             Text(
                 text = "Need camera permission",
                 color = Color(0xFFFFAB91),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        if (pipelineExpanded) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = "Record 4K/1080p chunks (~20 MB) → extract sharp face frames",
+                    color = Color(0xFF90A4AE),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StreamResolutionChip(
+                        resolution = StreamResolution.Fhd,
+                        selected = state.streamResolution == StreamResolution.Fhd,
+                        enabled = !state.isCapturing,
+                        onClick = { onStreamResolution(StreamResolution.Fhd) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    StreamResolutionChip(
+                        resolution = StreamResolution.Uhd,
+                        selected = state.streamResolution == StreamResolution.Uhd,
+                        enabled = !state.isCapturing,
+                        onClick = { onStreamResolution(StreamResolution.Uhd) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onPipelineToggle)
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Video pipeline",
+                color = Color(0xFF90A4AE),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                text = if (pipelineExpanded) " · Hide" else " · Show",
+                color = Color(0xFFB0BEC5),
                 style = MaterialTheme.typography.labelSmall,
             )
         }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.autobots.camera.ChunkRecord
 import com.autobots.camera.ChunkRecordingProgress
 import com.autobots.camera.PipelineStats
 import com.autobots.camera.StreamResolution
@@ -40,6 +41,13 @@ data class OperatorUiState(
     val serverIp: String = "—",
     val storageBlocked: Boolean = false,
     val recordingProgress: ChunkRecordingProgress = ChunkRecordingProgress(),
+    val isProcessing: Boolean = false,
+    val processingPercent: Int = 0,
+    val currentChunkPercent: Int = 0,
+    val chunksProcessed: Int = 0,
+    val processingChunkName: String? = null,
+    val imageQueuePending: Int = 0,
+    val chunkHistory: List<ChunkRecord> = emptyList(),
 ) {
     val deviceLoadLine: String
         get() = if (totalRamMb > 0) {
@@ -63,6 +71,25 @@ data class OperatorUiState(
             val rateLine = if (rate > 0) " · ~${rate} KB/s" else ""
             return "REC #${progress.chunkIndex} · $size / $target · ${progress.elapsedSec}s$rateLine"
         }
+
+    val processingLine: String
+        get() {
+            if (!isProcessing) return ""
+            val chunkLabel = processingChunkName?.substringBefore('.') ?: "chunk"
+            val queue = videoQueueDepth
+            val gallery = imageQueuePending
+            return buildString {
+                append("Processing $chunkLabel")
+                append(" · ${processingPercent}%")
+                append(" · ${chunksProcessed}/${videoChunksRecorded} chunks")
+                if (currentChunkPercent in 1..99) append(" · scan $currentChunkPercent%")
+                if (queue > 0) append(" · VQ $queue")
+                if (gallery > 0) append(" · save $gallery")
+            }
+        }
+
+    val canStartCapture: Boolean
+        get() = !isCapturing && !isProcessing
 }
 
 /** ≥1000 MB → "X.X GB", else "NNN MB". */
@@ -121,10 +148,16 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun startCapture() {
+        if (pipeline?.isBusy() == true) return
+
+        pipeline?.close()
+        pipeline = null
+
         val coordinator = CapturePipelineCoordinator.create(
             context = getApplication(),
             onStats = ::applyPipelineStats,
             onPhotoDelivered = { uri -> onPhotoDelivered(uri.toString()) },
+            onDrainComplete = ::onPipelineDrainComplete,
         )
         val resolution = _state.value.streamResolution
         coordinator.setResolution(resolution)
@@ -148,21 +181,40 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 lastChunkProcessMs = 0,
                 pipelinePaused = false,
                 recordingProgress = ChunkRecordingProgress(),
+                isProcessing = false,
+                processingPercent = 0,
+                currentChunkPercent = 0,
+                chunksProcessed = 0,
+                processingChunkName = null,
+                imageQueuePending = 0,
+                chunkHistory = emptyList(),
             )
         }
         applyDeviceLoad(deviceLoadReader.sample())
     }
 
     fun stopCapture() {
-        pipeline?.onRecordingStopped()
-        pipeline?.close()
-        pipeline = null
+        pipeline?.stopRecording()
         _state.update {
             it.copy(
                 isCapturing = false,
                 pipelinePaused = false,
                 exposureLine = "—mm  ·  —  ·  ISO —",
                 recordingProgress = ChunkRecordingProgress(),
+            )
+        }
+    }
+
+    private fun onPipelineDrainComplete() {
+        pipeline?.close()
+        pipeline = null
+        _state.update {
+            it.copy(
+                isProcessing = false,
+                processingPercent = 0,
+                currentChunkPercent = 0,
+                processingChunkName = null,
+                imageQueuePending = 0,
             )
         }
     }
@@ -203,11 +255,18 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 streamResolution = stats.resolution,
                 videoChunksRecorded = stats.videoChunksRecorded,
                 videoQueueDepth = stats.videoQueueDepth,
+                chunksProcessed = stats.chunksProcessed,
                 facesKept = stats.facesKept,
                 facesSkipped = stats.facesSkipped,
                 lastChunkProcessMs = stats.lastChunkProcessMs,
                 storageFreeMb = stats.storageFreeMb,
                 pipelinePaused = stats.pipelinePaused,
+                isProcessing = stats.isProcessing,
+                processingPercent = stats.overallProcessingPercent,
+                currentChunkPercent = stats.currentChunkPercent,
+                processingChunkName = stats.processingChunkName,
+                imageQueuePending = stats.imageQueuePending,
+                chunkHistory = stats.chunkHistory,
             )
         }
     }

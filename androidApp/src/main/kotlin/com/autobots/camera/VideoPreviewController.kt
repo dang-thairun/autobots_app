@@ -16,6 +16,7 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.autobots.camera.capture.ChunkCaptureMeta
 import com.autobots.camera.capture.VideoChunkRecorder
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -65,7 +66,7 @@ class VideoPreviewController(
     fun startChunkRecording(
         sessionDir: File,
         canAcceptChunk: () -> Boolean,
-        onChunkReady: (File) -> Unit,
+        onChunkReady: (ChunkCaptureMeta) -> Unit,
         onProgress: (Int, Long, Long) -> Unit,
         onPaused: () -> Unit,
         onResumed: () -> Unit,
@@ -89,17 +90,21 @@ class VideoPreviewController(
         ).also { it.start() }
     }
 
-    fun stopChunkRecording() {
-        chunkRecorder?.stop()
+    fun stopChunkRecording(onFinalized: () -> Unit = {}) {
+        val recorder = chunkRecorder
         chunkRecorder = null
+        if (recorder == null) {
+            onFinalized()
+            return
+        }
+        recorder.stop(onFinalized)
     }
 
     fun resumeRecordingIfPaused() {
         chunkRecorder?.resumeIfPaused()
     }
 
-    fun unbind() {
-        stopChunkRecording()
+    fun unbindCamera() {
         bindGeneration.updateAndGet { it + 1 }
         camera = null
         videoCapture = null
@@ -110,6 +115,10 @@ class VideoPreviewController(
         } catch (t: Throwable) {
             Log.e(TAG, "unbind failed", t)
         }
+    }
+
+    fun unbind() {
+        stopChunkRecording { unbindCamera() }
     }
 
     fun shutdown() {

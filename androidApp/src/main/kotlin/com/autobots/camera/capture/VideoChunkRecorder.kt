@@ -31,7 +31,7 @@ class VideoChunkRecorder(
     private val mainExecutor: Executor,
     private val maxChunkBytes: Long = DEFAULT_MAX_CHUNK_BYTES,
     private val canAcceptChunk: () -> Boolean,
-    private val onChunkReady: (File) -> Unit,
+    private val onChunkReady: (ChunkCaptureMeta) -> Unit,
     private val onProgress: (Int, Long, Long) -> Unit = { _, _, _ -> },
     private val onPaused: () -> Unit,
     private val onResumed: () -> Unit,
@@ -43,9 +43,12 @@ class VideoChunkRecorder(
     private val chunkCounter = AtomicInteger(0)
     private var activeRecording: Recording? = null
     private var currentFile: File? = null
+    private var currentChunkIndex: Int = 0
     private var sizeMonitorJob: Job? = null
     private var resumeWatchJob: Job? = null
     private var chunkStartElapsedMs: Long = 0L
+    private var chunkStartWallMs: Long = 0L
+    private var stopFinalizeCallback: (() -> Unit)? = null
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -53,15 +56,19 @@ class VideoChunkRecorder(
         startNextChunkOrPause()
     }
 
-    fun stop() {
+    fun stop(onFinalized: () -> Unit = {}) {
         running.set(false)
         paused.set(false)
         sizeMonitorJob?.cancel()
         resumeWatchJob?.cancel()
-        activeRecording?.stop()
-        activeRecording = null
-        currentFile = null
-        scope.cancel()
+        val recording = activeRecording
+        if (recording == null) {
+            scope.cancel()
+            onFinalized()
+            return
+        }
+        stopFinalizeCallback = onFinalized
+        recording.stop()
     }
 
     fun resumeIfPaused() {
@@ -99,10 +106,12 @@ class VideoChunkRecorder(
     private fun startNextChunk() {
         if (!running.get()) return
         val index = chunkCounter.incrementAndGet()
+        currentChunkIndex = index
         val file = File(videoDir, "chunk_${index.toString().padStart(3, '0')}.mp4")
         currentFile = file
         rotating.set(false)
         chunkStartElapsedMs = SystemClock.elapsedRealtime()
+        chunkStartWallMs = System.currentTimeMillis()
 
         val outputOptions = FileOutputOptions.Builder(file).build()
         activeRecording = videoCapture.output
@@ -134,7 +143,7 @@ class VideoChunkRecorder(
         when (event) {
             is VideoRecordEvent.Status -> {
                 val stats = event.recordingStats
-                val index = chunkCounter.get()
+                val index = currentChunkIndex
                 val elapsedMs = stats.recordedDurationNanos / 1_000_000L
                 val bytes = stats.numBytesRecorded
                 mainExecutor.execute {
@@ -143,17 +152,35 @@ class VideoChunkRecorder(
             }
             is VideoRecordEvent.Finalize -> {
                 val file = currentFile
+                val index = currentChunkIndex
+                val wallMs = chunkStartWallMs
+                val elapsedMs = (SystemClock.elapsedRealtime() - chunkStartElapsedMs).coerceAtLeast(0L)
+                val stoppedIntentionally = !running.get()
                 if (event.hasError()) {
                     Log.e(TAG, "Finalize error for ${file?.name}: ${event.error}")
-                } else if (file != null && file.exists() && file.length() > 0L) {
-                    Log.i(TAG, "Chunk ready ${file.name} (${file.length() / 1024}KB)")
-                    onChunkReady(file)
+                }
+                val hasContent = file != null && file.exists() && file.length() > 0L
+                if (hasContent && (!event.hasError() || stoppedIntentionally)) {
+                    val meta = ChunkCaptureMeta(
+                        index = index,
+                        file = file,
+                        recordedAtEpochMs = wallMs,
+                        recordDurationMs = elapsedMs,
+                        videoSizeBytes = file.length(),
+                    )
+                    val partialTag = if (file.length() < maxChunkBytes) ", partial" else ""
+                    Log.i(TAG, "Chunk ready ${file.name} (${file.length() / 1024}KB, ${elapsedMs}ms$partialTag)")
+                    onChunkReady(meta)
                 }
                 activeRecording = null
                 currentFile = null
                 rotating.set(false)
                 if (running.get()) {
                     startNextChunkOrPause()
+                } else {
+                    scope.cancel()
+                    stopFinalizeCallback?.invoke()
+                    stopFinalizeCallback = null
                 }
             }
             else -> Unit

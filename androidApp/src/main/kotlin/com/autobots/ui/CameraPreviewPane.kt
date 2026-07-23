@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +28,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.VideoPreviewController
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * Full-bleed CameraX Preview + Plan B video chunk recording.
@@ -38,6 +41,7 @@ fun CameraPreviewPane(
     pipelineCoordinator: CapturePipelineCoordinator?,
     pipelinePaused: Boolean = false,
     videoQueueDepth: Int = 0,
+    isProcessing: Boolean = false,
     onRecordingProgress: (Int, Long, Long) -> Unit = { _, _, _ -> },
     onExposureReadout: (String) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -46,15 +50,17 @@ fun CameraPreviewPane(
     val lifecycleOwner = LocalLifecycleOwner.current
     val controller = remember { VideoPreviewController(context.applicationContext) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    val activeState by rememberUpdatedState(active)
 
     DisposableEffect(Unit) {
         onDispose { controller.shutdown() }
     }
 
     LaunchedEffect(active, previewView, streamResolution, pipelineCoordinator) {
-        val view = previewView ?: return@LaunchedEffect
         if (active) {
+            val view = previewView ?: return@LaunchedEffect
             controller.bindPreview(lifecycleOwner, view, streamResolution) {
+                if (!activeState) return@bindPreview
                 val coordinator = pipelineCoordinator ?: return@bindPreview
                 if (!coordinator.hasStorageForRecording()) return@bindPreview
                 controller.startChunkRecording(
@@ -66,9 +72,17 @@ fun CameraPreviewPane(
                     onResumed = coordinator::onRecorderResumed,
                 )
             }
-        } else {
-            controller.stopChunkRecording()
-            controller.unbind()
+        }
+    }
+
+    LaunchedEffect(active, pipelineCoordinator) {
+        if (active) return@LaunchedEffect
+        suspendCancellableCoroutine { cont ->
+            controller.stopChunkRecording {
+                pipelineCoordinator?.onRecorderStopSettled()
+                controller.unbindCamera()
+                cont.resume(Unit)
+            }
         }
     }
 
@@ -98,7 +112,7 @@ fun CameraPreviewPane(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Stopped",
+                    text = if (isProcessing) "Processing chunks…" else "Stopped",
                     color = Color(0xFF9E9E9E),
                     style = MaterialTheme.typography.titleMedium,
                 )

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -21,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,45 +32,35 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
-import com.autobots.camera.CaptureMode
-import com.autobots.camera.CaptureResolutions
-import com.autobots.camera.detection.FaceFrameResult
+import com.autobots.camera.StreamResolution
+import com.autobots.camera.pipeline.CapturePipelineCoordinator
 
 private val CardBg = Color.Gray.copy(alpha = 0.25f)
 private val CardShape = RoundedCornerShape(12.dp)
 
-/**
- * Overlay pager pages (layer 2). Preview stays on layer 1 underneath.
- * Index 0 = operator controls; 1 = clean preview; later = observation pages.
- */
 private object OverlayPages {
     const val Controls = 0
     const val CleanPreview = 1
-    const val Observation = 2
-    const val Count = 3
+    const val Count = 2
 }
 
 @Composable
 fun OperatorShellScreen(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
+    pipelineCoordinator: CapturePipelineCoordinator?,
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
-    onCaptureMode: (CaptureMode) -> Unit,
-    onFaceResult: (FaceFrameResult) -> Boolean,
-    onBurstComplete: (Int) -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
+    onRecordingProgress: (Int, Long, Long) -> Unit,
     onPhotoDelivered: (String) -> Unit,
     onExposureReadout: (String) -> Unit,
-    onArmThreshold: (Float) -> Unit,
-    onFireThreshold: (Float) -> Unit,
     onOpenGallery: () -> Unit,
-    onFrameEncoded: ((ByteArray) -> Unit)? = null,
 ) {
     val previewActive = state.isCapturing && cameraPermissionGranted
     var settingsExpanded by remember { mutableStateOf(false) }
@@ -81,25 +71,17 @@ fun OperatorShellScreen(
             .fillMaxSize()
             .background(Color(0xFF121212)),
     ) {
-        // Layer 1 — camera preview (fixed)
         CameraPreviewPane(
             active = previewActive,
-            faces = state.faces,
-            subjectIndex = state.subjectIndex,
-            armThreshold = state.armThreshold,
-            fireThreshold = state.fireThreshold,
-            burstShotCount = state.burstShotCount,
-            captureMode = state.captureMode,
-            onFaceResult = onFaceResult,
-            onBurstComplete = onBurstComplete,
-            onPhotoDelivered = onPhotoDelivered,
+            streamResolution = state.streamResolution,
+            pipelineCoordinator = pipelineCoordinator,
+            pipelinePaused = state.pipelinePaused,
+            videoQueueDepth = state.videoQueueDepth,
+            onRecordingProgress = onRecordingProgress,
             onExposureReadout = onExposureReadout,
-            onFrameEncoded = onFrameEncoded,
-            showFaceOverlay = pagerState.currentPage != OverlayPages.CleanPreview,
             modifier = Modifier.fillMaxSize(),
         )
 
-        // Layer 2 — swipeable chrome / future observation pages
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -120,16 +102,10 @@ fun OperatorShellScreen(
                         onSettingsToggle = { settingsExpanded = !settingsExpanded },
                         onToggleCapture = onToggleCapture,
                         onRequestCameraPermission = onRequestCameraPermission,
-                        onCaptureMode = onCaptureMode,
-                        onArmThreshold = onArmThreshold,
-                        onFireThreshold = onFireThreshold,
+                        onStreamResolution = onStreamResolution,
                         onOpenGallery = onOpenGallery,
                     )
-                    OverlayPages.CleanPreview -> {
-                        // Transparent — preview-only
-                        Box(modifier = Modifier.fillMaxSize())
-                    }
-                    OverlayPages.Observation -> ObservationPage(state = state)
+                    OverlayPages.CleanPreview -> Box(modifier = Modifier.fillMaxSize())
                     else -> Box(modifier = Modifier.fillMaxSize())
                 }
             }
@@ -146,43 +122,6 @@ fun OperatorShellScreen(
 }
 
 @Composable
-private fun ObservationPage(state: OperatorUiState) {
-    val subject = state.subjectIndex?.let { state.faces.getOrNull(it) }
-    Box(modifier = Modifier.fillMaxSize()) {
-        AfGridOverlay(
-            subject = subject,
-            isArmed = state.isArmed,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 12.dp)
-                .clip(CardShape)
-                .background(CardBg)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "${AfGridDefaults.COLUMNS}×${AfGridDefaults.ROWS} AF points (visual)",
-                color = Color.White,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Text(
-                text = state.exposureLine,
-                color = Color(0xFFE0E0E0),
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Text(
-                text = if (state.isArmed) "Active near Subject Face" else "Idle — arm to highlight",
-                color = if (state.isArmed) Color(0xFF69F0AE) else Color(0xFF90A4AE),
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
-    }
-}
-
-@Composable
 private fun OperatorControlsPage(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
@@ -190,9 +129,7 @@ private fun OperatorControlsPage(
     onSettingsToggle: () -> Unit,
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
-    onCaptureMode: (CaptureMode) -> Unit,
-    onArmThreshold: (Float) -> Unit,
-    onFireThreshold: (Float) -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
     onOpenGallery: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -212,13 +149,11 @@ private fun OperatorControlsPage(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CaptureSettingsCard(
+            PipelineSettingsCard(
                 expanded = settingsExpanded,
                 onToggle = onSettingsToggle,
                 state = state,
-                onCaptureMode = onCaptureMode,
-                onArmThreshold = onArmThreshold,
-                onFireThreshold = onFireThreshold,
+                onStreamResolution = onStreamResolution,
             )
 
             Row(
@@ -265,6 +200,109 @@ private fun OperatorControlsPage(
 }
 
 @Composable
+private fun PipelineSettingsCard(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    state: OperatorUiState,
+    onStreamResolution: (StreamResolution) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(CardBg),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Video pipeline",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (!expanded) {
+                    Text(
+                        text = if (state.isCapturing) "Recording" else state.streamResolution.label,
+                        color = Color(0xFF90A4AE),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+            Text(
+                text = if (expanded) "Hide" else "Show",
+                color = Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Record 4K/1080p chunks (~20 MB) → extract sharp face frames",
+                    color = Color(0xFF90A4AE),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StreamResolutionChip(
+                        resolution = StreamResolution.Fhd,
+                        selected = state.streamResolution == StreamResolution.Fhd,
+                        enabled = !state.isCapturing,
+                        onClick = { onStreamResolution(StreamResolution.Fhd) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    StreamResolutionChip(
+                        resolution = StreamResolution.Uhd,
+                        selected = state.streamResolution == StreamResolution.Uhd,
+                        enabled = !state.isCapturing,
+                        onClick = { onStreamResolution(StreamResolution.Uhd) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamResolutionChip(
+    resolution: StreamResolution,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        FilterChip(
+            selected = selected,
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(resolution.label) },
+        )
+        Text(
+            text = "${resolution.width}×${resolution.height}",
+            color = Color(0xFF90A4AE),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+        )
+    }
+}
+
+@Composable
 private fun OverlayPageIndicator(
     pageCount: Int,
     currentPage: Int,
@@ -291,160 +329,19 @@ private fun OverlayPageIndicator(
 }
 
 @Composable
-private fun CaptureSettingsCard(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    state: OperatorUiState,
-    onCaptureMode: (CaptureMode) -> Unit,
-    onArmThreshold: (Float) -> Unit,
-    onFireThreshold: (Float) -> Unit,
-) {
-    val modeShort = when (state.captureMode) {
-        CaptureMode.Standard -> "Standard"
-        CaptureMode.MaxSensor -> "Max-Sensor"
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(CardShape)
-            .background(CardBg),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Capture settings",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                if (!expanded) {
-                    Text(
-                        text = "$modeShort · Arm ${(state.armThreshold * 100).toInt()}% · Min ${(state.fireThreshold * 100).toInt()}% · Zone ${if (state.inCaptureZone) "IN" else "—"}",
-                        color = Color(0xFF90A4AE),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
-            Text(
-                text = if (expanded) "Hide" else "Show",
-                color = Color(0xFFB0BEC5),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-
-        if (expanded) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ThresholdSliders(
-                    armThreshold = state.armThreshold,
-                    fireThreshold = state.fireThreshold,
-                    onArmThreshold = onArmThreshold,
-                    onFireThreshold = onFireThreshold,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CaptureModeChip(
-                        mode = CaptureMode.Standard,
-                        selected = state.captureMode == CaptureMode.Standard,
-                        onClick = { onCaptureMode(CaptureMode.Standard) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    CaptureModeChip(
-                        mode = CaptureMode.MaxSensor,
-                        selected = state.captureMode == CaptureMode.MaxSensor,
-                        onClick = { onCaptureMode(CaptureMode.MaxSensor) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CaptureModeChip(
-    mode: CaptureMode,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val title = when (mode) {
-        CaptureMode.Standard -> "Standard"
-        CaptureMode.MaxSensor -> "Max-Sensor"
-    }
-    val resolution = remember(mode) { CaptureResolutions.label(context, mode) }
-    Column(modifier = modifier) {
-        FilterChip(
-            selected = selected,
-            onClick = onClick,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text(title) },
-        )
-        Text(
-            text = resolution,
-            color = Color(0xFF90A4AE),
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp),
-        )
-    }
-}
-
-@Composable
-private fun ThresholdSliders(
-    armThreshold: Float,
-    fireThreshold: Float,
-    onArmThreshold: (Float) -> Unit,
-    onFireThreshold: (Float) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = "Arm (Face Lock)  ${(armThreshold * 100).toInt()}%",
-            color = Color(0xFFB0BEC5),
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Slider(
-            value = armThreshold,
-            onValueChange = onArmThreshold,
-            valueRange = 0.01f..0.25f,
-        )
-        Text(
-            text = "Min size (Fire)  ${(fireThreshold * 100).toInt()}%",
-            color = Color(0xFFB0BEC5),
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Slider(
-            value = fireThreshold,
-            onValueChange = onFireThreshold,
-            valueRange = 0.02f..0.45f,
-        )
-    }
-}
-
-@Composable
 private fun CompactStatusCard(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    var activeTooltip by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = modifier
             .clip(CardShape)
             .background(CardBg)
             .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -452,12 +349,15 @@ private fun CompactStatusCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = AutobotsApp.banner,
+                text = buildString {
+                    append(AutobotsApp.banner)
+                    if (!state.isCapturing) append(" · IDLE")
+                },
                 color = Color.White,
                 style = MaterialTheme.typography.labelSmall,
             )
             Text(
-                text = "IP ${state.serverIp}",
+                text = "${state.streamResolution.label} · IP ${state.serverIp}",
                 color = Color(0xFF69F0AE),
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
@@ -465,73 +365,106 @@ private fun CompactStatusCard(
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            StatChip("F", "${state.faceCount}", modifier = Modifier.weight(1f))
-            StatChip(
-                label = "Px",
-                value = "${(state.proximity * 100).toInt()}%",
-                highlight = state.isArmed,
-                modifier = Modifier.weight(1f),
+        if (state.isCapturing && state.recordingLine.isNotEmpty()) {
+            Text(
+                text = state.recordingLine,
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 2,
             )
-            StatChip(
-                label = "Arm",
-                value = if (state.isArmed) "●" else "○",
-                highlight = state.isArmed,
-                modifier = Modifier.weight(1f),
-            )
-            StatChip(
-                label = "Fir",
-                value = if (state.lastFired) "●" else if (state.isBursting) "…" else "○",
-                highlight = state.lastFired || state.isBursting,
-                modifier = Modifier.weight(1f),
-            )
-            StatChip(
-                label = "Gate",
-                value = if (state.passageGateOpen) "O" else "C",
-                highlight = state.passageGateOpen,
-                modifier = Modifier.weight(1f),
-            )
-            StatChip(
-                label = "Zn",
-                value = if (state.inCaptureZone) "IN" else "—",
-                highlight = state.inCaptureZone,
-                modifier = Modifier.weight(1f),
+            LinearProgressIndicator(
+                progress = { state.recordingProgress.progressFraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp),
+                color = Color(0xFFFF5252),
+                trackColor = Color.White.copy(alpha = 0.2f),
             )
         }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
+            StatChip(
+                label = "Ch",
+                value = "${state.videoChunksRecorded}",
+                tooltip = "Chunks — วิดีโอที่อัดเสร็จ (~20 MB)",
+                highlight = state.isCapturing,
+                active = activeTooltip,
+                onTooltip = { activeTooltip = it },
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "VQ",
+                value = "${state.videoQueueDepth}",
+                tooltip = "Video Queue — รอประมวลผลหาใบหน้า",
+                active = activeTooltip,
+                onTooltip = { activeTooltip = it },
+                modifier = Modifier.weight(1f),
+            )
+            StatChip(
+                label = "Face",
+                value = "${state.facesKept}",
+                tooltip = "เฟรมที่คัดได้ — มีหน้าและชัดพอ",
+                highlight = state.facesKept > 0,
+                active = activeTooltip,
+                onTooltip = { activeTooltip = it },
+                modifier = Modifier.weight(1f),
+            )
             StatChip(
                 label = "K",
                 value = "${state.keptPhotoCount}",
-                modifier = Modifier.weight(0.7f),
+                tooltip = "Kept — รูปใน Gallery",
+                active = activeTooltip,
+                onTooltip = { activeTooltip = it },
+                modifier = Modifier.weight(1f),
             )
             StatChip(
                 label = "Th",
                 value = state.thermalLabel,
+                tooltip = "Thermal — ความร้อนเครื่อง",
                 valueColor = thermalColor(state.thermalLevel),
+                active = activeTooltip,
+                onTooltip = { activeTooltip = it },
                 modifier = Modifier.weight(1f),
             )
             StatChip(
-                label = "RAM",
-                value = compactRamPair(state.usedRamMb, state.totalRamMb),
+                label = "Disk",
+                value = "${state.storageFreeMb}M",
+                tooltip = "Disk — พื้นที่ว่าง (MB)",
+                active = activeTooltip,
+                onTooltip = { activeTooltip = it },
                 modifier = Modifier.weight(1f),
             )
         }
 
+        activeTooltip?.let { hint ->
+            Text(
+                text = hint,
+                color = Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                maxLines = 2,
+            )
+        }
+
         Text(
-            text = state.exposureLine,
-            color = Color(0xFFE0E0E0),
+            text = state.deviceLoadLine,
+            color = Color(0xFF78909C),
             style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+
+        if (state.storageBlocked) {
+            Text(
+                text = "Storage low — need 2 GB free to record",
+                color = Color(0xFFFFAB91),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
 
         if (state.isCapturing && !cameraPermissionGranted) {
             Text(
@@ -547,49 +480,44 @@ private fun CompactStatusCard(
 private fun StatChip(
     label: String,
     value: String,
+    tooltip: String,
     modifier: Modifier = Modifier,
     highlight: Boolean = false,
     valueColor: Color? = null,
+    active: String? = null,
+    onTooltip: (String?) -> Unit = {},
 ) {
+    val selected = active == tooltip
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color.Black.copy(alpha = 0.32f))
-            .padding(horizontal = 4.dp, vertical = 3.dp),
+            .clip(RoundedCornerShape(4.dp))
+            .background(
+                if (selected) Color.White.copy(alpha = 0.12f)
+                else Color.Black.copy(alpha = 0.32f),
+            )
+            .clickable { onTooltip(if (selected) null else tooltip) }
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = label,
             color = Color(0xFF90A4AE),
             style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            lineHeight = 10.sp,
+            fontSize = 8.sp,
+            lineHeight = 9.sp,
+            maxLines = 1,
         )
         Text(
             text = value,
             color = valueColor ?: if (highlight) Color(0xFF69F0AE) else Color.White,
             style = MaterialTheme.typography.labelSmall,
-            fontSize = 11.sp,
-            lineHeight = 12.sp,
+            fontSize = 10.sp,
+            lineHeight = 11.sp,
             maxLines = 1,
         )
     }
 }
 
-private fun compactRamPair(usedMb: Long, totalMb: Long): String {
-    if (totalMb <= 0L) return "—"
-    return "${formatRamShort(usedMb)}/${formatRamShort(totalMb)}"
-}
-
-private fun formatRamShort(mb: Long): String {
-    return if (mb >= 1000L) {
-        String.format("%.1fG", mb / 1024.0)
-    } else {
-        "${mb}M"
-    }
-}
-
-/** Operator-friendly thermal colors (Flow 11 readout). */
 private fun thermalColor(level: Int): Color = when (level) {
     PowerManager.THERMAL_STATUS_NONE, -1 -> Color.White
     PowerManager.THERMAL_STATUS_LIGHT -> Color(0xFF26A69A)
@@ -605,15 +533,13 @@ private fun OperatorShellPreview() {
         OperatorShellScreen(
             state = OperatorUiState(isCapturing = false),
             cameraPermissionGranted = true,
+            pipelineCoordinator = null,
             onToggleCapture = {},
             onRequestCameraPermission = {},
-            onCaptureMode = {},
-            onFaceResult = { false },
-            onBurstComplete = {},
+            onStreamResolution = {},
+            onRecordingProgress = { _, _, _ -> },
             onPhotoDelivered = {},
             onExposureReadout = {},
-            onArmThreshold = {},
-            onFireThreshold = {},
             onOpenGallery = {},
         )
     }

@@ -57,6 +57,7 @@ dependencies {
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
+    implementation(libs.camerax.video)
     implementation(libs.mlkit.face.detection)
     implementation(libs.coroutines.android)
     debugImplementation(libs.androidx.compose.ui.tooling)

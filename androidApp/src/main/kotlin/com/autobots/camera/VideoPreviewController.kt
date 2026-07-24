@@ -65,6 +65,7 @@ class VideoPreviewController(
 
     fun startChunkRecording(
         sessionDir: File,
+        maxChunkBytes: Long,
         canAcceptChunk: () -> Boolean,
         onChunkReady: (ChunkCaptureMeta) -> Unit,
         onProgress: (Int, Long, Long) -> Unit,
@@ -82,6 +83,7 @@ class VideoPreviewController(
             videoCapture = capture,
             videoDir = videoDir,
             mainExecutor = mainExecutor,
+            maxChunkBytes = maxChunkBytes,
             canAcceptChunk = canAcceptChunk,
             onChunkReady = onChunkReady,
             onProgress = onProgress,

@@ -27,6 +27,7 @@ class VideoFaceProcessor(
 
     suspend fun process(
         file: File,
+        sampleIntervalMs: Long,
         onProgress: (Int) -> Unit = {},
     ): VideoProcessResult {
         val started = System.currentTimeMillis()
@@ -36,10 +37,10 @@ class VideoFaceProcessor(
         val savedFiles = mutableListOf<File>()
         var bestInWindow: FrameCandidate? = null
         var windowStartUs = -1L
-        val estimatedFrames = estimateFrameCount(file)
+        val estimatedFrames = estimateFrameCount(file, sampleIntervalMs)
         var scannedFrames = 0
 
-        VideoFrameSampler.sampleFrames(file, SAMPLE_INTERVAL_MS) { timestampUs, bitmap ->
+        VideoFrameSampler.sampleFrames(file, sampleIntervalMs) { timestampUs, bitmap ->
             scannedFrames++
             val percent = ((scannedFrames * 100) / estimatedFrames).coerceIn(0, 99)
             onProgress(percent)
@@ -144,9 +145,9 @@ class VideoFaceProcessor(
         detector.close()
     }
 
-    private fun estimateFrameCount(file: File): Int {
+    private fun estimateFrameCount(file: File, sampleIntervalMs: Long): Int {
         val durationMs = readDurationMs(file) ?: return 1
-        return maxOf(1, (durationMs / SAMPLE_INTERVAL_MS).toInt())
+        return maxOf(1, (durationMs / sampleIntervalMs).toInt())
     }
 
     private fun readDurationMs(file: File): Long? {
@@ -170,7 +171,6 @@ class VideoFaceProcessor(
 
     companion object {
         private const val TAG = "VideoFaceProcessor"
-        private const val SAMPLE_INTERVAL_MS = 300L
         private const val DEDUP_WINDOW_US = 1_000_000L
         private const val MIN_FACE_HEIGHT_RATIO = 0.05f
         private const val MIN_SHARPNESS = 80.0

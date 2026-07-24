@@ -363,7 +363,7 @@ private fun CompactStatusCard(
             StatChip(
                 label = "Ch",
                 value = "${state.videoChunksRecorded}",
-                tooltip = "Chunks — วิดีโอที่อัดเสร็จ (~20 MB)",
+                tooltip = "Chunks — วิดีโอที่อัดเสร็จ (1080p 20 MB / 4K 50 MB)",
                 highlight = state.isCapturing,
                 active = activeTooltip,
                 onTooltip = { activeTooltip = it },
@@ -454,7 +454,7 @@ private fun CompactStatusCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "Record 4K/1080p chunks (~20 MB) → extract sharp face frames",
+                    text = "Record chunks (1080p 20 MB / 4K 50 MB) → extract sharp face frames",
                     color = Color(0xFF90A4AE),
                     style = MaterialTheme.typography.labelSmall,
                 )

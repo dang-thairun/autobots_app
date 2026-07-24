@@ -85,7 +85,10 @@ class CapturePipelineCoordinator(
                 }
                 publishStats()
                 try {
-                    val result = faceProcessor.process(item.videoFile) { percent ->
+                    val result = faceProcessor.process(
+                        item.videoFile,
+                        sampleIntervalMs = resolution.frameSampleIntervalMs,
+                    ) { percent ->
                         currentChunkPercent = percent
                         publishStats()
                     }
@@ -188,6 +191,7 @@ class CapturePipelineCoordinator(
             resolution = resolution,
             recordDurationMs = meta.recordDurationMs,
             videoSizeBytes = meta.videoSizeBytes,
+            targetVideoBytes = resolution.chunkTargetBytes,
             status = ChunkProcessStatus.Pending,
         )
         scope.launch {

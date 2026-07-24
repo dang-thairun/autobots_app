@@ -7,7 +7,7 @@ data class ChunkRecordingProgress(
     val chunkIndex: Int = 0,
     val elapsedMs: Long = 0L,
     val bytesWritten: Long = 0L,
-    val targetBytes: Long = DEFAULT_CHUNK_TARGET_BYTES,
+    val targetBytes: Long = StreamResolution.CHUNK_TARGET_FHD_BYTES,
 ) {
     val elapsedSec: Long get() = elapsedMs / 1000L
 
@@ -26,7 +26,7 @@ data class ChunkRecordingProgress(
         }
 
     companion object {
-        const val DEFAULT_CHUNK_TARGET_BYTES = 20L * 1024L * 1024L
+        const val DEFAULT_CHUNK_TARGET_BYTES = StreamResolution.CHUNK_TARGET_FHD_BYTES
     }
 }
 

@@ -65,6 +65,7 @@ fun CameraPreviewPane(
                 if (!coordinator.hasStorageForRecording()) return@bindPreview
                 controller.startChunkRecording(
                     sessionDir = coordinator.sessionDirectory(),
+                    maxChunkBytes = streamResolution.chunkTargetBytes,
                     canAcceptChunk = coordinator::canAcceptVideoChunk,
                     onChunkReady = coordinator::onChunkRecorded,
                     onProgress = onRecordingProgress,

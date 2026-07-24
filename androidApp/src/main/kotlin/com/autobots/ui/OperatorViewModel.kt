@@ -226,6 +226,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                     chunkIndex = chunkIndex,
                     elapsedMs = elapsedMs,
                     bytesWritten = bytesWritten,
+                    targetBytes = it.streamResolution.chunkTargetBytes,
                 ),
             )
         }

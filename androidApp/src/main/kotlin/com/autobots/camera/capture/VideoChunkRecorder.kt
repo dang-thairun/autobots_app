@@ -16,6 +16,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.autobots.camera.StreamResolution
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -189,7 +190,7 @@ class VideoChunkRecorder(
 
     companion object {
         private const val TAG = "VideoChunkRecorder"
-        const val DEFAULT_MAX_CHUNK_BYTES = 20L * 1024L * 1024L
+        const val DEFAULT_MAX_CHUNK_BYTES = StreamResolution.CHUNK_TARGET_FHD_BYTES
         private const val SIZE_POLL_MS = 250L
         private const val RESUME_POLL_MS = 1_000L
     }

@@ -12,10 +12,18 @@ import kotlin.coroutines.resume
 /**
  * ML Kit face detection for offline video frame processing.
  */
-class OfflineFaceDetector {
+class OfflineFaceDetector(
+    accurate: Boolean = false,
+) {
     private val detector: FaceDetector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setPerformanceMode(
+                if (accurate) {
+                    FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE
+                } else {
+                    FaceDetectorOptions.PERFORMANCE_MODE_FAST
+                },
+            )
             .setMinFaceSize(0.05f)
             .build(),
     )

@@ -87,6 +87,7 @@ class CapturePipelineCoordinator(
                 try {
                     val result = faceProcessor.process(
                         item.videoFile,
+                        resolution = resolution,
                         sampleIntervalMs = resolution.frameSampleIntervalMs,
                     ) { percent ->
                         currentChunkPercent = percent

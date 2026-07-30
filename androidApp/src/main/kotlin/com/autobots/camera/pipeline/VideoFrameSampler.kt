@@ -1,6 +1,7 @@
 package com.autobots.camera.pipeline
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
@@ -12,7 +13,6 @@ import android.util.Log
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.nio.ByteBuffer
 
 /**
  * Decodes video samples at a fixed time interval via MediaCodec.
@@ -21,11 +21,17 @@ object VideoFrameSampler {
     private const val TAG = "VideoFrameSampler"
     private const val TIMEOUT_US = 10_000L
 
+    data class SampleStats(
+        var decodeFailures: Int = 0,
+        var unsupportedFormat: Int = 0,
+    )
+
     fun sampleFrames(
         file: File,
         intervalMs: Long,
         onFrame: suspend (timestampUs: Long, bitmap: Bitmap) -> Unit,
-    ) {
+    ): SampleStats {
+        val stats = SampleStats()
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(file.absolutePath)
@@ -40,18 +46,22 @@ object VideoFrameSampler {
             }
             if (trackIndex < 0) {
                 Log.w(TAG, "No video track in ${file.name}")
-                return
+                return stats
             }
 
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return stats
+            val width = format.getInteger(MediaFormat.KEY_WIDTH)
+            val height = format.getInteger(MediaFormat.KEY_HEIGHT)
+            Log.d(TAG, "Sampling ${file.name} ${width}x$height mime=$mime interval=${intervalMs}ms")
+
             val decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(format, null, null, 0)
             decoder.start()
 
             try {
-                decodeLoop(extractor, decoder, intervalMs, onFrame)
+                decodeLoop(extractor, decoder, intervalMs, stats, onFrame)
             } finally {
                 runCatching {
                     decoder.stop()
@@ -63,12 +73,21 @@ object VideoFrameSampler {
         } finally {
             runCatching { extractor.release() }
         }
+        if (stats.decodeFailures > 0 || stats.unsupportedFormat > 0) {
+            Log.w(
+                TAG,
+                "${file.name}: decodeFailures=${stats.decodeFailures} " +
+                    "unsupportedFormat=${stats.unsupportedFormat}",
+            )
+        }
+        return stats
     }
 
     private fun decodeLoop(
         extractor: MediaExtractor,
         decoder: MediaCodec,
         intervalMs: Long,
+        stats: SampleStats,
         onFrame: suspend (timestampUs: Long, bitmap: Bitmap) -> Unit,
     ) {
         val bufferInfo = MediaCodec.BufferInfo()
@@ -110,11 +129,12 @@ object VideoFrameSampler {
                         ptsUs - lastEmitUs >= intervalMs * 1_000L &&
                         bufferInfo.size > 0
                     ) {
-                        imageToBitmap(image)?.let { bitmap ->
+                        val bitmap = imageToBitmap(image, stats)
+                        image.close()
+                        if (bitmap != null) {
                             runBlocking { onFrame(ptsUs, bitmap) }
                             lastEmitUs = ptsUs
                         }
-                        image.close()
                     } else {
                         image?.close()
                     }
@@ -127,15 +147,35 @@ object VideoFrameSampler {
         }
     }
 
-    private fun imageToBitmap(image: Image): Bitmap? {
-        if (image.format != ImageFormat.YUV_420_888) return null
-        val nv21 = yuv420ToNv21(image) ?: return null
+    private fun imageToBitmap(image: Image, stats: SampleStats): Bitmap? {
+        if (image.format != ImageFormat.YUV_420_888) {
+            stats.unsupportedFormat++
+            if (stats.unsupportedFormat <= 3) {
+                Log.w(TAG, "Unsupported decode format=${image.format} ${image.width}x${image.height}")
+            }
+            return null
+        }
+        val nv21 = yuv420ToNv21(image) ?: run {
+            stats.decodeFailures++
+            return null
+        }
         val yuv = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
         val out = ByteArrayOutputStream()
         return try {
-            yuv.compressToJpeg(Rect(0, 0, image.width, image.height), 95, out)
-            android.graphics.BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
-        } catch (_: Throwable) {
+            yuv.compressToJpeg(Rect(0, 0, image.width, image.height), 92, out)
+            val bytes = out.toByteArray()
+            val options = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        } catch (t: Throwable) {
+            if (stats.decodeFailures < 3) {
+                Log.w(TAG, "imageToBitmap failed ${image.width}x${image.height}", t)
+            }
+            stats.decodeFailures++
+            null
+        } ?: run {
+            stats.decodeFailures++
             null
         }
     }

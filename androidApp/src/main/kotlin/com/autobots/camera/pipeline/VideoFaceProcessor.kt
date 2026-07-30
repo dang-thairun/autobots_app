@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.media.MediaMetadataRetriever
 import android.util.Log
+import com.autobots.camera.StreamResolution
 import com.autobots.camera.detection.OfflineFaceDetector
 import java.io.File
 import java.io.FileOutputStream
@@ -14,6 +15,8 @@ data class VideoProcessResult(
     val skipped: Int,
     val durationMs: Long,
     val savedFiles: List<File> = emptyList(),
+    val framesSampled: Int = 0,
+    val decodeFailures: Int = 0,
 )
 
 /**
@@ -21,15 +24,22 @@ data class VideoProcessResult(
  */
 class VideoFaceProcessor(
     private val facesDir: File,
-    private val detectBitmapWidth: Int = 640,
 ) {
-    private val detector = OfflineFaceDetector()
+    private var detector = OfflineFaceDetector(accurate = false)
+    private var profile = FaceProcessProfile.forResolution(StreamResolution.Fhd)
 
     suspend fun process(
         file: File,
+        resolution: StreamResolution,
         sampleIntervalMs: Long,
         onProgress: (Int) -> Unit = {},
     ): VideoProcessResult {
+        profile = FaceProcessProfile.forResolution(resolution)
+        if (profile.accurateDetect) {
+            detector.close()
+            detector = OfflineFaceDetector(accurate = true)
+        }
+
         val started = System.currentTimeMillis()
         facesDir.mkdirs()
         var kept = 0
@@ -39,13 +49,14 @@ class VideoFaceProcessor(
         var windowStartUs = -1L
         val estimatedFrames = estimateFrameCount(file, sampleIntervalMs)
         var scannedFrames = 0
+        val rejects = RejectStats()
 
-        VideoFrameSampler.sampleFrames(file, sampleIntervalMs) { timestampUs, bitmap ->
+        val sampleStats = VideoFrameSampler.sampleFrames(file, sampleIntervalMs) { timestampUs, bitmap ->
             scannedFrames++
             val percent = ((scannedFrames * 100) / estimatedFrames).coerceIn(0, 99)
             onProgress(percent)
 
-            val candidate = evaluateFrame(bitmap, timestampUs)
+            val candidate = evaluateFrame(bitmap, timestampUs, rejects)
             if (candidate == null) {
                 skipped++
                 bitmap.recycle()
@@ -81,26 +92,40 @@ class VideoFaceProcessor(
         onProgress(100)
 
         val durationMs = System.currentTimeMillis() - started
-        Log.i(TAG, "Processed ${file.name}: kept=$kept skipped=$skipped ${durationMs}ms")
+        Log.i(
+            TAG,
+            "Processed ${file.name} (${resolution.label}): kept=$kept skipped=$skipped " +
+                "sampled=$scannedFrames decodeFail=${sampleStats.decodeFailures} " +
+                "rejects=$rejects ${durationMs}ms",
+        )
         return VideoProcessResult(
             kept = kept,
             skipped = skipped,
             durationMs = durationMs,
             savedFiles = savedFiles,
+            framesSampled = scannedFrames,
+            decodeFailures = sampleStats.decodeFailures,
         )
     }
 
-    private suspend fun evaluateFrame(bitmap: Bitmap, timestampUs: Long): FrameCandidate? {
+    private suspend fun evaluateFrame(
+        bitmap: Bitmap,
+        timestampUs: Long,
+        rejects: RejectStats,
+    ): FrameCandidate? {
         val scaled = scaleForDetect(bitmap)
         val faces = try {
             detector.detect(scaled)
         } finally {
             if (scaled !== bitmap) scaled.recycle()
         }
-        if (faces.isEmpty()) return null
+        if (faces.isEmpty()) {
+            rejects.noFace++
+            return null
+        }
 
-        val scaleX = bitmap.width.toFloat() / detectBitmapWidth
-        val scaleY = scaleX
+        val scaleX = bitmap.width.toFloat() / scaled.width
+        val scaleY = bitmap.height.toFloat() / scaled.height
         val mapped = faces.map { face ->
             Rect(
                 (face.left * scaleX).toInt(),
@@ -109,20 +134,30 @@ class VideoFaceProcessor(
                 (face.bottom * scaleY).toInt(),
             )
         }
-        val largest = mapped.maxByOrNull { it.height() } ?: return null
+        val largest = mapped.maxByOrNull { it.height() } ?: run {
+            rejects.noFace++
+            return null
+        }
         val faceRatio = largest.height().toFloat() / bitmap.height
-        if (faceRatio < MIN_FACE_HEIGHT_RATIO) return null
+        if (faceRatio < MIN_FACE_HEIGHT_RATIO) {
+            rejects.tooSmall++
+            return null
+        }
 
-        val sharpness = FaceSharpnessScorer.score(bitmap, largest)
-        if (sharpness < MIN_SHARPNESS) return null
+        val sharpness = FaceSharpnessScorer.scoreNormalized(bitmap, largest)
+        if (sharpness < profile.minSharpness) {
+            rejects.tooSoft++
+            return null
+        }
 
         return FrameCandidate(timestampUs, bitmap, sharpness, faceRatio)
     }
 
     private fun scaleForDetect(bitmap: Bitmap): Bitmap {
-        if (bitmap.width <= detectBitmapWidth) return bitmap
-        val height = (bitmap.height * (detectBitmapWidth.toFloat() / bitmap.width)).toInt()
-        return Bitmap.createScaledBitmap(bitmap, detectBitmapWidth, max(1, height), true)
+        val targetW = profile.detectBitmapWidth
+        if (bitmap.width <= targetW) return bitmap
+        val height = (bitmap.height * (targetW.toFloat() / bitmap.width)).toInt()
+        return Bitmap.createScaledBitmap(bitmap, targetW, max(1, height), true)
     }
 
     private fun saveFrame(candidate: FrameCandidate): File? {
@@ -168,6 +203,38 @@ class VideoFaceProcessor(
         val sharpness: Double,
         val faceRatio: Float,
     )
+
+    private data class RejectStats(
+        var noFace: Int = 0,
+        var tooSmall: Int = 0,
+        var tooSoft: Int = 0,
+    ) {
+        override fun toString(): String =
+            "noFace=$noFace,small=$tooSmall,soft=$tooSoft"
+    }
+
+    private data class FaceProcessProfile(
+        val detectBitmapWidth: Int,
+        val minSharpness: Double,
+        val accurateDetect: Boolean,
+    ) {
+        companion object {
+            fun forResolution(resolution: StreamResolution): FaceProcessProfile {
+                return when (resolution) {
+                    StreamResolution.Fhd -> FaceProcessProfile(
+                        detectBitmapWidth = 640,
+                        minSharpness = MIN_SHARPNESS,
+                        accurateDetect = false,
+                    )
+                    StreamResolution.Uhd -> FaceProcessProfile(
+                        detectBitmapWidth = 640,
+                        minSharpness = MIN_SHARPNESS,
+                        accurateDetect = true,
+                    )
+                }
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "VideoFaceProcessor"

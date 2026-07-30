@@ -3,6 +3,7 @@ package com.autobots.camera.pipeline
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.ChunkProcessStatus
 import com.autobots.camera.ChunkRecord
 import com.autobots.camera.ExtractedFaceImage
@@ -43,7 +44,7 @@ class CapturePipelineCoordinator(
     private val historyLock = Mutex()
     private val chunkHistory = mutableListOf<ChunkRecord>()
 
-    private val faceProcessor = VideoFaceProcessor(facesDir)
+    private val frameProcessor = VideoFrameProcessor(facesDir)
     private val deliveryWriter = LocalDeliveryWriter(appContext)
     private val imageDelivery = WriteQueue(
         writer = deliveryWriter,
@@ -61,6 +62,7 @@ class CapturePipelineCoordinator(
     private var facesSkipped = 0
     private var lastChunkProcessMs = 0L
     private var resolution = StreamResolution.Fhd
+    private var extractionTarget = ExtractionTarget.Face
     private var recording = false
     private var awaitingRecorderFinalize = false
     private var pipelinePaused = false
@@ -85,9 +87,10 @@ class CapturePipelineCoordinator(
                 }
                 publishStats()
                 try {
-                    val result = faceProcessor.process(
+                    val result = frameProcessor.process(
                         item.videoFile,
                         resolution = resolution,
+                        extractionTarget = extractionTarget,
                         sampleIntervalMs = resolution.frameSampleIntervalMs,
                     ) { percent ->
                         currentChunkPercent = percent
@@ -145,6 +148,11 @@ class CapturePipelineCoordinator(
         publishStats()
     }
 
+    fun setExtractionTarget(value: ExtractionTarget) {
+        extractionTarget = value
+        publishStats()
+    }
+
     fun sessionDirectory(): File = sessionDir
 
     fun canAcceptVideoChunk(): Boolean = videoPending.get() < VIDEO_QUEUE_CAPACITY
@@ -190,6 +198,7 @@ class CapturePipelineCoordinator(
             videoAbsolutePath = meta.file.absolutePath,
             recordedAtEpochMs = meta.recordedAtEpochMs,
             resolution = resolution,
+            extractionTarget = extractionTarget,
             recordDurationMs = meta.recordDurationMs,
             videoSizeBytes = meta.videoSizeBytes,
             targetVideoBytes = resolution.chunkTargetBytes,
@@ -232,7 +241,7 @@ class CapturePipelineCoordinator(
         closed = true
         recording = false
         videoQueue.close()
-        faceProcessor.close()
+        frameProcessor.close()
         imageDelivery.close()
     }
 
@@ -248,6 +257,7 @@ class CapturePipelineCoordinator(
             val snapshot = PipelineStats(
                 sessionId = sessionId,
                 resolution = resolution,
+                extractionTarget = extractionTarget,
                 videoChunksRecorded = chunksRecorded,
                 videoQueueDepth = videoPending.get(),
                 chunksProcessed = chunksProcessed,

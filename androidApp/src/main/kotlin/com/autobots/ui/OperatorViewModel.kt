@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobots.camera.ChunkRecord
 import com.autobots.camera.ChunkRecordingProgress
+import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.formatChunkBytes
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 data class OperatorUiState(
     val isCapturing: Boolean = false,
     val streamResolution: StreamResolution = StreamResolution.Fhd,
+    val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
     val videoChunksRecorded: Int = 0,
     val videoQueueDepth: Int = 0,
     val facesKept: Int = 0,
@@ -160,7 +162,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
             onDrainComplete = ::onPipelineDrainComplete,
         )
         val resolution = _state.value.streamResolution
+        val extractionTarget = _state.value.extractionTarget
         coordinator.setResolution(resolution)
+        coordinator.setExtractionTarget(extractionTarget)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -246,6 +250,11 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(streamResolution = resolution) }
     }
 
+    fun setExtractionTarget(target: ExtractionTarget) {
+        if (_state.value.isCapturing) return
+        _state.update { it.copy(extractionTarget = target) }
+    }
+
     fun onExposureReadout(line: String) {
         _state.update { it.copy(exposureLine = line) }
     }
@@ -254,6 +263,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 streamResolution = stats.resolution,
+                extractionTarget = stats.extractionTarget,
                 videoChunksRecorded = stats.videoChunksRecorded,
                 videoQueueDepth = stats.videoQueueDepth,
                 chunksProcessed = stats.chunksProcessed,

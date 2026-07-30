@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                         cameraPermission.request()
                     },
                     onStreamResolution = operatorViewModel::setStreamResolution,
+                    onExtractionTarget = operatorViewModel::setExtractionTarget,
                     onRecordingProgress = operatorViewModel::onRecordingProgress,
                     onPhotoDelivered = operatorViewModel::onPhotoDelivered,
                     onExposureReadout = operatorViewModel::onExposureReadout,

@@ -6,6 +6,7 @@ package com.autobots.camera
 data class PipelineStats(
     val sessionId: String = "",
     val resolution: StreamResolution = StreamResolution.Fhd,
+    val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
     val videoChunksRecorded: Int = 0,
     val videoQueueDepth: Int = 0,
     val chunksProcessed: Int = 0,

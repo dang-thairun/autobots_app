@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
+import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
 
@@ -58,6 +59,7 @@ fun OperatorShellScreen(
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
+    onExtractionTarget: (ExtractionTarget) -> Unit,
     onRecordingProgress: (Int, Long, Long) -> Unit,
     onPhotoDelivered: (String) -> Unit,
     onExposureReadout: (String) -> Unit,
@@ -105,6 +107,7 @@ fun OperatorShellScreen(
                         onToggleCapture = onToggleCapture,
                         onRequestCameraPermission = onRequestCameraPermission,
                         onStreamResolution = onStreamResolution,
+                        onExtractionTarget = onExtractionTarget,
                         onOpenGallery = onOpenGallery,
                     )
                     OverlayPages.CleanPreview -> Box(modifier = Modifier.fillMaxSize())
@@ -136,6 +139,7 @@ private fun OperatorControlsPage(
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
+    onExtractionTarget: (ExtractionTarget) -> Unit,
     onOpenGallery: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -145,6 +149,7 @@ private fun OperatorControlsPage(
             pipelineExpanded = pipelineExpanded,
             onPipelineToggle = onPipelineToggle,
             onStreamResolution = onStreamResolution,
+            onExtractionTarget = onExtractionTarget,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -217,7 +222,7 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "Face extraction",
+            text = "${state.extractionTarget.label} extraction",
             color = Color.White,
             style = MaterialTheme.typography.labelMedium,
         )
@@ -237,9 +242,9 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
         )
         Text(
             text = if (active) {
-                "${state.processingPercent}% overall · faces found ${state.facesKept}"
+                "${state.processingPercent}% overall · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
             } else {
-                "Idle · faces found ${state.facesKept}"
+                "Idle · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
             },
             color = Color(0xFF78909C),
             style = MaterialTheme.typography.labelSmall,
@@ -306,6 +311,7 @@ private fun CompactStatusCard(
     pipelineExpanded: Boolean,
     onPipelineToggle: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
+    onExtractionTarget: (ExtractionTarget) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var activeTooltip by remember { mutableStateOf<String?>(null) }
@@ -331,7 +337,7 @@ private fun CompactStatusCard(
                 style = MaterialTheme.typography.labelSmall,
             )
             Text(
-                text = "${state.streamResolution.label} · IP ${state.serverIp}",
+                text = "${state.streamResolution.label} · ${state.extractionTarget.label} · IP ${state.serverIp}",
                 color = Color(0xFF69F0AE),
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
@@ -378,9 +384,12 @@ private fun CompactStatusCard(
                 modifier = Modifier.weight(1f),
             )
             StatChip(
-                label = "Face",
+                label = state.extractionTarget.statLabel,
                 value = "${state.facesKept}",
-                tooltip = "เฟรมที่คัดได้ — มีหน้าและชัดพอ",
+                tooltip = when (state.extractionTarget) {
+                    ExtractionTarget.Face -> "เฟรมที่คัดได้ — มีหน้าและชัดพอ"
+                    ExtractionTarget.Pose -> "เฟรมที่คัดได้ — มีท่าทางและชัดพอ"
+                },
                 highlight = state.facesKept > 0,
                 active = activeTooltip,
                 onTooltip = { activeTooltip = it },
@@ -454,10 +463,24 @@ private fun CompactStatusCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "Record chunks (1080p 20 MB / 4K 50 MB) → extract sharp face frames",
+                    text = "Record chunks → extract sharp frames (Face or Pose, experimental)",
                     color = Color(0xFF90A4AE),
                     style = MaterialTheme.typography.labelSmall,
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ExtractionTarget.entries.forEach { target ->
+                        FilterChip(
+                            selected = state.extractionTarget == target,
+                            onClick = { onExtractionTarget(target) },
+                            enabled = !state.isCapturing,
+                            modifier = Modifier.weight(1f),
+                            label = { Text(target.label) },
+                        )
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -563,6 +586,7 @@ private fun OperatorShellPreview() {
             onToggleCapture = {},
             onRequestCameraPermission = {},
             onStreamResolution = {},
+            onExtractionTarget = {},
             onRecordingProgress = { _, _, _ -> },
             onPhotoDelivered = {},
             onExposureReadout = {},

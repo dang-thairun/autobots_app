@@ -25,6 +25,7 @@ data class ChunkRecord(
     val videoAbsolutePath: String,
     val recordedAtEpochMs: Long,
     val resolution: StreamResolution,
+    val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
     val recordDurationMs: Long,
     val videoSizeBytes: Long,
     val targetVideoBytes: Long = ChunkRecordingProgress.DEFAULT_CHUNK_TARGET_BYTES,
@@ -49,9 +50,9 @@ data class ChunkRecord(
             ChunkProcessStatus.Failed -> "Extract failed"
             ChunkProcessStatus.Done -> when {
                 facesKept > 0 -> {
-                    "Extract $facesKept faces · ${processDurationMs / 1000}s · ${formatChunkBytes(imagesTotalBytes)}"
+                    "Extract $facesKept ${extractionTarget.keptNoun} · ${processDurationMs / 1000}s · ${formatChunkBytes(imagesTotalBytes)}"
                 }
-                else -> "No face · ${processDurationMs / 1000}s"
+                else -> "${extractionTarget.noKeptLabel} · ${processDurationMs / 1000}s"
             }
         }
 }

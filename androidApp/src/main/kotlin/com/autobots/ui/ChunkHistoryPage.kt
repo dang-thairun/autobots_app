@@ -184,7 +184,7 @@ private fun ChunkRecordCard(
         if (expanded && chunk.status == ChunkProcessStatus.Done) {
             if (chunk.facesKept == 0) {
                 Text(
-                    text = "No face",
+                    text = chunk.extractionTarget.noKeptLabel,
                     color = Color(0xFFFFAB91),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(start = 4.dp),

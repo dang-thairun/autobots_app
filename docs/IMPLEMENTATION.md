@@ -1,9 +1,29 @@
-# Implementation plan (post P0–P8)
+# Implementation plan
+
+**Current release:** [CHANGELOG.md](./CHANGELOG.md) (**v0.1.2** — Plan B video pipeline).  
+**Operator flow:** [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).
+
+The **P9 / P10** sections below describe the **v0.1 stills** path (burst + Passage Gate). That code remains in the repo but is **not wired** in the v0.1.2 operator shell.
+
+---
+
+## Plan B — next slices (v0.1.2+)
+
+| Slice | Work | Status |
+|-------|------|--------|
+| **B2a** | Per-reject logging in `VideoFaceProcessor` (no_face / small / soft / decode_fail) | ⏳ |
+| **B2b** | Sharpness on fixed-size face crop (resolution-agnostic threshold) | ⏳ |
+| **B2c** | 4K: optional `detectBitmapWidth` 1280 + ML Kit ACCURATE offline | ⏳ |
+| **B2d** | Skip YUV→JPEG roundtrip in `VideoFrameSampler` for 4K | ⏳ |
+| **B3** | HTTP upload worker (replace or extend local-only `WriteQueue`) | ⏳ |
+| **B4** | Body/person pre-filter before face (see [ROADMAP.md](./ROADMAP.md)) | ⏳ note |
+
+---
+
+## Legacy — P9 / P10 (v0.1 stills)
 
 Tripod-mounted, fixed shooting point. Runner in frame ~**1.5–3 s**.  
 Keep each slice small — do not merge P9 + P10 into one change set.
-
-**Release:** [CHANGELOG.md](./CHANGELOG.md) (current **v0.1**)
 
 Naming: [CONVENTIONS.md](./CONVENTIONS.md) · Rules: [architecture.md](./architecture.md) · Field: [FIELD_SETUP.md](./FIELD_SETUP.md)
 

@@ -229,7 +229,7 @@ class VideoFaceProcessor(
                     StreamResolution.Uhd -> FaceProcessProfile(
                         detectBitmapWidth = 640,
                         minSharpness = MIN_SHARPNESS,
-                        accurateDetect = true,
+                        accurateDetect = false,
                     )
                 }
             }

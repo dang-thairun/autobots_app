@@ -7,6 +7,7 @@ androidx-lifecycle = "2.8.7"
 androidx-compose-bom = "2024.10.01"
 camerax = "1.4.1"
 mlkit-face = "16.1.7"
+mlkit-pose = "18.0.0-beta5"
 coroutines = "1.9.0"
 kotlinx-serialization = "1.7.3"
 ktor = "2.3.12"
@@ -25,7 +26,9 @@ camerax-core = { module = "androidx.camera:camera-core", version.ref = "camerax"
 camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
 camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+camerax-video = { module = "androidx.camera:camera-video", version.ref = "camerax" }
 mlkit-face-detection = { module = "com.google.mlkit:face-detection", version.ref = "mlkit-face" }
+mlkit-pose-detection = { module = "com.google.mlkit:pose-detection", version.ref = "mlkit-pose" }
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }

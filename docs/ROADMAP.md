@@ -1,10 +1,13 @@
 # Roadmap (unscheduled)
 
-Ideas past the active P9/P10 plan in [IMPLEMENTATION.md](./IMPLEMENTATION.md).  
+Ideas past the active **Plan B** slices in [IMPLEMENTATION.md](./IMPLEMENTATION.md).  
+Current operator build: **v0.1.2** — [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).  
 Naming: [CONVENTIONS.md](./CONVENTIONS.md).
 
 | Topic | Notes |
 |-------|--------|
+| **4K face extract tuning** | Sharpness normalize, decode path, ML Kit ACCURATE — see B2 in [IMPLEMENTATION.md](./IMPLEMENTATION.md) |
+| **Body / person pre-filter** | ML Kit Object Detection or pose — skip frames before face extract |
 | ThermalGuard auto-throttle | Adaptive backoff from Device Load Readout |
 | On-device frame scoring | Smile / pose / sharpness ranking (optional) |
 | YOLO / TFLite detector | Replace ML Kit if field recall needs it |

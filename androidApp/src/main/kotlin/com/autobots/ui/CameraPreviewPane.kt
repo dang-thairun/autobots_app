@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,83 +25,71 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.autobots.camera.CaptureMode
-import com.autobots.camera.PreviewCameraController
-import com.autobots.camera.detection.FaceFrameResult
-import com.autobots.camera.detection.NormalizedFaceBox
+import com.autobots.camera.StreamResolution
+import com.autobots.camera.VideoPreviewController
+import com.autobots.camera.pipeline.CapturePipelineCoordinator
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
- * Full-bleed CameraX Preview + face overlay + burst trigger hook.
+ * Full-bleed CameraX Preview + Plan B video chunk recording.
  */
 @Composable
 fun CameraPreviewPane(
     active: Boolean,
-    faces: List<NormalizedFaceBox>,
-    subjectIndex: Int?,
-    armThreshold: Float,
-    fireThreshold: Float,
-    burstShotCount: Int,
-    captureMode: CaptureMode,
-    onFaceResult: (FaceFrameResult) -> Boolean,
-    onBurstComplete: (savedCount: Int) -> Unit,
-    onPhotoDelivered: (uri: String) -> Unit,
-    onExposureReadout: (line: String) -> Unit = {},
-    onFrameEncoded: ((ByteArray) -> Unit)? = null,
-    showFaceOverlay: Boolean = true,
+    streamResolution: StreamResolution,
+    pipelineCoordinator: CapturePipelineCoordinator?,
+    pipelinePaused: Boolean = false,
+    videoQueueDepth: Int = 0,
+    isProcessing: Boolean = false,
+    onRecordingProgress: (Int, Long, Long) -> Unit = { _, _, _ -> },
+    onExposureReadout: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val controller = remember { PreviewCameraController(context.applicationContext) }
-    val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
+    val controller = remember { VideoPreviewController(context.applicationContext) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    val activeState by rememberUpdatedState(active)
 
     DisposableEffect(Unit) {
-        controller.setPhotoDeliveredListener { uri ->
-            onPhotoDelivered(uri.toString())
-        }
-        controller.setExposureReadoutListener { readout ->
-            onExposureReadout(readout.line)
-        }
-        controller.setFrameEncodedListener { jpeg ->
-            onFrameEncoded?.invoke(jpeg)
-        }
         onDispose { controller.shutdown() }
     }
 
-    LaunchedEffect(armThreshold) {
-        controller.setArmThreshold(armThreshold)
-    }
-    LaunchedEffect(fireThreshold) {
-        controller.setFireThreshold(fireThreshold)
-    }
-    LaunchedEffect(burstShotCount) {
-        controller.setBurstShotCount(burstShotCount)
-    }
-    LaunchedEffect(captureMode) {
-        controller.setCaptureMode(captureMode)
-        controller.setBurstShotCount(burstShotCount)
+    LaunchedEffect(active, previewView, streamResolution, pipelineCoordinator) {
+        if (active) {
+            val view = previewView ?: return@LaunchedEffect
+            controller.bindPreview(lifecycleOwner, view, streamResolution) {
+                if (!activeState) return@bindPreview
+                val coordinator = pipelineCoordinator ?: return@bindPreview
+                if (!coordinator.hasStorageForRecording()) return@bindPreview
+                controller.startChunkRecording(
+                    sessionDir = coordinator.sessionDirectory(),
+                    maxChunkBytes = streamResolution.chunkTargetBytes,
+                    canAcceptChunk = coordinator::canAcceptVideoChunk,
+                    onChunkReady = coordinator::onChunkRecorded,
+                    onProgress = onRecordingProgress,
+                    onPaused = coordinator::onRecorderPaused,
+                    onResumed = coordinator::onRecorderResumed,
+                )
+            }
+        }
     }
 
-    LaunchedEffect(active, previewView, captureMode) {
-        val view = previewView ?: return@LaunchedEffect
-        if (active) {
-            controller.setArmThreshold(armThreshold)
-            controller.setFireThreshold(fireThreshold)
-            controller.setBurstShotCount(burstShotCount)
-            controller.setCaptureMode(captureMode)
-            controller.bindPreview(lifecycleOwner, view) { result ->
-                mainExecutor.execute {
-                    val shouldFire = onFaceResult(result)
-                    if (shouldFire) {
-                        controller.triggerBurst { saved ->
-                            mainExecutor.execute { onBurstComplete(saved) }
-                        }
-                    }
-                }
+    LaunchedEffect(active, pipelineCoordinator) {
+        if (active) return@LaunchedEffect
+        suspendCancellableCoroutine { cont ->
+            controller.stopChunkRecording {
+                pipelineCoordinator?.onRecorderStopSettled()
+                controller.unbindCamera()
+                cont.resume(Unit)
             }
-        } else {
-            controller.unbind()
+        }
+    }
+
+    LaunchedEffect(active, pipelinePaused, videoQueueDepth) {
+        if (active && pipelinePaused && pipelineCoordinator?.canAcceptVideoChunk() == true) {
+            controller.resumeRecordingIfPaused()
         }
     }
 
@@ -116,14 +105,6 @@ fun CameraPreviewPane(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (active && showFaceOverlay) {
-            FaceOverlay(
-                faces = faces,
-                subjectIndex = subjectIndex,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
         if (!active) {
             Box(
                 modifier = Modifier
@@ -132,7 +113,7 @@ fun CameraPreviewPane(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Stopped",
+                    text = if (isProcessing) "Processing chunks…" else "Stopped",
                     color = Color(0xFF9E9E9E),
                     style = MaterialTheme.typography.titleMedium,
                 )

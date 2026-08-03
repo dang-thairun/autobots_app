@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
                 OperatorShellScreen(
                     state = state,
                     cameraPermissionGranted = cameraPermission.granted,
+                    pipelineCoordinator = operatorViewModel.pipelineCoordinator(),
                     onToggleCapture = {
                         if (state.isCapturing) {
                             operatorViewModel.stopCapture()
@@ -60,20 +61,15 @@ class MainActivity : ComponentActivity() {
                         operatorViewModel.markPendingStartAfterPermission()
                         cameraPermission.request()
                     },
-                    onCaptureMode = operatorViewModel::setCaptureMode,
-                    onFaceResult = operatorViewModel::onFaceResult,
-                    onBurstComplete = operatorViewModel::onBurstComplete,
+                    onStreamResolution = operatorViewModel::setStreamResolution,
+                    onExtractionTarget = operatorViewModel::setExtractionTarget,
+                    onRecordingProgress = operatorViewModel::onRecordingProgress,
                     onPhotoDelivered = operatorViewModel::onPhotoDelivered,
                     onExposureReadout = operatorViewModel::onExposureReadout,
-                    onArmThreshold = operatorViewModel::setArmThreshold,
-                    onFireThreshold = operatorViewModel::setFireThreshold,
                     onOpenGallery = {
                         val uri = state.lastGalleryUri?.let(Uri::parse)
                         GalleryLauncher.open(this@MainActivity, uri)
                     },
-                    onFrameEncoded = { jpeg ->
-                        currentServer.broadcastPreviewFrame(jpeg)
-                    }
                 )
             }
         }

@@ -4,13 +4,15 @@ import android.app.Application
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.autobots.camera.CaptureMode
-import com.autobots.camera.PassageFireEvaluator
-import com.autobots.camera.PassageThresholds
-import com.autobots.camera.detection.FaceFrameResult
-import com.autobots.camera.detection.NormalizedFaceBox
+import com.autobots.camera.ChunkRecord
+import com.autobots.camera.ChunkRecordingProgress
+import com.autobots.camera.ExtractionTarget
+import com.autobots.camera.PipelineStats
+import com.autobots.camera.StreamResolution
+import com.autobots.camera.formatChunkBytes
 import com.autobots.camera.load.DeviceLoadReader
 import com.autobots.camera.load.DeviceLoadSnapshot
+import com.autobots.camera.pipeline.CapturePipelineCoordinator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,50 +20,78 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicBoolean
 
 data class OperatorUiState(
     val isCapturing: Boolean = false,
-    val captureMode: CaptureMode = CaptureMode.Standard,
-    val isArmed: Boolean = false,
-    val lastFired: Boolean = false,
-    /** Passage Gate open = may fire; closed after a Fire until face leaves. */
-    val passageGateOpen: Boolean = true,
+    val streamResolution: StreamResolution = StreamResolution.Fhd,
+    val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
+    val videoChunksRecorded: Int = 0,
+    val videoQueueDepth: Int = 0,
+    val facesKept: Int = 0,
+    val facesSkipped: Int = 0,
+    val lastChunkProcessMs: Long = 0,
+    val storageFreeMb: Long = 0,
+    val pipelinePaused: Boolean = false,
     val keptPhotoCount: Int = 0,
-    val lastBurstSaved: Int = 0,
     val lastGalleryUri: String? = null,
-    val isBursting: Boolean = false,
     val thermalLabel: String = "—",
     val thermalLevel: Int = -1,
     val usedRamMb: Long = 0,
     val availRamMb: Long = 0,
     val totalRamMb: Long = 0,
-    val faces: List<NormalizedFaceBox> = emptyList(),
-    val subjectIndex: Int? = null,
-    val proximity: Float = 0f,
-    val faceCount: Int = 0,
-    val inCaptureZone: Boolean = false,
-    val armThreshold: Float = PassageThresholds.ARM_HALF_BODY,
-    /** Minimum face size for Fire (Capture Zone is the primary trigger). */
-    val fireThreshold: Float = PassageThresholds.FIRE_HALF_BODY,
     val exposureLine: String = "—mm  ·  —  ·  ISO —",
     val serverIp: String = "—",
+    val storageBlocked: Boolean = false,
+    val recordingProgress: ChunkRecordingProgress = ChunkRecordingProgress(),
+    val isProcessing: Boolean = false,
+    val processingPercent: Int = 0,
+    val currentChunkPercent: Int = 0,
+    val chunksProcessed: Int = 0,
+    val processingChunkName: String? = null,
+    val imageQueuePending: Int = 0,
+    val chunkHistory: List<ChunkRecord> = emptyList(),
 ) {
-    val armReleaseThreshold: Float
-        get() = PassageThresholds.armRelease(armThreshold)
-
-    val burstShotCount: Int
-        get() = when (captureMode) {
-            CaptureMode.Standard -> 3
-            CaptureMode.MaxSensor -> 1
-        }
-
     val deviceLoadLine: String
         get() = if (totalRamMb > 0) {
-            "Load: thermal=$thermalLabel  RAM ${formatRam(usedRamMb)}/${formatRam(totalRamMb)} (free ${formatRam(availRamMb)})"
+            "RAM ${formatRam(usedRamMb)}/${formatRam(totalRamMb)} (free ${formatRam(availRamMb)})"
         } else {
-            "Load: thermal=$thermalLabel  RAM —"
+            "RAM —"
         }
+
+    val statusLine: String
+        get() = if (isCapturing) "" else "IDLE"
+
+    val recordingLine: String
+        get() {
+            if (!isCapturing) return ""
+            if (pipelinePaused) return "PAUSED · queue full — waiting to resume"
+            val progress = recordingProgress
+            if (progress.chunkIndex <= 0) return "REC · starting chunk…"
+            val size = formatChunkBytes(progress.bytesWritten)
+            val target = formatChunkBytes(progress.targetBytes)
+            val rate = progress.rateKbPerSec
+            val rateLine = if (rate > 0) " · ~${rate} KB/s" else ""
+            return "REC #${progress.chunkIndex} · $size / $target · ${progress.elapsedSec}s$rateLine"
+        }
+
+    val processingLine: String
+        get() {
+            if (!isProcessing) return ""
+            val chunkLabel = processingChunkName?.substringBefore('.') ?: "chunk"
+            val queue = videoQueueDepth
+            val gallery = imageQueuePending
+            return buildString {
+                append("Processing $chunkLabel")
+                append(" · ${processingPercent}%")
+                append(" · ${chunksProcessed}/${videoChunksRecorded} chunks")
+                if (currentChunkPercent in 1..99) append(" · scan $currentChunkPercent%")
+                if (queue > 0) append(" · VQ $queue")
+                if (gallery > 0) append(" · save $gallery")
+            }
+        }
+
+    val canStartCapture: Boolean
+        get() = !isCapturing && !isProcessing
 }
 
 /** ≥1000 MB → "X.X GB", else "NNN MB". */
@@ -78,14 +108,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     private val _state = MutableStateFlow(OperatorUiState())
     val state: StateFlow<OperatorUiState> = _state.asStateFlow()
 
-    fun setServerIp(ip: String) {
-        _state.update { it.copy(serverIp = ip) }
-    }
-
-    /** Authoritative Passage Gate — closed after Fire until face leaves. */
-    private val passageGateOpen = AtomicBoolean(true)
-    private val bursting = AtomicBoolean(false)
-    private var fireTracker = PassageFireEvaluator.Tracker()
+    private var pipeline: CapturePipelineCoordinator? = null
 
     private val deviceLoadReader = DeviceLoadReader(
         context = application,
@@ -106,9 +129,17 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onCleared() {
+        pipeline?.close()
+        pipeline = null
         deviceLoadReader.stop()
         super.onCleared()
     }
+
+    fun setServerIp(ip: String) {
+        _state.update { it.copy(serverIp = ip) }
+    }
+
+    fun pipelineCoordinator(): CapturePipelineCoordinator? = pipeline
 
     fun markPendingStartAfterPermission() {
         pendingStartAfterPermission = true
@@ -119,115 +150,90 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun startCapture() {
-        passageGateOpen.set(true)
-        bursting.set(false)
-        fireTracker = PassageFireEvaluator.Tracker()
+        if (pipeline?.isBusy() == true) return
+
+        pipeline?.close()
+        pipeline = null
+
+        val coordinator = CapturePipelineCoordinator.create(
+            context = getApplication(),
+            onStats = ::applyPipelineStats,
+            onPhotoDelivered = { uri -> onPhotoDelivered(uri.toString()) },
+            onDrainComplete = ::onPipelineDrainComplete,
+        )
+        val resolution = _state.value.streamResolution
+        val extractionTarget = _state.value.extractionTarget
+        coordinator.setResolution(resolution)
+        coordinator.setExtractionTarget(extractionTarget)
+
+        if (!coordinator.hasStorageForRecording()) {
+            _state.update { it.copy(storageBlocked = true) }
+            coordinator.close()
+            return
+        }
+
+        pipeline = coordinator
+        coordinator.onRecordingStarted()
         _state.update {
             it.copy(
                 isCapturing = true,
-                isArmed = false,
-                lastFired = false,
-                passageGateOpen = true,
-                isBursting = false,
-                lastBurstSaved = 0,
-                faces = emptyList(),
-                subjectIndex = null,
-                proximity = 0f,
-                faceCount = 0,
-                inCaptureZone = false,
+                storageBlocked = false,
+                videoChunksRecorded = 0,
+                videoQueueDepth = 0,
+                facesKept = 0,
+                facesSkipped = 0,
+                lastChunkProcessMs = 0,
+                pipelinePaused = false,
+                recordingProgress = ChunkRecordingProgress(),
+                isProcessing = false,
+                processingPercent = 0,
+                currentChunkPercent = 0,
+                chunksProcessed = 0,
+                processingChunkName = null,
+                imageQueuePending = 0,
+                chunkHistory = emptyList(),
             )
         }
         applyDeviceLoad(deviceLoadReader.sample())
     }
 
     fun stopCapture() {
-        passageGateOpen.set(true)
-        bursting.set(false)
-        fireTracker = PassageFireEvaluator.Tracker()
+        pipeline?.stopRecording()
         _state.update {
             it.copy(
                 isCapturing = false,
-                isArmed = false,
-                isBursting = false,
-                passageGateOpen = true,
-                faces = emptyList(),
-                subjectIndex = null,
-                proximity = 0f,
-                faceCount = 0,
-                inCaptureZone = false,
+                pipelinePaused = false,
                 exposureLine = "—mm  ·  —  ·  ISO —",
+                recordingProgress = ChunkRecordingProgress(),
             )
         }
     }
 
-    /**
-     * @return true if a Lean Burst should be triggered now (Passage Gate fire).
-     */
-    fun onFaceResult(result: FaceFrameResult): Boolean {
-        val current = _state.value
-        if (!current.isCapturing) return false
-
-        val armed = resolveArmed(
-            wasArmed = current.isArmed,
-            proximity = result.proximity,
-            arm = current.armThreshold,
-            release = current.armReleaseThreshold,
-        )
-
-        // Re-open gate when face leaves / drops below release
-        if (!passageGateOpen.get() &&
-            (result.faces.isEmpty() || result.proximity < current.armReleaseThreshold)
-        ) {
-            passageGateOpen.set(true)
-        }
-
-        var shouldFire = false
-        var inZone = false
-        if (passageGateOpen.get() && !bursting.get() && result.subjectIndex != null) {
-            val (ready, nextTracker) = PassageFireEvaluator.evaluate(
-                result = result,
-                armed = armed,
-                nowMs = System.currentTimeMillis(),
-                minFaceSize = current.fireThreshold,
-                tracker = fireTracker,
-            )
-            fireTracker = nextTracker
-            inZone = nextTracker.zoneStreak > 0
-            if (ready) {
-                if (passageGateOpen.compareAndSet(true, false) && bursting.compareAndSet(false, true)) {
-                    shouldFire = true
-                    fireTracker = PassageFireEvaluator.Tracker()
-                }
-            }
-        } else if (!armed) {
-            fireTracker = PassageFireEvaluator.Tracker()
-        }
-
+    private fun onPipelineDrainComplete() {
+        pipeline?.close()
+        pipeline = null
         _state.update {
             it.copy(
-                faces = result.faces,
-                subjectIndex = result.subjectIndex,
-                proximity = result.proximity,
-                faceCount = result.faces.size,
-                isArmed = armed,
-                inCaptureZone = inZone,
-                passageGateOpen = passageGateOpen.get(),
-                lastFired = if (shouldFire) true else it.lastFired,
-                isBursting = bursting.get(),
+                isProcessing = false,
+                processingPercent = 0,
+                currentChunkPercent = 0,
+                processingChunkName = null,
+                imageQueuePending = 0,
             )
         }
-        return shouldFire
     }
 
-    fun onBurstComplete(savedCount: Int) {
-        bursting.set(false)
+    fun onRecordingProgress(chunkIndex: Int, elapsedMs: Long, bytesWritten: Long) {
         _state.update {
             it.copy(
-                isBursting = false,
-                lastBurstSaved = savedCount,
+                recordingProgress = ChunkRecordingProgress(
+                    chunkIndex = chunkIndex,
+                    elapsedMs = elapsedMs,
+                    bytesWritten = bytesWritten,
+                    targetBytes = it.streamResolution.chunkTargetBytes,
+                ),
             )
         }
-        applyDeviceLoad(deviceLoadReader.sample())
     }
 
     fun onPhotoDelivered(uriString: String) {
@@ -239,44 +245,41 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun resolveArmed(
-        wasArmed: Boolean,
-        proximity: Float,
-        arm: Float,
-        release: Float,
-    ): Boolean {
-        return when {
-            proximity >= arm -> true
-            proximity < release -> false
-            else -> wasArmed
-        }
+    fun setStreamResolution(resolution: StreamResolution) {
+        if (_state.value.isCapturing) return
+        _state.update { it.copy(streamResolution = resolution) }
     }
 
-    fun setArmThreshold(value: Float) {
-        val arm = value.coerceIn(0.01f, 0.30f)
-        _state.update { current ->
-            current.copy(
-                armThreshold = arm,
-                fireThreshold = current.fireThreshold.coerceAtLeast(arm + 0.01f),
-            )
-        }
-    }
-
-    fun setFireThreshold(value: Float) {
-        _state.update { current ->
-            val fire = value.coerceIn(0.02f, 0.50f)
-            current.copy(
-                fireThreshold = fire.coerceAtLeast(current.armThreshold + 0.01f),
-            )
-        }
-    }
-
-    fun setCaptureMode(mode: CaptureMode) {
-        _state.update { it.copy(captureMode = mode) }
+    fun setExtractionTarget(target: ExtractionTarget) {
+        if (_state.value.isCapturing) return
+        _state.update { it.copy(extractionTarget = target) }
     }
 
     fun onExposureReadout(line: String) {
         _state.update { it.copy(exposureLine = line) }
+    }
+
+    private fun applyPipelineStats(stats: PipelineStats) {
+        _state.update {
+            it.copy(
+                streamResolution = stats.resolution,
+                extractionTarget = stats.extractionTarget,
+                videoChunksRecorded = stats.videoChunksRecorded,
+                videoQueueDepth = stats.videoQueueDepth,
+                chunksProcessed = stats.chunksProcessed,
+                facesKept = stats.facesKept,
+                facesSkipped = stats.facesSkipped,
+                lastChunkProcessMs = stats.lastChunkProcessMs,
+                storageFreeMb = stats.storageFreeMb,
+                pipelinePaused = stats.pipelinePaused,
+                isProcessing = stats.isProcessing,
+                processingPercent = stats.overallProcessingPercent,
+                currentChunkPercent = stats.currentChunkPercent,
+                processingChunkName = stats.processingChunkName,
+                imageQueuePending = stats.imageQueuePending,
+                chunkHistory = stats.chunkHistory,
+            )
+        }
     }
 
     private fun applyDeviceLoad(snapshot: DeviceLoadSnapshot) {

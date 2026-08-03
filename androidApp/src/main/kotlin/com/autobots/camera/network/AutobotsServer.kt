@@ -4,7 +4,6 @@ import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
 import android.util.Log
-import com.autobots.camera.CaptureMode
 import com.autobots.ui.OperatorViewModel
 import com.autobots.ui.OperatorUiState
 import io.ktor.http.ContentType
@@ -153,16 +152,15 @@ class AutobotsServer(
                     }
                     RemoteControlCommand.ACTION_SET_CAPTURE_MODE -> {
                         cmd.captureMode?.let { modeStr ->
-                            val mode = CaptureMode.valueOf(modeStr)
-                            viewModel.setCaptureMode(mode)
+                            val resolution = when (modeStr) {
+                                "Uhd", "4K" -> com.autobots.camera.StreamResolution.Uhd
+                                else -> com.autobots.camera.StreamResolution.Fhd
+                            }
+                            viewModel.setStreamResolution(resolution)
                         }
                     }
-                    RemoteControlCommand.ACTION_SET_ARM_THRESHOLD -> {
-                        cmd.armThreshold?.let { viewModel.setArmThreshold(it) }
-                    }
-                    RemoteControlCommand.ACTION_SET_FIRE_THRESHOLD -> {
-                        cmd.fireThreshold?.let { viewModel.setFireThreshold(it) }
-                    }
+                    RemoteControlCommand.ACTION_SET_ARM_THRESHOLD -> Unit
+                    RemoteControlCommand.ACTION_SET_FIRE_THRESHOLD -> Unit
                 }
             }
         } catch (e: Exception) {
@@ -210,23 +208,27 @@ class AutobotsServer(
 
         return RemoteStateUpdate(
             isCapturing = uiState.isCapturing,
-            captureMode = uiState.captureMode.name,
-            isArmed = uiState.isArmed,
-            lastFired = uiState.lastFired,
-            passageGateOpen = uiState.passageGateOpen,
+            captureMode = uiState.streamResolution.name,
+            isArmed = false,
+            lastFired = false,
+            passageGateOpen = true,
             keptPhotoCount = uiState.keptPhotoCount,
-            lastBurstSaved = uiState.lastBurstSaved,
+            lastBurstSaved = uiState.videoChunksRecorded,
             lastGalleryUri = uiState.lastGalleryUri,
-            isBursting = uiState.isBursting,
+            isBursting = false,
             thermalLabel = uiState.thermalLabel,
             thermalLevel = uiState.thermalLevel,
             usedRamMb = uiState.usedRamMb,
             totalRamMb = uiState.totalRamMb,
-            faceCount = uiState.faceCount,
-            proximity = uiState.proximity,
-            armThreshold = uiState.armThreshold,
-            fireThreshold = uiState.fireThreshold,
-            exposureLine = uiState.exposureLine,
+            faceCount = uiState.facesKept,
+            proximity = 0f,
+            armThreshold = 0f,
+            fireThreshold = 0f,
+            exposureLine = when {
+                uiState.isCapturing && uiState.recordingLine.isNotEmpty() -> uiState.recordingLine
+                uiState.statusLine.isNotEmpty() -> "${uiState.statusLine} · ${uiState.streamResolution.label}"
+                else -> uiState.streamResolution.label
+            },
             deviceLoadLine = uiState.deviceLoadLine,
             lastPhotoUrl = lastPhotoUrl
         )

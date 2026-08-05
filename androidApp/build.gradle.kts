@@ -18,8 +18,15 @@ android {
     }
 
     buildTypes {
+        // Phase 0 instrumentation. On by default in debug, off in release.
+        // Override either way with -PcamPerf=true|false
+        val camPerfOverride = (findProperty("camPerf") as String?)?.toBoolean()
+        debug {
+            buildConfigField("boolean", "CAM_PERF", (camPerfOverride ?: true).toString())
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField("boolean", "CAM_PERF", (camPerfOverride ?: false).toString())
         }
     }
 
@@ -34,6 +41,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

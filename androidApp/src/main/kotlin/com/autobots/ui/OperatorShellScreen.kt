@@ -64,6 +64,7 @@ fun OperatorShellScreen(
     onPhotoDelivered: (String) -> Unit,
     onExposureReadout: (String) -> Unit,
     onOpenGallery: () -> Unit,
+    onImportVideo: () -> Unit,
 ) {
     val previewActive = state.isCapturing && cameraPermissionGranted
     var settingsExpanded by remember { mutableStateOf(false) }
@@ -109,6 +110,7 @@ fun OperatorShellScreen(
                         onStreamResolution = onStreamResolution,
                         onExtractionTarget = onExtractionTarget,
                         onOpenGallery = onOpenGallery,
+                        onImportVideo = onImportVideo,
                     )
                     OverlayPages.CleanPreview -> Box(modifier = Modifier.fillMaxSize())
                     OverlayPages.ChunkHistory -> ChunkHistoryPage(
@@ -141,6 +143,7 @@ private fun OperatorControlsPage(
     onStreamResolution: (StreamResolution) -> Unit,
     onExtractionTarget: (ExtractionTarget) -> Unit,
     onOpenGallery: () -> Unit,
+    onImportVideo: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         CompactStatusCard(
@@ -192,6 +195,17 @@ private fun OperatorControlsPage(
                 }
 
                 Button(
+                    onClick = onImportVideo,
+                    enabled = state.canImportVideo,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = if (state.isImporting) "Importing…" else "Import",
+                        maxLines = 1,
+                    )
+                }
+
+                Button(
                     onClick = onOpenGallery,
                     enabled = state.keptPhotoCount > 0 || state.lastGalleryUri != null,
                     modifier = Modifier.weight(1f),
@@ -212,7 +226,7 @@ private fun OperatorControlsPage(
 
 @Composable
 private fun ProcessingStatusCard(state: OperatorUiState) {
-    val active = state.isProcessing
+    val active = state.isProcessing || state.isImporting
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,13 +241,28 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
             style = MaterialTheme.typography.labelMedium,
         )
         Text(
-            text = if (active) state.processingLine else "No processing",
-            color = if (active) Color(0xFF80CBC4) else Color(0xFF78909C),
+            text = when {
+                state.importError != null -> "Import failed: ${state.importError}"
+                state.isImporting -> state.importLine
+                state.isProcessing -> state.processingLine
+                else -> "No processing"
+            },
+            color = when {
+                state.importError != null -> Color(0xFFEF9A9A)
+                active -> Color(0xFF80CBC4)
+                else -> Color(0xFF78909C)
+            },
             style = MaterialTheme.typography.labelSmall,
             maxLines = 3,
         )
         LinearProgressIndicator(
-            progress = { if (active) state.processingPercent / 100f else 0f },
+            progress = {
+                when {
+                    state.isImporting -> state.importPercent / 100f
+                    state.isProcessing -> state.processingPercent / 100f
+                    else -> 0f
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(4.dp),
@@ -591,6 +620,7 @@ private fun OperatorShellPreview() {
             onPhotoDelivered = {},
             onExposureReadout = {},
             onOpenGallery = {},
+            onImportVideo = {},
         )
     }
 }

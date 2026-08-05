@@ -19,6 +19,8 @@ class WriteQueue(
     capacity: Int = DEFAULT_CAPACITY,
     private val onDelivered: (Uri) -> Unit,
     private val onDropped: (File) -> Unit = {},
+    /** Instrumentation hook: the source file that was just published. */
+    private val onDeliveredFile: (File) -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channel = Channel<File>(capacity = capacity)
@@ -32,6 +34,7 @@ class WriteQueue(
                 try {
                     val uri = writer.publish(file)
                     if (uri != null) {
+                        onDeliveredFile(file)
                         file.delete()
                         onDelivered(uri)
                     } else {

@@ -3,7 +3,9 @@ package com.autobots
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +37,12 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 val state by operatorViewModel.state.collectAsStateWithLifecycle()
                 val cameraPermission = rememberCameraPermissionState()
+
+                val videoPicker = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument(),
+                ) { uri ->
+                    if (uri != null) operatorViewModel.importVideo(uri)
+                }
 
                 LaunchedEffect(cameraPermission.granted) {
                     if (cameraPermission.granted &&
@@ -69,6 +77,10 @@ class MainActivity : ComponentActivity() {
                     onOpenGallery = {
                         val uri = state.lastGalleryUri?.let(Uri::parse)
                         GalleryLauncher.open(this@MainActivity, uri)
+                    },
+                    onImportVideo = {
+                        operatorViewModel.clearImportError()
+                        videoPicker.launch(arrayOf("video/*"))
                     },
                 )
             }

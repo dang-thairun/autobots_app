@@ -9,8 +9,11 @@ import com.autobots.camera.StreamResolution
 import com.autobots.camera.detection.OfflineFaceDetector
 import com.autobots.camera.detection.OfflinePoseDetector
 import com.autobots.camera.detection.PoseDetectionResult
+import com.autobots.camera.perf.CamPerf
+import com.autobots.camera.perf.StageStats
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import kotlin.math.max
 
 data class VideoProcessResult(
@@ -33,13 +36,20 @@ class VideoFrameProcessor(
     private var profile = ProcessProfile.forResolution(StreamResolution.Fhd)
     private var target = ExtractionTarget.Face
 
+    /** Per-chunk stage timings; safe as a field because chunks are processed serially. */
+    private var perf: StageStats? = null
+    private val sharpnessSamples = ArrayList<Double>()
+    private var currentChunkIndex = 0
+
     suspend fun process(
         file: File,
+        chunkIndex: Int,
         resolution: StreamResolution,
         extractionTarget: ExtractionTarget,
         sampleIntervalMs: Long,
         onProgress: (Int) -> Unit = {},
     ): VideoProcessResult {
+        currentChunkIndex = chunkIndex
         profile = ProcessProfile.forResolution(resolution)
         target = extractionTarget
         if (profile.accurateDetect) {
@@ -48,6 +58,8 @@ class VideoFrameProcessor(
         }
 
         val started = System.currentTimeMillis()
+        perf = CamPerf.stageStats()
+        sharpnessSamples.clear()
         outputDir.mkdirs()
         var kept = 0
         var skipped = 0
@@ -58,7 +70,7 @@ class VideoFrameProcessor(
         var scannedFrames = 0
         val rejects = RejectStats()
 
-        val sampleStats = VideoFrameSampler.sampleFrames(file, sampleIntervalMs) { timestampUs, bitmap ->
+        val sampleStats = VideoFrameSampler.sampleFrames(file, sampleIntervalMs, perf) { timestampUs, bitmap ->
             scannedFrames++
             val percent = ((scannedFrames * 100) / estimatedFrames).coerceIn(0, 99)
             onProgress(percent)
@@ -105,6 +117,10 @@ class VideoFrameProcessor(
                 "sampled=$scannedFrames decodeFail=${sampleStats.decodeFailures} " +
                 "rejects=$rejects ${durationMs}ms",
         )
+        perf?.takeIf { !it.isEmpty() }?.let { stats ->
+            CamPerf.log { stats.table("Worker2 ${file.name} (${resolution.label}, ${target.label})") }
+        }
+        CamPerf.log { sharpnessReport(file.name) }
         return VideoProcessResult(
             kept = kept,
             skipped = skipped,
@@ -131,9 +147,9 @@ class VideoFrameProcessor(
         timestampUs: Long,
         rejects: RejectStats,
     ): FrameCandidate? {
-        val scaled = scaleForDetect(bitmap)
+        val scaled = CamPerf.timed(perf, "scale_for_detect") { scaleForDetect(bitmap) }
         val faces = try {
-            faceDetector.detect(scaled)
+            CamPerf.timed(perf, "mlkit_face") { faceDetector.detect(scaled) }
         } finally {
             if (scaled !== bitmap) scaled.recycle()
         }
@@ -162,7 +178,7 @@ class VideoFrameProcessor(
             return null
         }
 
-        val sharpness = FaceSharpnessScorer.scoreNormalized(bitmap, largest)
+        val sharpness = scoreSharpness(bitmap, largest)
         if (sharpness < profile.minSharpness) {
             rejects.tooSoft++
             return null
@@ -176,9 +192,9 @@ class VideoFrameProcessor(
         timestampUs: Long,
         rejects: RejectStats,
     ): FrameCandidate? {
-        val scaled = scaleForDetect(bitmap)
+        val scaled = CamPerf.timed(perf, "scale_for_detect") { scaleForDetect(bitmap) }
         val detection = try {
-            detectPose(scaled)
+            CamPerf.timed(perf, "mlkit_pose") { detectPose(scaled) }
         } finally {
             if (scaled !== bitmap) scaled.recycle()
         }
@@ -201,7 +217,7 @@ class VideoFrameProcessor(
             return null
         }
 
-        val sharpness = FaceSharpnessScorer.scoreNormalized(bitmap, torso)
+        val sharpness = scoreSharpness(bitmap, torso)
         if (sharpness < profile.minSharpness) {
             rejects.tooSoft++
             return null
@@ -212,6 +228,19 @@ class VideoFrameProcessor(
 
     private suspend fun detectPose(bitmap: Bitmap): PoseDetectionResult? {
         return poseDetector.detect(bitmap)
+    }
+
+    /**
+     * Scores the subject ROI and records the raw value. The distribution is what
+     * Phase 1 needs to re-tune [MIN_SHARPNESS] — the current threshold was picked
+     * against JPEG-softened, long-exposure frames.
+     */
+    private fun scoreSharpness(bitmap: Bitmap, roi: Rect): Double {
+        val score = CamPerf.timed(perf, "sharpness") {
+            FaceSharpnessScorer.scoreNormalized(bitmap, roi)
+        }
+        if (CamPerf.enabled) sharpnessSamples.add(score)
+        return score
     }
 
     private fun scaleForDetect(bitmap: Bitmap): Bitmap {
@@ -226,11 +255,15 @@ class VideoFrameProcessor(
             ExtractionTarget.Face -> "face"
             ExtractionTarget.Pose -> "pose"
         }
-        val name = "${prefix}_${candidate.timestampUs}.jpg"
+        // Chunk index is part of the name because presentation timestamps restart at ~0
+        // in every chunk — without it, frames from different chunks overwrite each other.
+        val name = "${prefix}_c${currentChunkIndex.toString().padStart(3, '0')}_${candidate.timestampUs}.jpg"
         val outFile = File(outputDir, name)
         return try {
-            FileOutputStream(outFile).use { stream ->
-                candidate.bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+            CamPerf.timed(perf, "save_jpeg") {
+                FileOutputStream(outFile).use { stream ->
+                    candidate.bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+                }
             }
             if (outFile.length() > 0L) outFile else null
         } catch (t: Throwable) {
@@ -244,6 +277,31 @@ class VideoFrameProcessor(
     fun close() {
         faceDetector.close()
         poseDetector.close()
+    }
+
+    /** Sharpness distribution vs. the current cut-off — the input for re-tuning it. */
+    private fun sharpnessReport(name: String): String {
+        if (sharpnessSamples.isEmpty()) {
+            return "┌─ sharpness $name\n└ no frames reached the scorer (all rejected earlier)"
+        }
+        val sorted = sharpnessSamples.sorted()
+        fun percentile(p: Int) = sorted[((sorted.size - 1) * p / 100).coerceIn(0, sorted.size - 1)]
+        val below = sorted.count { it < profile.minSharpness }
+        return buildString {
+            append("┌─ sharpness $name (n=${sorted.size}, cutoff=${profile.minSharpness})\n")
+            append(
+                String.format(
+                    Locale.US,
+                    "│ min %.1f  p25 %.1f  p50 %.1f  p75 %.1f  max %.1f\n",
+                    sorted.first(),
+                    percentile(25),
+                    percentile(50),
+                    percentile(75),
+                    sorted.last(),
+                ),
+            )
+            append("└ below cutoff ${below * 100 / sorted.size}% ($below/${sorted.size})")
+        }
     }
 
     private fun estimateFrameCount(file: File, sampleIntervalMs: Long): Int {

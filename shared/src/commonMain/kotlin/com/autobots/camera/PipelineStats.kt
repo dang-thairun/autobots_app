@@ -21,6 +21,10 @@ data class PipelineStats(
     val currentChunkPercent: Int = 0,
     val processingChunkName: String? = null,
     val imageQueuePending: Int = 0,
+    /** A device video is being split into chunks right now. */
+    val isImporting: Boolean = false,
+    val importPercent: Int = 0,
+    val importName: String? = null,
     val chunkHistory: List<ChunkRecord> = emptyList(),
 ) {
     /** Overall progress across recorded chunks (includes in-flight chunk). */

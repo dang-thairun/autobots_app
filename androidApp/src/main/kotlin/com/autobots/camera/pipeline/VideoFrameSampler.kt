@@ -3,13 +3,17 @@ package com.autobots.camera.pipeline
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.util.Log
+import com.autobots.camera.perf.CamPerf
+import com.autobots.camera.perf.StageStats
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -29,6 +33,7 @@ object VideoFrameSampler {
     fun sampleFrames(
         file: File,
         intervalMs: Long,
+        perf: StageStats? = null,
         onFrame: suspend (timestampUs: Long, bitmap: Bitmap) -> Unit,
     ): SampleStats {
         val stats = SampleStats()
@@ -54,14 +59,19 @@ object VideoFrameSampler {
             val mime = format.getString(MediaFormat.KEY_MIME) ?: return stats
             val width = format.getInteger(MediaFormat.KEY_WIDTH)
             val height = format.getInteger(MediaFormat.KEY_HEIGHT)
-            Log.d(TAG, "Sampling ${file.name} ${width}x$height mime=$mime interval=${intervalMs}ms")
+            val rotation = readRotationDegrees(format, file)
+            Log.d(
+                TAG,
+                "Sampling ${file.name} ${width}x$height mime=$mime " +
+                    "interval=${intervalMs}ms rotation=${rotation}°",
+            )
 
             val decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(format, null, null, 0)
             decoder.start()
 
             try {
-                decodeLoop(extractor, decoder, intervalMs, stats, onFrame)
+                decodeLoop(extractor, decoder, intervalMs, stats, perf, rotation, onFrame)
             } finally {
                 runCatching {
                     decoder.stop()
@@ -88,6 +98,8 @@ object VideoFrameSampler {
         decoder: MediaCodec,
         intervalMs: Long,
         stats: SampleStats,
+        perf: StageStats?,
+        rotationDegrees: Int,
         onFrame: suspend (timestampUs: Long, bitmap: Bitmap) -> Unit,
     ) {
         val bufferInfo = MediaCodec.BufferInfo()
@@ -118,21 +130,33 @@ object VideoFrameSampler {
                 }
             }
 
+            val dequeueStartNs = if (perf != null) System.nanoTime() else 0L
             val outputIndex = decoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
             when {
                 outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
                 outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
                 outputIndex >= 0 -> {
+                    perf?.add("decode", System.nanoTime() - dequeueStartNs)
                     val image = decoder.getOutputImage(outputIndex)
                     val ptsUs = bufferInfo.presentationTimeUs
                     if (image != null &&
                         ptsUs - lastEmitUs >= intervalMs * 1_000L &&
                         bufferInfo.size > 0
                     ) {
-                        val bitmap = imageToBitmap(image, stats)
+                        val decoded = CamPerf.timed(perf, "yuv_jpeg_argb") {
+                            imageToBitmap(image, stats)
+                        }
                         image.close()
+                        val bitmap = if (decoded != null && rotationDegrees != 0) {
+                            CamPerf.timed(perf, "rotate") { rotate(decoded, rotationDegrees) }
+                        } else {
+                            decoded
+                        }
                         if (bitmap != null) {
-                            runBlocking { onFrame(ptsUs, bitmap) }
+                            // Everything downstream runs here, blocking the decoder.
+                            CamPerf.timed(perf, "decoder_blocked") {
+                                runBlocking { onFrame(ptsUs, bitmap) }
+                            }
                             lastEmitUs = ptsUs
                         }
                     } else {
@@ -144,6 +168,44 @@ object VideoFrameSampler {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Rotation is metadata on the container, so decoded frames come out sideways for
+     * phone-shot portrait video. ML Kit is handed rotation 0, so upright them here or
+     * no face is ever found. Recorded chunks report 0° and skip this entirely.
+     */
+    private fun readRotationDegrees(format: MediaFormat, file: File): Int {
+        runCatching { format.getInteger(MediaFormat.KEY_ROTATION) }
+            .getOrNull()
+            ?.let { return normalizeRotation(it) }
+
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            normalizeRotation(
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull() ?: 0,
+            )
+        } catch (_: Throwable) {
+            0
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun normalizeRotation(degrees: Int): Int = ((degrees % 360) + 360) % 360
+
+    private fun rotate(bitmap: Bitmap, degrees: Int): Bitmap {
+        return try {
+            val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (rotated !== bitmap) bitmap.recycle()
+            rotated
+        } catch (t: Throwable) {
+            Log.w(TAG, "Rotate by $degrees failed; using unrotated frame", t)
+            bitmap
         }
     }
 

@@ -51,8 +51,10 @@ fun CameraPreviewPane(
     val controller = remember { VideoPreviewController(context.applicationContext) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     val activeState by rememberUpdatedState(active)
+    val exposureListener by rememberUpdatedState(onExposureReadout)
 
-    DisposableEffect(Unit) {
+    DisposableEffect(controller) {
+        controller.setExposureReadoutListener { readout -> exposureListener(readout.line) }
         onDispose { controller.shutdown() }
     }
 

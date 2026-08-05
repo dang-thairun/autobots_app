@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.autobots.camera.StreamResolution
+import com.autobots.camera.perf.CamPerf
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -51,6 +52,12 @@ class VideoChunkRecorder(
     private var chunkStartWallMs: Long = 0L
     private var stopFinalizeCallback: (() -> Unit)? = null
 
+    /** Coverage-gap instrumentation: frames recorded by nobody between chunks. */
+    private var stopRequestedNs: Long = 0L
+    private var gapTotalNs: Long = 0L
+    private var gapCount: Int = 0
+    private var gapMaxNs: Long = 0L
+
     fun start() {
         if (!running.compareAndSet(false, true)) return
         videoDir.mkdirs()
@@ -69,6 +76,15 @@ class VideoChunkRecorder(
             return
         }
         stopFinalizeCallback = onFinalized
+        stopRequestedNs = CamPerf.nowNs()
+        if (CamPerf.enabled && gapCount > 0) {
+            CamPerf.log {
+                "┌─ chunk boundary coverage gaps\n" +
+                    "│ ${gapCount} rotations · avg ${CamPerf.ms(gapTotalNs / gapCount)} · " +
+                    "max ${CamPerf.ms(gapMaxNs)}\n" +
+                    "└ total ${CamPerf.ms(gapTotalNs)} of footage never recorded"
+            }
+        }
         recording.stop()
     }
 
@@ -133,6 +149,7 @@ class VideoChunkRecorder(
                 }
                 if (length >= maxChunkBytes) {
                     rotating.set(true)
+                    stopRequestedNs = CamPerf.nowNs()
                     recording.stop()
                 }
             }
@@ -142,6 +159,22 @@ class VideoChunkRecorder(
 
     private fun onRecordEvent(event: VideoRecordEvent) {
         when (event) {
+            is VideoRecordEvent.Start -> {
+                // Camera is only capturing from here — everything since stopRequestedNs is lost.
+                if (stopRequestedNs > 0L) {
+                    val gapNs = CamPerf.nowNs() - stopRequestedNs
+                    gapTotalNs += gapNs
+                    gapCount++
+                    if (gapNs > gapMaxNs) gapMaxNs = gapNs
+                    CamPerf.log {
+                        "chunk#$currentChunkIndex START · boundary gap ${CamPerf.ms(gapNs)} " +
+                            "— no frames recorded in that window"
+                    }
+                    stopRequestedNs = 0L
+                } else {
+                    CamPerf.log { "chunk#$currentChunkIndex START · first chunk, no preceding gap" }
+                }
+            }
             is VideoRecordEvent.Status -> {
                 val stats = event.recordingStats
                 val index = currentChunkIndex

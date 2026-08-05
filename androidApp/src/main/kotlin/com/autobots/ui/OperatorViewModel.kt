@@ -1,6 +1,8 @@
 package com.autobots.ui
 
 import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,6 +51,10 @@ data class OperatorUiState(
     val chunksProcessed: Int = 0,
     val processingChunkName: String? = null,
     val imageQueuePending: Int = 0,
+    val isImporting: Boolean = false,
+    val importPercent: Int = 0,
+    val importName: String? = null,
+    val importError: String? = null,
     val chunkHistory: List<ChunkRecord> = emptyList(),
 ) {
     val deviceLoadLine: String
@@ -91,7 +97,18 @@ data class OperatorUiState(
         }
 
     val canStartCapture: Boolean
-        get() = !isCapturing && !isProcessing
+        get() = !isCapturing && !isProcessing && !isImporting
+
+    /** Importing needs the pipeline free, but not the camera. */
+    val canImportVideo: Boolean
+        get() = !isCapturing && !isProcessing && !isImporting
+
+    val importLine: String
+        get() {
+            if (!isImporting) return ""
+            val name = importName ?: "video"
+            return "Importing $name · splitting $importPercent%"
+        }
 }
 
 /** ≥1000 MB → "X.X GB", else "NNN MB". */
@@ -197,6 +214,70 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         applyDeviceLoad(deviceLoadReader.sample())
     }
 
+    /**
+     * Runs a device video through the same pipeline as a live Passage. No camera is
+     * bound — [OperatorUiState.isCapturing] stays false so the preview stays idle.
+     */
+    fun importVideo(uri: Uri) {
+        if (!_state.value.canImportVideo) return
+
+        pipeline?.close()
+        val coordinator = CapturePipelineCoordinator.create(
+            context = getApplication(),
+            onStats = ::applyPipelineStats,
+            onPhotoDelivered = { delivered -> onPhotoDelivered(delivered.toString()) },
+            onDrainComplete = ::onPipelineDrainComplete,
+        )
+        coordinator.setResolution(_state.value.streamResolution)
+        coordinator.setExtractionTarget(_state.value.extractionTarget)
+
+        if (!coordinator.hasStorageForRecording()) {
+            _state.update { it.copy(storageBlocked = true) }
+            coordinator.close()
+            return
+        }
+
+        pipeline = coordinator
+        val displayName = resolveDisplayName(uri)
+        _state.update {
+            it.copy(
+                storageBlocked = false,
+                importError = null,
+                isImporting = true,
+                importName = displayName,
+                importPercent = 0,
+                videoChunksRecorded = 0,
+                videoQueueDepth = 0,
+                facesKept = 0,
+                facesSkipped = 0,
+                chunksProcessed = 0,
+                imageQueuePending = 0,
+                chunkHistory = emptyList(),
+            )
+        }
+
+        viewModelScope.launch {
+            val result = coordinator.importVideo(uri, displayName)
+            if (result.error != null || result.segments == 0) {
+                _state.update {
+                    it.copy(importError = result.error ?: "No video segments produced")
+                }
+            }
+        }
+    }
+
+    fun clearImportError() {
+        _state.update { it.copy(importError = null) }
+    }
+
+    private fun resolveDisplayName(uri: Uri): String? = runCatching {
+        getApplication<Application>().contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull() ?: uri.lastPathSegment
+
     fun stopCapture() {
         pipeline?.stopRecording()
         _state.update {
@@ -219,6 +300,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 currentChunkPercent = 0,
                 processingChunkName = null,
                 imageQueuePending = 0,
+                isImporting = false,
+                importPercent = 0,
+                importName = null,
             )
         }
     }
@@ -277,6 +361,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 currentChunkPercent = stats.currentChunkPercent,
                 processingChunkName = stats.processingChunkName,
                 imageQueuePending = stats.imageQueuePending,
+                isImporting = stats.isImporting,
+                importPercent = stats.importPercent,
+                importName = stats.importName ?: it.importName,
                 chunkHistory = stats.chunkHistory,
             )
         }

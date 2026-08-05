@@ -11,8 +11,11 @@ import com.autobots.camera.PipelineStats
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.VideoPreviewController
 import com.autobots.camera.capture.ChunkCaptureMeta
+import com.autobots.camera.capture.ImportSplitResult
+import com.autobots.camera.capture.ImportedVideoSplitter
 import com.autobots.camera.delivery.LocalDeliveryWriter
 import com.autobots.camera.delivery.WriteQueue
+import com.autobots.camera.perf.CamPerf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,7 +23,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -54,7 +60,16 @@ class CapturePipelineCoordinator(
             publishStats()
             maybeNotifyDrainComplete()
         },
+        onDeliveredFile = ::logMomentToGallery,
     )
+
+    /** chunk index → wall-clock instant that chunk started / finished recording. */
+    private val chunkStartWallMs = ConcurrentHashMap<Int, Long>()
+    private val chunkQueuedWallMs = ConcurrentHashMap<Int, Long>()
+    private var photoLatencySumMs = 0L
+    private var photoLatencyCount = 0
+    private var photoLatencyMaxMs = 0L
+    private var photoLatencyMinMs = Long.MAX_VALUE
 
     private var chunksRecorded = 0
     private var chunksProcessed = 0
@@ -69,6 +84,10 @@ class CapturePipelineCoordinator(
     private var currentChunkPercent = 0
     private var processingChunkName: String? = null
     private var closed = false
+    private var importing = false
+    private var importPercent = 0
+    private var importName: String? = null
+    private val chunkIndexSeq = AtomicInteger(0)
 
     init {
         sessionDir.mkdirs()
@@ -87,8 +106,10 @@ class CapturePipelineCoordinator(
                 }
                 publishStats()
                 try {
+                    val processStartMs = System.currentTimeMillis()
                     val result = frameProcessor.process(
                         item.videoFile,
+                        chunkIndex = item.index,
                         resolution = resolution,
                         extractionTarget = extractionTarget,
                         sampleIntervalMs = resolution.frameSampleIntervalMs,
@@ -119,6 +140,7 @@ class CapturePipelineCoordinator(
                             )
                         }
                     }
+                    logChunkEndToEnd(item, processStartMs, result)
                     for (imageFile in result.savedFiles) {
                         imageDelivery.enqueue(imageFile)
                     }
@@ -159,10 +181,59 @@ class CapturePipelineCoordinator(
 
     fun isBusy(): Boolean {
         return recording ||
+            importing ||
             awaitingRecorderFinalize ||
             workerBusy.get() ||
             videoPending.get() > 0 ||
             imageDelivery.pendingCount > 0
+    }
+
+    /**
+     * Feed a video already on the device into the same chunk → extract → deliver path.
+     * Splitting reuses the live queue's backpressure, so a long import cannot outrun
+     * Worker 2 or blow up memory.
+     */
+    suspend fun importVideo(source: Uri, displayName: String?): ImportSplitResult {
+        if (closed) {
+            return ImportSplitResult(0, 0L, 0L, error = "Pipeline already closed")
+        }
+        importing = true
+        importPercent = 0
+        importName = displayName
+        publishStats()
+
+        val splitter = ImportedVideoSplitter(appContext, File(sessionDir, "video"))
+        return try {
+            // Remuxing is blocking I/O — never on the caller's (main) thread.
+            withContext(Dispatchers.IO) {
+                splitter.split(
+                    source = source,
+                    targetSegmentBytes = resolution.chunkTargetBytes,
+                    startIndex = chunkIndexSeq.get() + 1,
+                    canAcceptChunk = ::canAcceptVideoChunk,
+                    onChunkReady = ::onChunkRecorded,
+                    onProgress = { percent ->
+                        importPercent = percent
+                        publishStats()
+                    },
+                )
+            }.also { result ->
+                Log.i(
+                    TAG,
+                    "Import ${displayName ?: source} -> ${result.segments} chunk(s)" +
+                        (result.error?.let { " (error: $it)" } ?: ""),
+                )
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Import failed for ${displayName ?: source}", t)
+            ImportSplitResult(0, 0L, 0L, error = t.message ?: t::class.java.simpleName)
+        } finally {
+            importing = false
+            importPercent = 0
+            importName = null
+            publishStats()
+            maybeNotifyDrainComplete()
+        }
     }
 
     fun onRecordingStarted() {
@@ -192,6 +263,9 @@ class CapturePipelineCoordinator(
         awaitingRecorderFinalize = false
         chunksRecorded++
         videoPending.incrementAndGet()
+        chunkStartWallMs[meta.index] = meta.recordedAtEpochMs
+        chunkQueuedWallMs[meta.index] = System.currentTimeMillis()
+        chunkIndexSeq.updateAndGet { maxOf(it, meta.index) }
         val record = ChunkRecord(
             index = meta.index,
             videoFileName = meta.file.name,
@@ -245,6 +319,69 @@ class CapturePipelineCoordinator(
         imageDelivery.close()
     }
 
+    /**
+     * The two numbers that decide whether Phase 3 (shorter chunks) is safe:
+     * how long a chunk waits before processing, and whether Worker 2 runs faster
+     * than realtime. A realtime ratio ≥ 1.0 means shorter chunks will stall the recorder.
+     */
+    private fun logChunkEndToEnd(
+        item: ChunkWorkItem,
+        processStartMs: Long,
+        result: VideoProcessResult,
+    ) {
+        if (!CamPerf.enabled) return
+        val recordStart = chunkStartWallMs[item.index] ?: return
+        val queuedAt = chunkQueuedWallMs[item.index] ?: return
+        val recordedMs = (queuedAt - recordStart).coerceAtLeast(1L)
+        val queueWaitMs = processStartMs - queuedAt
+        val ratio = result.durationMs.toDouble() / recordedMs
+        CamPerf.log {
+            buildString {
+                append("┌─ chunk#${item.index} ${item.videoFile.name} end-to-end\n")
+                append("│ recorded        ${CamPerf.sec(recordedMs)} of footage\n")
+                append("│ queue wait      ${CamPerf.sec(queueWaitMs)}\n")
+                append("│ process         ${CamPerf.sec(result.durationMs)}  ")
+                append("(sampled=${result.framesSampled} kept=${result.kept} skipped=${result.skipped})\n")
+                append(
+                    String.format(
+                        Locale.US,
+                        "│ REALTIME RATIO  %.2fx  %s\n",
+                        ratio,
+                        if (ratio >= 1.0) "<-- SLOWER than realtime, queue will back up" else "(headroom ok)",
+                    ),
+                )
+                append("│ worst latency   ${CamPerf.sec(processStartMs + result.durationMs - recordStart)} ")
+                append("(moment at chunk start, before gallery write)\n")
+                append("└ video queue     ${videoPending.get()}/$VIDEO_QUEUE_CAPACITY pending")
+            }
+        }
+    }
+
+    /** Wall time from the instant the runner was in front of the lens to a gallery-visible file. */
+    private fun logMomentToGallery(file: File) {
+        if (!CamPerf.enabled) return
+        val parts = file.nameWithoutExtension.split('_')
+        if (parts.size < 3) return
+        val chunkIndex = parts[1].removePrefix("c").toIntOrNull() ?: return
+        val ptsUs = parts[2].toLongOrNull() ?: return
+        val recordStart = chunkStartWallMs[chunkIndex] ?: return
+
+        val latencyMs = System.currentTimeMillis() - (recordStart + ptsUs / 1000L)
+        synchronized(this) {
+            photoLatencySumMs += latencyMs
+            photoLatencyCount++
+            if (latencyMs > photoLatencyMaxMs) photoLatencyMaxMs = latencyMs
+            if (latencyMs < photoLatencyMinMs) photoLatencyMinMs = latencyMs
+            CamPerf.log {
+                "MOMENT→GALLERY ${CamPerf.sec(latencyMs)} · ${file.name} " +
+                    "(chunk#$chunkIndex at t+${CamPerf.sec(ptsUs / 1000L)}) · " +
+                    "avg ${CamPerf.sec(photoLatencySumMs / photoLatencyCount)} " +
+                    "min ${CamPerf.sec(photoLatencyMinMs)} max ${CamPerf.sec(photoLatencyMaxMs)} " +
+                    "over $photoLatencyCount photos"
+            }
+        }
+    }
+
     private fun maybeNotifyDrainComplete() {
         if (closed || recording || isBusy()) return
         onDrainComplete()
@@ -268,6 +405,9 @@ class CapturePipelineCoordinator(
                 pipelinePaused = pipelinePaused,
                 isRecording = recording,
                 isProcessing = isProcessing,
+                isImporting = importing,
+                importPercent = importPercent,
+                importName = importName,
                 currentChunkPercent = currentChunkPercent,
                 processingChunkName = processingChunkName,
                 imageQueuePending = imageDelivery.pendingCount,

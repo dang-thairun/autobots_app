@@ -1,0 +1,46 @@
+--------- beginning of main
+08-05 13:43:00.889 10348 10348 I CamPerf : ┌─ camera capabilities
+08-05 13:43:00.889 10348 10348 I CamPerf : │ id=0  level=LEVEL_3
+08-05 13:43:00.889 10348 10348 I CamPerf : │ MANUAL_SENSOR   YES   <-- decides Phase 1 path A vs B
+08-05 13:43:00.889 10348 10348 I CamPerf : │ exposure range  51,282ns … 1,000,000,000ns  (1/19500 … 1.0s)
+08-05 13:43:00.889 10348 10348 I CamPerf : │ iso range       50 … 2239
+08-05 13:43:00.889 10348 10348 I CamPerf : │ min focus       10.00 diopters (closest 0.10 m)
+08-05 13:43:00.889 10348 10348 I CamPerf : │ ev compensation -24 … 24 steps of 0.167 EV  (-4.0 … 4.0 EV)
+08-05 13:43:00.889 10348 10348 I CamPerf : │ fps ranges      [10,10] [15,15] [24,24] [14,30] [30,30]
+08-05 13:43:00.889 10348 10348 I CamPerf : └ zsl supported   YES   (unused on the video path)
+08-05 13:43:01.101 10348 10348 I CamPerf : chunk#1 START · first chunk, no preceding gap
+08-05 13:43:09.521 10348 10348 I CamPerf : ┌─ SESSION TOTAL — sensor while bound
+08-05 13:43:09.521 10348 10348 I CamPerf : │ exposure   avg 1/53   min 1/100   max 1/33
+08-05 13:43:09.521 10348 10348 I CamPerf : │            avg 18,838,174ns (budget 2,000,000ns)
+08-05 13:43:09.521 10348 10348 I CamPerf : │ OVER BUDGET 100% of 241 frames  <-- these are blurred at capture
+08-05 13:43:09.521 10348 10348 I CamPerf : │ iso        avg 67   min 50   max 142
+08-05 13:43:09.521 10348 10348 I CamPerf : │ af         PASSIVE_FOCUSED 87%  PASSIVE_SCAN 10%  INACTIVE 1%
+08-05 13:43:09.521 10348 10348 I CamPerf : │ ae         CONVERGED 66%  SEARCHING 33%
+08-05 13:43:09.521 10348 10348 I CamPerf : └ focus      1.22 diopters (0.82 m)
+08-05 13:43:14.119 10348 25866 I VideoFrameProcessor: Processed chunk_001.mp4 (1080p, Face): kept=6 skipped=12 sampled=25 decodeFail=0 rejects=noSubject=1,small=0,soft=1 4598ms
+08-05 13:43:14.119 10348 25866 I CamPerf : ┌─ Worker2 chunk_001.mp4 (1080p, Face)
+08-05 13:43:14.119 10348 25866 I CamPerf : │ stage                  n        avg        max      total
+08-05 13:43:14.119 10348 25866 I CamPerf : │ decode               239      1.1ms     10.5ms    272.5ms
+08-05 13:43:14.119 10348 25866 I CamPerf : │ yuv_jpeg_argb         25     33.5ms     43.0ms    837.0ms
+08-05 13:43:14.119 10348 25866 I CamPerf : │ scale_for_detect      25      3.6ms      3.9ms     90.7ms
+08-05 13:43:14.119 10348 25866 I CamPerf : │ mlkit_face            25    104.9ms    151.4ms   2622.2ms
+08-05 13:43:14.119 10348 25866 I CamPerf : │ decoder_blocked       25    115.4ms    159.8ms   2886.0ms
+08-05 13:43:14.119 10348 25866 I CamPerf : │ sharpness             24      1.1ms      7.7ms     25.8ms
+08-05 13:43:14.119 10348 25866 I CamPerf : │ save_jpeg              6     15.9ms     20.7ms     95.5ms
+08-05 13:43:14.119 10348 25866 I CamPerf : └ TOTAL                                            6829.7ms
+08-05 13:43:14.120 10348 25866 I CamPerf : ┌─ sharpness chunk_001.mp4 (n=24, cutoff=80.0)
+08-05 13:43:14.120 10348 25866 I CamPerf : │ min 63.1  p25 357.5  p50 443.9  p75 544.2  max 752.4
+08-05 13:43:14.120 10348 25866 I CamPerf : └ below cutoff 4% (1/24)
+08-05 13:43:14.120 10348 25866 I CamPerf : ┌─ chunk#1 chunk_001.mp4 end-to-end
+08-05 13:43:14.120 10348 25866 I CamPerf : │ recorded        8.62s of footage
+08-05 13:43:14.120 10348 25866 I CamPerf : │ queue wait      0.00s
+08-05 13:43:14.120 10348 25866 I CamPerf : │ process         4.60s  (sampled=25 kept=6 skipped=12)
+08-05 13:43:14.120 10348 25866 I CamPerf : │ REALTIME RATIO  0.53x  (headroom ok)
+08-05 13:43:14.120 10348 25866 I CamPerf : │ worst latency   13.22s (moment at chunk start, before gallery write)
+08-05 13:43:14.120 10348 25866 I CamPerf : └ video queue     1/8 pending
+08-05 13:43:14.199 10348 25871 I CamPerf : MOMENT→GALLERY 11.67s · face_c001_1632266.jpg (chunk#1 at t+1.63s) · avg 11.67s min 11.67s max 11.67s over 1 photos
+08-05 13:43:14.245 10348 25871 I CamPerf : MOMENT→GALLERY 11.38s · face_c001_1965377.jpg (chunk#1 at t+1.97s) · avg 11.52s min 11.38s max 11.67s over 2 photos
+08-05 13:43:14.280 10348 25871 I CamPerf : MOMENT→GALLERY 10.08s · face_c001_3297822.jpg (chunk#1 at t+3.30s) · avg 11.04s min 10.08s max 11.67s over 3 photos
+08-05 13:43:14.305 10348 25871 I CamPerf : MOMENT→GALLERY 8.47s · face_c001_4930111.jpg (chunk#1 at t+4.93s) · avg 10.40s min 8.47s max 11.67s over 4 photos
+08-05 13:43:14.336 10348 25871 I CamPerf : MOMENT→GALLERY 6.54s · face_c001_6895477.jpg (chunk#1 at t+6.90s) · avg 9.63s min 6.54s max 11.67s over 5 photos
+08-05 13:43:14.368 10348 25871 I CamPerf : MOMENT→GALLERY 5.93s · face_c001_7538388.jpg (chunk#1 at t+7.54s) · avg 9.01s min 5.93s max 11.67s over 6 photos

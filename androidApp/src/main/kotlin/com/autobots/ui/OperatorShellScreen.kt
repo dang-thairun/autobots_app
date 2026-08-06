@@ -255,6 +255,15 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
             style = MaterialTheme.typography.labelSmall,
             maxLines = 3,
         )
+        if (state.throughputLine.isNotEmpty()) {
+            Text(
+                text = state.throughputLine,
+                color = if (state.isThroughputTooSlow) Color(0xFFFF7043) else Color(0xFF90A4AE),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 2,
+            )
+        }
+
         LinearProgressIndicator(
             progress = {
                 when {

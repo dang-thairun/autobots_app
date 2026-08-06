@@ -60,7 +60,7 @@ class CapturePipelineCoordinator(
             publishStats()
             maybeNotifyDrainComplete()
         },
-        onDeliveredFile = ::logMomentToGallery,
+        onDeliveredFile = ::recordMomentToGallery,
     )
 
     /** chunk index → wall-clock instant that chunk started / finished recording. */
@@ -70,6 +70,10 @@ class CapturePipelineCoordinator(
     private var photoLatencyCount = 0
     private var photoLatencyMaxMs = 0L
     private var photoLatencyMinMs = Long.MAX_VALUE
+
+    /** Written on the worker thread, read when publishing stats. */
+    @Volatile
+    private var lastRealtimeRatio = 0f
 
     private var chunksRecorded = 0
     private var chunksProcessed = 0
@@ -140,7 +144,7 @@ class CapturePipelineCoordinator(
                             )
                         }
                     }
-                    logChunkEndToEnd(item, processStartMs, result)
+                    recordChunkEndToEnd(item, processStartMs, result)
                     for (imageFile in result.savedFiles) {
                         imageDelivery.enqueue(imageFile)
                     }
@@ -324,17 +328,19 @@ class CapturePipelineCoordinator(
      * how long a chunk waits before processing, and whether Worker 2 runs faster
      * than realtime. A realtime ratio ≥ 1.0 means shorter chunks will stall the recorder.
      */
-    private fun logChunkEndToEnd(
+    private fun recordChunkEndToEnd(
         item: ChunkWorkItem,
         processStartMs: Long,
         result: VideoProcessResult,
     ) {
-        if (!CamPerf.enabled) return
         val recordStart = chunkStartWallMs[item.index] ?: return
         val queuedAt = chunkQueuedWallMs[item.index] ?: return
         val recordedMs = (queuedAt - recordStart).coerceAtLeast(1L)
         val queueWaitMs = processStartMs - queuedAt
         val ratio = result.durationMs.toDouble() / recordedMs
+        lastRealtimeRatio = ratio.toFloat()
+        publishStats()
+
         CamPerf.log {
             buildString {
                 append("┌─ chunk#${item.index} ${item.videoFile.name} end-to-end\n")
@@ -358,8 +364,7 @@ class CapturePipelineCoordinator(
     }
 
     /** Wall time from the instant the runner was in front of the lens to a gallery-visible file. */
-    private fun logMomentToGallery(file: File) {
-        if (!CamPerf.enabled) return
+    private fun recordMomentToGallery(file: File) {
         val parts = file.nameWithoutExtension.split('_')
         if (parts.size < 3) return
         val chunkIndex = parts[1].removePrefix("c").toIntOrNull() ?: return
@@ -408,6 +413,10 @@ class CapturePipelineCoordinator(
                 isImporting = importing,
                 importPercent = importPercent,
                 importName = importName,
+                lastRealtimeRatio = lastRealtimeRatio,
+                avgPhotoLatencyMs = synchronized(this@CapturePipelineCoordinator) {
+                    if (photoLatencyCount == 0) 0L else photoLatencySumMs / photoLatencyCount
+                },
                 currentChunkPercent = currentChunkPercent,
                 processingChunkName = processingChunkName,
                 imageQueuePending = imageDelivery.pendingCount,

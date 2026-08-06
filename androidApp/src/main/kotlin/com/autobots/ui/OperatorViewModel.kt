@@ -55,6 +55,8 @@ data class OperatorUiState(
     val importPercent: Int = 0,
     val importName: String? = null,
     val importError: String? = null,
+    val lastRealtimeRatio: Float = 0f,
+    val avgPhotoLatencyMs: Long = 0,
     val chunkHistory: List<ChunkRecord> = emptyList(),
 ) {
     val deviceLoadLine: String
@@ -109,6 +111,22 @@ data class OperatorUiState(
             val name = importName ?: "video"
             return "Importing $name · splitting $importPercent%"
         }
+
+    /** Can Worker 2 keep up, and how long until a photo lands? Empty until a chunk finishes. */
+    val throughputLine: String
+        get() {
+            if (lastRealtimeRatio <= 0f) return ""
+            return buildString {
+                append(String.format("%.2fx realtime", lastRealtimeRatio))
+                if (avgPhotoLatencyMs > 0) {
+                    append(String.format(" · photo in ~%.1fs", avgPhotoLatencyMs / 1000.0))
+                }
+                if (isThroughputTooSlow) append(" · TOO SLOW, queue will back up")
+            }
+        }
+
+    val isThroughputTooSlow: Boolean
+        get() = lastRealtimeRatio >= 1f
 }
 
 /** ≥1000 MB → "X.X GB", else "NNN MB". */
@@ -208,6 +226,8 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 chunksProcessed = 0,
                 processingChunkName = null,
                 imageQueuePending = 0,
+                lastRealtimeRatio = 0f,
+                avgPhotoLatencyMs = 0,
                 chunkHistory = emptyList(),
             )
         }
@@ -252,6 +272,8 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 facesSkipped = 0,
                 chunksProcessed = 0,
                 imageQueuePending = 0,
+                lastRealtimeRatio = 0f,
+                avgPhotoLatencyMs = 0,
                 chunkHistory = emptyList(),
             )
         }
@@ -364,6 +386,8 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 isImporting = stats.isImporting,
                 importPercent = stats.importPercent,
                 importName = stats.importName ?: it.importName,
+                lastRealtimeRatio = stats.lastRealtimeRatio,
+                avgPhotoLatencyMs = stats.avgPhotoLatencyMs,
                 chunkHistory = stats.chunkHistory,
             )
         }

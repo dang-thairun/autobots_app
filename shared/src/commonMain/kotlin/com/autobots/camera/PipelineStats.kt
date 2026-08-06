@@ -25,6 +25,10 @@ data class PipelineStats(
     val isImporting: Boolean = false,
     val importPercent: Int = 0,
     val importName: String? = null,
+    /** process time ÷ footage length for the last chunk. ≥ 1.0 means the queue backs up. */
+    val lastRealtimeRatio: Float = 0f,
+    /** Mean wall time from the moment in front of the lens to a gallery-visible file. */
+    val avgPhotoLatencyMs: Long = 0,
     val chunkHistory: List<ChunkRecord> = emptyList(),
 ) {
     /** Overall progress across recorded chunks (includes in-flight chunk). */

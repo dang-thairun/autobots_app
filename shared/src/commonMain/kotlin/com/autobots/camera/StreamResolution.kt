@@ -10,10 +10,7 @@ enum class StreamResolution(val label: String, val width: Int, val height: Int) 
     ;
 
     val chunkTargetBytes: Long
-        get() = when (this) {
-            Fhd -> CHUNK_TARGET_FHD_BYTES
-            Uhd -> CHUNK_TARGET_UHD_BYTES
-        }
+        get() = CHUNK_TARGET_BYTES
 
     val frameSampleIntervalMs: Long
         get() = when (this) {
@@ -22,9 +19,8 @@ enum class StreamResolution(val label: String, val width: Int, val height: Int) 
         }
 
     companion object {
-        const val CHUNK_TARGET_FHD_BYTES = 20L * 1024L * 1024L
-        const val CHUNK_TARGET_UHD_BYTES = 50L * 1024L * 1024L
+        const val CHUNK_TARGET_BYTES = 50L * 1024L * 1024L
         const val FRAME_SAMPLE_INTERVAL_FHD_MS = 300L
-        const val FRAME_SAMPLE_INTERVAL_UHD_MS = 120L
+        const val FRAME_SAMPLE_INTERVAL_UHD_MS = 180L
     }
 }

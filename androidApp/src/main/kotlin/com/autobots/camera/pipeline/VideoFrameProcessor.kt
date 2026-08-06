@@ -352,7 +352,7 @@ class VideoFrameProcessor(
                     )
                     StreamResolution.Uhd -> ProcessProfile(
                         detectBitmapWidth = 640,
-                        minSharpness = MIN_SHARPNESS,
+                        minSharpness = MIN_SHARPNESS_UHD,
                         accurateDetect = false,
                     )
                 }
@@ -365,6 +365,7 @@ class VideoFrameProcessor(
         private const val DEDUP_WINDOW_US = 1_000_000L
         private const val MIN_FACE_HEIGHT_RATIO = 0.05f
         private const val MIN_TORSO_HEIGHT_RATIO = 0.25f
-        private const val MIN_SHARPNESS = 80.0
+        const val MIN_SHARPNESS = 80.0
+        const val MIN_SHARPNESS_UHD = 65.0
     }
 }

@@ -223,7 +223,7 @@ class VideoChunkRecorder(
 
     companion object {
         private const val TAG = "VideoChunkRecorder"
-        const val DEFAULT_MAX_CHUNK_BYTES = StreamResolution.CHUNK_TARGET_FHD_BYTES
+        const val DEFAULT_MAX_CHUNK_BYTES = StreamResolution.CHUNK_TARGET_BYTES
         private const val SIZE_POLL_MS = 250L
         private const val RESUME_POLL_MS = 1_000L
     }

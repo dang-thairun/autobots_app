@@ -25,6 +25,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.autobots.camera.PipelineSessionRecord
+import com.autobots.camera.SessionSource
+import com.autobots.camera.SessionStatus
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -49,6 +54,7 @@ class CapturePipelineCoordinator(
     private val workerBusy = AtomicBoolean(false)
     private val historyLock = Mutex()
     private val chunkHistory = mutableListOf<ChunkRecord>()
+    private var sessionMeta: SessionMeta? = null
 
     private val frameProcessor = VideoFrameProcessor(facesDir)
     private val deliveryWriter = LocalDeliveryWriter(appContext)
@@ -201,6 +207,8 @@ class CapturePipelineCoordinator(
         if (closed) {
             return ImportSplitResult(0, 0L, 0L, error = "Pipeline already closed")
         }
+        beginSession(SessionSource.VideoImport, displayName ?: "Imported video")
+        val splitStartMs = System.currentTimeMillis()
         importing = true
         importPercent = 0
         importName = displayName
@@ -209,7 +217,7 @@ class CapturePipelineCoordinator(
         val splitter = ImportedVideoSplitter(appContext, File(sessionDir, "video"))
         return try {
             // Remuxing is blocking I/O — never on the caller's (main) thread.
-            withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 splitter.split(
                     source = source,
                     targetSegmentBytes = resolution.chunkTargetBytes,
@@ -221,14 +229,24 @@ class CapturePipelineCoordinator(
                         publishStats()
                     },
                 )
-            }.also { result ->
-                Log.i(
-                    TAG,
-                    "Import ${displayName ?: source} -> ${result.segments} chunk(s)" +
-                        (result.error?.let { " (error: $it)" } ?: ""),
-                )
             }
+            sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
+            sessionMeta?.sourceDurationMs = result.sourceDurationMs.takeIf { it > 0 }
+            sessionMeta?.sourceSizeBytes = result.totalBytes.takeIf { it > 0 }
+            if (result.error != null || result.segments == 0) {
+                sessionMeta?.failed = true
+                sessionMeta?.errorMessage = result.error ?: "No video segments produced"
+            }
+            Log.i(
+                TAG,
+                "Import ${displayName ?: source} -> ${result.segments} chunk(s)" +
+                    (result.error?.let { " (error: $it)" } ?: ""),
+            )
+            result
         } catch (t: Throwable) {
+            sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
+            sessionMeta?.failed = true
+            sessionMeta?.errorMessage = t.message ?: t::class.java.simpleName
             Log.e(TAG, "Import failed for ${displayName ?: source}", t)
             ImportSplitResult(0, 0L, 0L, error = t.message ?: t::class.java.simpleName)
         } finally {
@@ -241,6 +259,7 @@ class CapturePipelineCoordinator(
     }
 
     fun onRecordingStarted() {
+        beginSession(SessionSource.LiveCapture, liveSessionDisplayName())
         recording = true
         publishStats()
     }
@@ -271,6 +290,7 @@ class CapturePipelineCoordinator(
         chunkQueuedWallMs[meta.index] = System.currentTimeMillis()
         chunkIndexSeq.updateAndGet { maxOf(it, meta.index) }
         val record = ChunkRecord(
+            sessionId = sessionId,
             index = meta.index,
             videoFileName = meta.file.name,
             videoAbsolutePath = meta.file.absolutePath,
@@ -389,12 +409,111 @@ class CapturePipelineCoordinator(
 
     private fun maybeNotifyDrainComplete() {
         if (closed || recording || isBusy()) return
+        finalizeCurrentSession()
+        publishStats()
         onDrainComplete()
     }
+
+    private fun beginSession(source: SessionSource, displayName: String) {
+        sessionMeta = SessionMeta(
+            source = source,
+            displayName = displayName,
+            startedAtEpochMs = System.currentTimeMillis(),
+        )
+    }
+
+    private fun liveSessionDisplayName(): String {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        return "Live · $time"
+    }
+
+    private fun finalizeCurrentSession() {
+        val meta = sessionMeta ?: return
+        if (meta.finalized) return
+        meta.finalized = true
+        meta.finishedAtEpochMs = System.currentTimeMillis()
+        if (meta.failed) {
+            meta.status = SessionStatus.Failed
+        } else {
+            meta.status = SessionStatus.Done
+        }
+    }
+
+    private fun currentSessionStatus(meta: SessionMeta): SessionStatus {
+        if (meta.finalized) return meta.status
+        if (meta.failed && chunkHistory.isEmpty()) return SessionStatus.Failed
+
+        val pipelineActive = importing ||
+            recording ||
+            workerBusy.get() ||
+            videoPending.get() > 0 ||
+            chunksProcessed < chunksRecorded
+
+        if (!pipelineActive && chunkHistory.isNotEmpty()) {
+            return SessionStatus.Done
+        }
+
+        return when (meta.source) {
+            SessionSource.VideoImport -> if (importing) SessionStatus.Splitting else SessionStatus.Processing
+            SessionSource.LiveCapture -> if (recording) SessionStatus.Recording else SessionStatus.Processing
+        }
+    }
+
+    private fun buildSessionRecord(chunks: List<ChunkRecord>): PipelineSessionRecord? {
+        val meta = sessionMeta ?: return null
+        val now = System.currentTimeMillis()
+        val processDurationMs = chunks.sumOf { it.processDurationMs }
+        val facesKeptTotal = chunks.sumOf { it.facesKept }
+        val facesSkippedTotal = chunks.sumOf { it.facesSkipped }
+        val chunksDone = chunks.count {
+            it.status == ChunkProcessStatus.Done || it.status == ChunkProcessStatus.Failed
+        }
+        val status = currentSessionStatus(meta)
+        val totalDurationMs = when {
+            meta.finalized && meta.finishedAtEpochMs != null ->
+                meta.finishedAtEpochMs!! - meta.startedAtEpochMs
+            else -> now - meta.startedAtEpochMs
+        }
+        return PipelineSessionRecord(
+            id = sessionId,
+            source = meta.source,
+            displayName = meta.displayName,
+            startedAtEpochMs = meta.startedAtEpochMs,
+            sourceDurationMs = meta.sourceDurationMs,
+            sourceSizeBytes = meta.sourceSizeBytes,
+            resolution = resolution,
+            extractionTarget = extractionTarget,
+            status = status,
+            splitDurationMs = meta.splitDurationMs,
+            processDurationMs = processDurationMs,
+            totalDurationMs = totalDurationMs,
+            chunkCount = chunks.size,
+            chunksDone = chunksDone,
+            facesKept = facesKeptTotal,
+            facesSkipped = facesSkippedTotal,
+            errorMessage = meta.errorMessage,
+            chunks = chunks,
+        )
+    }
+
+    private data class SessionMeta(
+        val source: SessionSource,
+        val displayName: String,
+        val startedAtEpochMs: Long,
+        var status: SessionStatus = SessionStatus.Processing,
+        var sourceDurationMs: Long? = null,
+        var sourceSizeBytes: Long? = null,
+        var splitDurationMs: Long = 0,
+        var errorMessage: String? = null,
+        var failed: Boolean = false,
+        var finalized: Boolean = false,
+        var finishedAtEpochMs: Long? = null,
+    )
 
     private fun publishStats() {
         scope.launch {
             val historySnapshot = historyLock.withLock { chunkHistory.toList() }
+            val sessionSnapshot = listOfNotNull(buildSessionRecord(historySnapshot))
             val isProcessing = workerBusy.get() || videoPending.get() > 0
             val snapshot = PipelineStats(
                 sessionId = sessionId,
@@ -420,7 +539,7 @@ class CapturePipelineCoordinator(
                 currentChunkPercent = currentChunkPercent,
                 processingChunkName = processingChunkName,
                 imageQueuePending = imageDelivery.pendingCount,
-                chunkHistory = historySnapshot,
+                sessionHistory = sessionSnapshot,
             )
             onStats(snapshot)
         }

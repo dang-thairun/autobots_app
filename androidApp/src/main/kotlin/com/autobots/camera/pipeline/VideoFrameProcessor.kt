@@ -231,9 +231,8 @@ class VideoFrameProcessor(
     }
 
     /**
-     * Scores the subject ROI and records the raw value. The distribution is what
-     * Phase 1 needs to re-tune [MIN_SHARPNESS] — the current threshold was picked
-     * against JPEG-softened, long-exposure frames.
+     * Laplacian-variance sharpness on the subject ROI.
+     * The distribution is what Phase 1 needs to re-tune [MIN_SHARPNESS].
      */
     private fun scoreSharpness(bitmap: Bitmap, roi: Rect): Double {
         val score = CamPerf.timed(perf, "sharpness") {

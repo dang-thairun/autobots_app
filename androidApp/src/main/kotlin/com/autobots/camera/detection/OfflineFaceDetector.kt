@@ -11,6 +11,9 @@ import kotlin.coroutines.resume
 
 /**
  * ML Kit face detection for offline video frame processing.
+ *
+ * Uses Google ML Kit (bundled TFLite) — hardware acceleration is handled
+ * internally by the SDK on supported devices.
  */
 class OfflineFaceDetector(
     accurate: Boolean = false,
@@ -25,6 +28,8 @@ class OfflineFaceDetector(
                 },
             )
             .setMinFaceSize(0.05f)
+            // Reuse face IDs across consecutive frames in the same chunk.
+            .enableTracking()
             .build(),
     )
 

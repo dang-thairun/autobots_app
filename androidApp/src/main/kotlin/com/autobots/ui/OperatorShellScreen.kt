@@ -114,7 +114,7 @@ fun OperatorShellScreen(
                     )
                     OverlayPages.CleanPreview -> Box(modifier = Modifier.fillMaxSize())
                     OverlayPages.ChunkHistory -> ChunkHistoryPage(
-                        chunks = state.chunkHistory,
+                        sessions = state.sessionHistory,
                         modifier = Modifier.fillMaxSize(),
                     )
                     else -> Box(modifier = Modifier.fillMaxSize())

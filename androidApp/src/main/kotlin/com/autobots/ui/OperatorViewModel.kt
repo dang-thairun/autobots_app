@@ -6,8 +6,8 @@ import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.autobots.camera.ChunkRecord
 import com.autobots.camera.ChunkRecordingProgress
+import com.autobots.camera.PipelineSessionRecord
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
 import com.autobots.camera.StreamResolution
@@ -57,7 +57,7 @@ data class OperatorUiState(
     val importError: String? = null,
     val lastRealtimeRatio: Float = 0f,
     val avgPhotoLatencyMs: Long = 0,
-    val chunkHistory: List<ChunkRecord> = emptyList(),
+    val sessionHistory: List<PipelineSessionRecord> = emptyList(),
 ) {
     val deviceLoadLine: String
         get() = if (totalRamMb > 0) {
@@ -228,7 +228,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 imageQueuePending = 0,
                 lastRealtimeRatio = 0f,
                 avgPhotoLatencyMs = 0,
-                chunkHistory = emptyList(),
+                sessionHistory = emptyList(),
             )
         }
         applyDeviceLoad(deviceLoadReader.sample())
@@ -274,7 +274,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 imageQueuePending = 0,
                 lastRealtimeRatio = 0f,
                 avgPhotoLatencyMs = 0,
-                chunkHistory = emptyList(),
+                sessionHistory = emptyList(),
             )
         }
 
@@ -388,7 +388,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 importName = stats.importName ?: it.importName,
                 lastRealtimeRatio = stats.lastRealtimeRatio,
                 avgPhotoLatencyMs = stats.avgPhotoLatencyMs,
-                chunkHistory = stats.chunkHistory,
+                sessionHistory = stats.sessionHistory,
             )
         }
     }

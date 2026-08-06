@@ -29,8 +29,11 @@ data class PipelineStats(
     val lastRealtimeRatio: Float = 0f,
     /** Mean wall time from the moment in front of the lens to a gallery-visible file. */
     val avgPhotoLatencyMs: Long = 0,
-    val chunkHistory: List<ChunkRecord> = emptyList(),
+    val sessionHistory: List<PipelineSessionRecord> = emptyList(),
 ) {
+    /** Flat chunk list from all sessions (convenience for callers that only need chunks). */
+    val chunkHistory: List<ChunkRecord>
+        get() = sessionHistory.flatMap { it.chunks }
     /** Overall progress across recorded chunks (includes in-flight chunk). */
     val overallProcessingPercent: Int
         get() {

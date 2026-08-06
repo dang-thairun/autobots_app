@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.ChunkProcessStatus
 import com.autobots.camera.ChunkRecord
+import com.autobots.camera.PipelineSessionRecord
+import com.autobots.camera.SessionStatus
 import com.autobots.camera.formatChunkBytes
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,10 +39,11 @@ private val HistoryCardShape = RoundedCornerShape(10.dp)
 
 @Composable
 fun ChunkHistoryPage(
-    chunks: List<ChunkRecord>,
+    sessions: List<PipelineSessionRecord>,
     modifier: Modifier = Modifier,
 ) {
-    val expandedMap = remember { mutableStateMapOf<Int, Boolean>() }
+    val expandedSessions = remember { mutableStateMapOf<String, Boolean>() }
+    val expandedChunks = remember { mutableStateMapOf<Int, Boolean>() }
 
     Column(
         modifier = modifier
@@ -48,13 +51,13 @@ fun ChunkHistoryPage(
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Text(
-            text = "Chunk history",
+            text = "Session history",
             color = Color.White,
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(bottom = 6.dp),
         )
 
-        if (chunks.isEmpty()) {
+        if (sessions.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -63,7 +66,7 @@ fun ChunkHistoryPage(
                     .padding(12.dp),
             ) {
                 Text(
-                    text = "No chunks yet",
+                    text = "No sessions yet",
                     color = Color(0xFF90A4AE),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -72,14 +75,15 @@ fun ChunkHistoryPage(
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(chunks, key = { it.index }) { chunk ->
-                    ChunkRecordCard(
-                        chunk = chunk,
-                        expanded = expandedMap[chunk.index] == true,
+                items(sessions, key = { it.id }) { session ->
+                    SessionRecordCard(
+                        session = session,
+                        expanded = expandedSessions[session.id] == true,
                         onToggleExpand = {
-                            val current = expandedMap[chunk.index] == true
-                            expandedMap[chunk.index] = !current
+                            val current = expandedSessions[session.id] == true
+                            expandedSessions[session.id] = !current
                         },
+                        expandedChunks = expandedChunks,
                     )
                 }
             }
@@ -88,17 +92,19 @@ fun ChunkHistoryPage(
 }
 
 @Composable
-private fun ChunkRecordCard(
-    chunk: ChunkRecord,
+private fun SessionRecordCard(
+    session: PipelineSessionRecord,
     expanded: Boolean,
     onToggleExpand: () -> Unit,
+    expandedChunks: MutableMap<Int, Boolean>,
 ) {
-    val timeLabel = remember(chunk.recordedAtEpochMs) {
-        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(chunk.recordedAtEpochMs))
+    val startedLabel = remember(session.startedAtEpochMs) {
+        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(session.startedAtEpochMs))
     }
-    val videoSizeLabel = buildString {
-        append(formatChunkBytes(chunk.videoSizeBytes))
-        if (chunk.isPartialChunk) append(" (partial)")
+    val statusColor = when (session.status) {
+        SessionStatus.Done -> Color(0xFF80CBC4)
+        SessionStatus.Failed -> Color(0xFFFFAB91)
+        else -> Color(0xFF90A4AE)
     }
 
     Column(
@@ -115,9 +121,142 @@ private fun ChunkRecordCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Chunk #${chunk.index}",
+                text = session.displayName,
                 color = Color.White,
                 style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = session.statusLabel,
+                color = statusColor,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        Text(
+            text = buildString {
+                append(session.sourceLabel)
+                append(" · ")
+                append(session.resolution.label)
+                append(" · ")
+                append(session.extractionTarget.label)
+                append(" · started $startedLabel")
+            },
+            color = Color(0xFFB0BEC5),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+        )
+
+        session.videoDurationLabel?.let { duration ->
+            Text(
+                text = "Video $duration · ${formatChunkBytes(session.sourceSizeBytes ?: 0)}",
+                color = Color(0xFFE0E0E0),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        Text(
+            text = session.headlineSummary,
+            color = Color(0xFF69F0AE),
+            style = MaterialTheme.typography.labelMedium,
+        )
+
+        if (session.totalDurationMs > 0) {
+            Text(
+                text = session.timingSummary,
+                color = Color(0xFFCFD8DC),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        session.progressLine?.let { progress ->
+            Text(
+                text = progress,
+                color = Color(0xFF90A4AE),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        session.errorMessage?.takeIf { session.status == SessionStatus.Failed }?.let { error ->
+            Text(
+                text = error,
+                color = Color(0xFFFFAB91),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        if (session.chunks.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleExpand),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "${session.chunks.size} chunks",
+                    color = Color(0xFFB0BEC5),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (expanded) "Hide chunks" else "Show chunks",
+                    color = Color(0xFFB0BEC5),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+
+        if (expanded) {
+            session.chunks.forEach { chunk ->
+                ChunkRecordCard(
+                    chunk = chunk,
+                    expanded = expandedChunks[chunk.index] == true,
+                    onToggleExpand = {
+                        val current = expandedChunks[chunk.index] == true
+                        expandedChunks[chunk.index] = !current
+                    },
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChunkRecordCard(
+    chunk: ChunkRecord,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val timeLabel = remember(chunk.recordedAtEpochMs) {
+        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(chunk.recordedAtEpochMs))
+    }
+    val videoSizeLabel = buildString {
+        append(formatChunkBytes(chunk.videoSizeBytes))
+        if (chunk.isPartialChunk) append(" (partial)")
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.28f))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Chunk #${chunk.index}",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
             )
             Text(
                 text = chunk.resolution.label,
@@ -127,24 +266,10 @@ private fun ChunkRecordCard(
         }
 
         Text(
-            text = "Started $timeLabel",
+            text = "Started $timeLabel · ${chunk.recordDurationSec}s · $videoSizeLabel",
             color = Color(0xFFB0BEC5),
             style = MaterialTheme.typography.labelSmall,
-        )
-
-        Text(
-            text = "Record ${chunk.recordDurationSec}s · $videoSizeLabel",
-            color = Color(0xFFE0E0E0),
-            style = MaterialTheme.typography.labelSmall,
-        )
-
-        Text(
-            text = chunk.videoAbsolutePath,
-            color = Color(0xFF78909C),
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            fontSize = 10.sp,
         )
 
         Row(
@@ -170,6 +295,7 @@ private fun ChunkRecordCard(
                     else -> Color(0xFF90A4AE)
                 },
                 style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
                 modifier = Modifier.weight(1f),
             )
             if (chunk.status == ChunkProcessStatus.Done || chunk.status == ChunkProcessStatus.Failed) {
@@ -177,6 +303,7 @@ private fun ChunkRecordCard(
                     text = if (expanded) "Hide" else "Show",
                     color = Color(0xFFB0BEC5),
                     style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
                 )
             }
         }
@@ -187,6 +314,7 @@ private fun ChunkRecordCard(
                     text = chunk.extractionTarget.noKeptLabel,
                     color = Color(0xFFFFAB91),
                     style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
                     modifier = Modifier.padding(start = 4.dp),
                 )
             } else {
@@ -195,19 +323,10 @@ private fun ChunkRecordCard(
                         text = "${image.fileName}  ${formatChunkBytes(image.sizeBytes)}",
                         color = Color(0xFFCFD8DC),
                         style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 4.dp),
-                    )
-                    Text(
-                        text = image.absolutePath,
-                        color = Color(0xFF78909C),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 8.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 8.dp, bottom = 2.dp),
                     )
                 }
             }

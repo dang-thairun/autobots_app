@@ -20,6 +20,7 @@ enum class ChunkProcessStatus {
  * Session log entry for one recorded video chunk.
  */
 data class ChunkRecord(
+    val sessionId: String = "",
     val index: Int,
     val videoFileName: String,
     val videoAbsolutePath: String,

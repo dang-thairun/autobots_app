@@ -148,6 +148,8 @@ class CapturePipelineCoordinator(
                                 processDurationMs = result.durationMs,
                                 facesKept = result.kept,
                                 facesSkipped = result.skipped,
+                                framesSampled = result.framesSampled,
+                                sampleIntervalMs = resolution.frameSampleIntervalMs,
                                 extractedImages = images,
                             )
                         }
@@ -329,6 +331,7 @@ class CapturePipelineCoordinator(
             videoSizeBytes = meta.videoSizeBytes,
             targetVideoBytes = resolution.chunkTargetBytes,
             status = ChunkProcessStatus.Pending,
+            sampleIntervalMs = resolution.frameSampleIntervalMs,
         )
         scope.launch {
             historyLock.withLock {
@@ -449,16 +452,32 @@ class CapturePipelineCoordinator(
     }
 
     private fun writeSessionLog(session: PipelineSessionRecord) {
-        deliveryWriter.publishText(
-            LocalDeliveryWriter.SESSION_LOG_FILE,
-            session.toLogText(),
-        )
+        val text = session.toLogText()
+        if (session.albumFolderName.isNotEmpty()) {
+            deliveryWriter.albumSubfolder = session.albumFolderName
+        }
+        runCatching {
+            sessionDir.mkdirs()
+            File(sessionDir, LocalDeliveryWriter.SESSION_LOG_FILE).writeText(text)
+            if (session.albumFolderName.isNotEmpty()) {
+                val mirrorDir = File(appContext.cacheDir, "autobots/logs/${session.albumFolderName}")
+                mirrorDir.mkdirs()
+                File(mirrorDir, LocalDeliveryWriter.SESSION_LOG_FILE).writeText(text)
+            }
+        }.onFailure { error ->
+            Log.e(TAG, "Session log cache write failed for ${session.albumFolderName}", error)
+        }
+        runCatching {
+            deliveryWriter.publishText(LocalDeliveryWriter.SESSION_LOG_FILE, text)
+        }.onFailure { error ->
+            Log.e(TAG, "Session log gallery write failed for ${session.albumFolderName}", error)
+        }
     }
 
     private fun beginSession(source: SessionSource, displayName: String) {
         val startedAt = System.currentTimeMillis()
         val albumFolder = when (source) {
-            SessionSource.VideoImport -> SessionAlbumNaming.importFolder(displayName)
+            SessionSource.VideoImport -> SessionAlbumNaming.importFolder(startedAt)
             SessionSource.LiveCapture -> SessionAlbumNaming.liveFolder(startedAt)
         }
         deliveryWriter.albumSubfolder = albumFolder

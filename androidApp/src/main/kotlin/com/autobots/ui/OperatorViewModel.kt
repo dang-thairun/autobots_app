@@ -87,14 +87,11 @@ data class OperatorUiState(
         get() {
             if (!isProcessing) return ""
             val chunkLabel = processingChunkName?.substringBefore('.') ?: "chunk"
-            val queue = videoQueueDepth
             val gallery = imageQueuePending
             return buildString {
                 append("Processing $chunkLabel")
-                append(" · ${processingPercent}%")
                 append(" · ${chunksProcessed}/${videoChunksRecorded} chunks")
                 if (currentChunkPercent in 1..99) append(" · scan $currentChunkPercent%")
-                if (queue > 0) append(" · VQ $queue")
                 if (gallery > 0) append(" · save $gallery")
             }
         }

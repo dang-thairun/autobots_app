@@ -5,13 +5,10 @@ import java.util.Date
 import java.util.Locale
 
 object SessionAlbumNaming {
-    private val invalidChars = Regex("""[\\/:*?"<>|]""")
-
-    /** `aa11.mp4` → `aa11_extraction` */
-    fun importFolder(videoDisplayName: String): String {
-        val base = videoDisplayName.substringBeforeLast('.').ifEmpty { videoDisplayName }
-        val sanitized = sanitize(base).ifEmpty { "video" }
-        return "${sanitized}_extraction"
+    /** Video import → `ext_07082026_1415` from session start time. */
+    fun importFolder(startedAtEpochMs: Long): String {
+        val stamp = SimpleDateFormat("ddMMyyyy_HHmm", Locale.US).format(Date(startedAtEpochMs))
+        return "ext_$stamp"
     }
 
     /** Live capture → `20260806_140532` from session start time. */
@@ -25,13 +22,5 @@ object SessionAlbumNaming {
         } else {
             LocalDeliveryWriter.RELATIVE_PATH
         }
-    }
-
-    private fun sanitize(name: String): String {
-        return name.trim()
-            .replace(invalidChars, "_")
-            .replace(Regex("_+"), "_")
-            .trim('_')
-            .take(64)
     }
 }

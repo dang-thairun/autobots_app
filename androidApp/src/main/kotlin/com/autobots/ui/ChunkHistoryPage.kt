@@ -173,6 +173,14 @@ private fun SessionRecordCard(
             style = MaterialTheme.typography.labelMedium,
         )
 
+        session.detectionSummary?.let { detection ->
+            Text(
+                text = detection,
+                color = Color(0xFF80CBC4),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
         if (session.totalDurationMs > 0) {
             Text(
                 text = session.timingSummary,
@@ -290,11 +298,20 @@ private fun ChunkRecordCard(
         }
 
         Text(
-            text = "Started $timeLabel · ${chunk.recordDurationSec}s · $videoSizeLabel",
+            text = "Started $timeLabel · ${chunk.recordDurationLabel} · $videoSizeLabel",
             color = Color(0xFFB0BEC5),
             style = MaterialTheme.typography.labelSmall,
             fontSize = 10.sp,
         )
+
+        if (chunk.status == ChunkProcessStatus.Done && chunk.framesSampled > 0) {
+            Text(
+                text = "Sample ${chunk.sampleIntervalMs}ms · ${chunk.framesSampled} frames",
+                color = Color(0xFF78909C),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+            )
+        }
 
         Row(
             modifier = Modifier
@@ -333,6 +350,15 @@ private fun ChunkRecordCard(
         }
 
         if (expanded && chunk.status == ChunkProcessStatus.Done) {
+            chunk.processStatsLine?.let { stats ->
+                Text(
+                    text = stats,
+                    color = Color(0xFF90A4AE),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
             if (chunk.facesKept == 0) {
                 Text(
                     text = chunk.extractionTarget.noKeptLabel,

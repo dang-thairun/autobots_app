@@ -101,6 +101,29 @@ data class PipelineSessionRecord(
             SessionStatus.Done -> null
             SessionStatus.Failed -> errorMessage ?: "Failed"
         }
+
+    val framesSampledTotal: Int
+        get() = chunks.sumOf { it.framesSampled }
+
+    val detectionHitPercent: Int
+        get() = if (framesSampledTotal > 0) ((facesKept * 100.0) / framesSampledTotal).toInt() else 0
+
+    val avgFrameProcessMs: Long
+        get() {
+            val frames = framesSampledTotal
+            return if (frames > 0) processDurationMs / frames else 0L
+        }
+
+    val detectionSummary: String?
+        get() {
+            val frames = framesSampledTotal
+            if (frames <= 0) return null
+            return buildString {
+                append("Found $facesKept ${extractionTarget.keptNoun} from $frames frames ($detectionHitPercent%)")
+                append(" · avg ${avgFrameProcessMs}ms/frame")
+                append(" · sample ${StreamResolution.FRAME_SAMPLE_INTERVAL_MS}ms")
+            }
+        }
 }
 
 /** Plain-text session log for saving alongside extracted photos. */
@@ -129,6 +152,7 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
     appendLine("Chunks: $chunkCount (done $chunksDone)")
     appendLine("Photos kept: $facesKept ${extractionTarget.keptNoun}")
     appendLine("Photos skipped: $facesSkipped")
+    detectionSummary?.let { appendLine(it) }
     appendLine(headlineSummary)
     if (totalDurationMs > 0) appendLine(timingSummary)
     splitDurationMs.takeIf { it > 0 }?.let {
@@ -149,8 +173,15 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
             appendLine()
             appendLine("Chunk #${chunk.index}")
             appendLine("  Video: ${chunk.videoFileName}")
-            appendLine("  Record: ${chunk.recordDurationSec}s · ${formatChunkBytes(chunk.videoSizeBytes)}")
-            appendLine("  Extract: ${chunk.extractSummary}")
+            appendLine("  Duration: ${chunk.recordDurationLabel} · ${formatChunkBytes(chunk.videoSizeBytes)}")
+            if (chunk.framesSampled > 0) {
+                appendLine("  Sample interval: ${chunk.sampleIntervalMs} ms")
+                appendLine("  Frames sampled: ${chunk.framesSampled}")
+                chunk.detectionSummary?.let { appendLine("  $it") }
+                chunk.processStatsLine?.let { appendLine("  $it") }
+            } else if (chunk.status == ChunkProcessStatus.Done) {
+                appendLine("  Extract: ${chunk.extractSummary}")
+            }
             if (chunk.extractedImages.isNotEmpty()) {
                 chunk.extractedImages.forEach { image ->
                     appendLine("    - ${image.fileName} (${formatChunkBytes(image.sizeBytes)})")
@@ -178,6 +209,14 @@ fun formatDurationMs(ms: Long): String {
     val min = totalSec / 60
     val sec = totalSec % 60
     return if (min > 0) "${min}m ${sec}s" else "${sec}s"
+}
+
+/** Precise duration in seconds with millisecond precision (e.g. 45.123 s, 83.456 s). */
+fun formatPreciseDurationMs(ms: Long): String {
+    val clamped = ms.coerceAtLeast(0)
+    val seconds = clamped / 1000
+    val millis = clamped % 1000
+    return "${seconds}.${millis.toString().padStart(3, '0')} s"
 }
 
 /** Source video length (e.g. "5:30", "42s"). */

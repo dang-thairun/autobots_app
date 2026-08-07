@@ -279,10 +279,10 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
             trackColor = Color.White.copy(alpha = 0.2f),
         )
         Text(
-            text = if (active) {
-                "${state.processingPercent}% overall · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
-            } else {
-                "Idle · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
+            text = when {
+                !active -> "Idle · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
+                state.isImporting -> "${state.extractionTarget.keptNoun} found ${state.facesKept}"
+                else -> "${state.processingPercent}% overall · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
             },
             color = Color(0xFF78909C),
             style = MaterialTheme.typography.labelSmall,

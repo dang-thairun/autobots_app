@@ -19,7 +19,7 @@ class LocalDeliveryWriter(
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
 
-    /** Subfolder under DCIM/AutoBots, e.g. `aa11_extraction` or `20260806_140532`. */
+    /** Subfolder under DCIM/AutoBots, e.g. `ext_07082026_1415` or `20260806_140532`. */
     @Volatile
     var albumSubfolder: String = ""
 
@@ -70,35 +70,53 @@ class LocalDeliveryWriter(
         }
     }
 
+    /**
+     * Session log / plain text next to JPEGs under DCIM/AutoBots when possible.
+     * MediaStore.Files does not allow RELATIVE_PATH under DCIM on API 29+ (crashes on insert).
+     */
     fun publishText(fileName: String, content: String): Uri? {
+        val legacy = legacyPublishText(fileName, content)
+        if (legacy != null) return legacy
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, galleryRelativePath())
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val uri = resolver.insert(collection, values) ?: return legacyPublishText(fileName, content)
-            return try {
-                resolver.openOutputStream(uri)?.use { out ->
-                    out.write(content.toByteArray(Charsets.UTF_8))
-                } ?: run {
-                    resolver.delete(uri, null, null)
-                    return legacyPublishText(fileName, content)
-                }
-                values.clear()
-                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-                Log.i(TAG, "Delivered $fileName → $uri (${galleryRelativePath()})")
-                uri
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to publish $fileName", t)
-                runCatching { resolver.delete(uri, null, null) }
-                legacyPublishText(fileName, content)
+            return publishTextToDownloads(fileName, content)
+        }
+        return null
+    }
+
+    private fun publishTextToDownloads(fileName: String, content: String): Uri? {
+        val relativePath = buildString {
+            append(Environment.DIRECTORY_DOWNLOADS)
+            append("/")
+            append(ALBUM_NAME)
+            if (albumSubfolder.isNotEmpty()) {
+                append("/")
+                append(albumSubfolder)
             }
         }
-        return legacyPublishText(fileName, content)
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        return try {
+            val uri = resolver.insert(collection, values) ?: return null
+            resolver.openOutputStream(uri)?.use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+            } ?: run {
+                resolver.delete(uri, null, null)
+                return null
+            }
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            Log.i(TAG, "Delivered $fileName → $uri ($relativePath)")
+            uri
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to publish $fileName to Downloads", t)
+            null
+        }
     }
 
     private fun galleryRelativePath(): String =

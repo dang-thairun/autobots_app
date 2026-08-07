@@ -178,15 +178,19 @@ MainActivity.kt
 ```
 VideoChunkRecorder.start()
   │
-  ├── บันทึกวิดีโอทีละ chunk (ขนาดจำกัด)
+  ├── บันทึกวิดีโอทีละ chunk (ขนาดจำกัดตาม bytes)
   ├── เมื่อ chunk ครบ target bytes → หยุด chunk เก่า → เริ่ม chunk ใหม่
   │
-  ├── FHD: chunkTargetBytes = 50 MB  → chunk ทุก ~30 วินาที
-  └── UHD: chunkTargetBytes = 50 MB  → chunk ทุก ~60 วินาที
+  ├── FHD และ UHD ใช้ chunkTargetBytes เดียวกัน = 50 MB (StreamResolution.CHUNK_TARGET_BYTES)
+  │
+  ├── FHD (~10–15 Mbps): 50 MB เต็มช้ากว่า  → chunk ทุก ~**30–40 วินาที**
+  └── UHD (~25–50 Mbps): 50 MB เต็มเร็วกว่า → chunk ทุก ~**12–20 วินาที**
   │
   └─ เมื่อ chunk เสร็จ (Finalize event):
        └─ ส่ง ChunkCaptureMeta → เข้า videoQueue → Worker 2 เริ่มประมวลผล
 ```
+
+> **ทำไม UHD ไม่ได้ยาวกว่า?** — เป้าคือ **ขนาดไฟล์** (50 MB) ไม่ใช่เวลา 4K encode ข้อมูลหนักกว่าต่อวินาที → ครบ 50 MB **เร็วกว่า** → สลับ chunk บ่อยกว่า FHD (เอกสารเก่าที่เขียน ~60s สำหรับ UHD **ผิด**)
 
 ### Step 3: Worker 2 ประมวลผล Chunk (GPU Pipeline)
 
@@ -234,7 +238,7 @@ WriteQueue.enqueue(jpegFile)
   └─ [Dispatchers.IO — background thread]
        └─ LocalDeliveryWriter.publish(file)
             ├── โฟลเดอร์ย่อยใต้ DCIM/AutoBots:
-            │   ├── Import: `{ชื่อไฟล์}_extraction` (เช่น `aa11_extraction`)
+            │   ├── Import: `ext_DDMMYYYY_HHMM` (เช่น `ext_07082026_1415`)
             │   └── Live:   `{yyyyMMdd_HHmmss}` จากเวลา Start
             ├── รูป: `face_c000_123456.jpg` / `pose_c000_123456.jpg`
             ├── `session_log.txt` — สรุป session (chunks, photos, timing)
@@ -248,9 +252,9 @@ WriteQueue.enqueue(jpegFile)
 ```
 Live Capture (5 นาที):
   │
-  ├── Worker 1: บันทึก ~10 chunks (FHD 50MB/chunk)
+  ├── Worker 1: บันทึก ~8–10 chunks (FHD) หรือ ~15–25 chunks (UHD) — ทุก chunk 50 MB
   │
-  ├── Worker 2: ประมวลผล ~10 chunks (GPU Pipeline)
+  ├── Worker 2: ประมวลผล chunks (ตาม queue)
   │    ├── Hardware decode → NNAPI detect → GPU sharpness → dedup
   │    └── เก็บ ~30-50 photos (หลัง sharpness + dedup)
   │
@@ -379,17 +383,20 @@ Session history — สรุประดับ session (ไม่ใช่แ�
 
 | Parameter | FHD | UHD |
 |-----------|-----|-----|
-| Chunks (~50 MB) | ~10 | ~5 |
+| Chunk เป้า | 50 MB | 50 MB |
+| ระยะเวลาต่อ chunk (โดยประมาณ) | ~30–40 s | ~12–20 s |
+| จำนวน chunk ใน 5 นาที | ~8–10 | ~**15–25** |
 | Frames sampled (5 min) | 300s ÷ 0.12s ≈ **2500** | 300s ÷ 0.12s ≈ **2500** |
 | Photos kept (หลัง filter) | ~30–50 | ~30–50 |
 
-> จำนวน photos จริงขึ้นกับ sharpness, ขนาดหน้า/ลำตัว, และ dedup 1 วินาที
+> Bitrate จริงขึ้นกับเครื่อง/codec — ตัวเลข chunk เป็นค่าประมาณ  
+> Frames sampled เท่ากันเพราะอิง **ความยาววิดีโอรวม** (5 นาที) ไม่ใช่จำนวน chunk
 
 ### Gallery path
 
 ```
 DCIM/AutoBots/
-├── aa11_extraction/          ← import aa11.mp4
+├── ext_07082026_1415/        ← import video
 │   ├── face_c000_….jpg
 │   └── session_log.txt
 └── 20260806_160512/        ← live capture
@@ -487,7 +494,7 @@ DCIM/AutoBots/
 |--------|------------|
 | **Sample interval** | **120 ms** ทุก resolution (`StreamResolution.kt`) |
 | **Import resolution** | Auto-detect จากไฟล์ — ไม่ใช้ค่า UI |
-| **Gallery folders** | `DCIM/AutoBots/{name}_extraction` หรือ `{timestamp}` |
+| **Gallery folders** | `DCIM/AutoBots/ext_DDMMYYYY_HHMM` (import) หรือ `{yyyyMMdd_HHmmss}` (live) |
 | **Session log** | `session_log.txt` ในโฟลเดอร์เดียวกับรูป |
 | **Session history UI** | สรุป session + แสดงเฉพาะ chunk ที่ detect ได้ (import) |
 | **Sharpness** | CPU `FaceSharpnessScorer` (ไม่ใช่ GPU shader) |

@@ -17,8 +17,23 @@ data class ImportSplitResult(
     val totalBytes: Long,
     val sourceDurationMs: Long,
     val rotationDegrees: Int = 0,
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
     val error: String? = null,
 )
+
+data class VideoProbeResult(
+    val width: Int,
+    val height: Int,
+    val rotationDegrees: Int,
+    val durationMs: Long,
+) {
+    val displayWidth: Int
+        get() = if (rotationDegrees == 90 || rotationDegrees == 270) height else width
+
+    val displayHeight: Int
+        get() = if (rotationDegrees == 90 || rotationDegrees == 270) width else height
+}
 
 /**
  * Turns a user-picked video into pipeline chunks by **remuxing** the video track —
@@ -36,6 +51,27 @@ class ImportedVideoSplitter(
     private val context: Context,
     private val videoDir: File,
 ) {
+    fun probe(source: Uri): VideoProbeResult? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, source)
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull() ?: return null
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull() ?: return null
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            VideoProbeResult(width, height, rotation, durationMs)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Video probe failed", t)
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
     suspend fun split(
         source: Uri,
         targetSegmentBytes: Long,
@@ -50,6 +86,8 @@ class ImportedVideoSplitter(
         var totalBytes = 0L
         var durationUs = 0L
         val rotation = readRotationDegrees(source)
+        var videoWidth = 0
+        var videoHeight = 0
 
         try {
             extractor.setDataSource(context, source, null)
@@ -63,11 +101,16 @@ class ImportedVideoSplitter(
                 }
             }
             if (trackIndex < 0) {
-                return ImportSplitResult(0, 0L, 0L, rotation, "No video track in the selected file")
+                return ImportSplitResult(
+                    0, 0L, 0L, rotation, 0, 0,
+                    "No video track in the selected file",
+                )
             }
 
             extractor.selectTrack(trackIndex)
             val format = extractor.getTrackFormat(trackIndex)
+            videoWidth = runCatching { format.getInteger(MediaFormat.KEY_WIDTH) }.getOrDefault(0)
+            videoHeight = runCatching { format.getInteger(MediaFormat.KEY_HEIGHT) }.getOrDefault(0)
             durationUs = runCatching { format.getLong(MediaFormat.KEY_DURATION) }.getOrDefault(0L)
             val buffer = ByteBuffer.allocate(sampleBufferSize(format))
             val info = MediaCodec.BufferInfo()
@@ -161,6 +204,8 @@ class ImportedVideoSplitter(
                 totalBytes = totalBytes,
                 sourceDurationMs = durationUs / 1000L,
                 rotationDegrees = rotation,
+                videoWidth = videoWidth,
+                videoHeight = videoHeight,
                 error = t.message ?: t::class.java.simpleName,
             )
         } finally {
@@ -170,9 +215,16 @@ class ImportedVideoSplitter(
         Log.i(
             TAG,
             "Imported $segments segment(s), ${totalBytes / 1024}KB, " +
-                "source ${durationUs / 1000}ms, rotation ${rotation}°",
+                "source ${videoWidth}x${videoHeight} ${durationUs / 1000}ms, rotation ${rotation}°",
         )
-        return ImportSplitResult(segments, totalBytes, durationUs / 1000L, rotation)
+        return ImportSplitResult(
+            segments,
+            totalBytes,
+            durationUs / 1000L,
+            rotation,
+            videoWidth,
+            videoHeight,
+        )
     }
 
     /** Honour the same backpressure the live recorder obeys — never overrun the queue. */

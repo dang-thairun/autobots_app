@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.autobots.camera.ChunkProcessStatus
 import com.autobots.camera.ChunkRecord
 import com.autobots.camera.PipelineSessionRecord
+import com.autobots.camera.SessionSource
 import com.autobots.camera.SessionStatus
 import com.autobots.camera.formatChunkBytes
 import java.text.SimpleDateFormat
@@ -106,6 +107,15 @@ private fun SessionRecordCard(
         SessionStatus.Failed -> Color(0xFFFFAB91)
         else -> Color(0xFF90A4AE)
     }
+    val visibleChunks = remember(session.chunks, session.source) {
+        if (session.source == SessionSource.VideoImport) {
+            session.chunks.filter {
+                it.status == ChunkProcessStatus.Done && it.facesKept > 0
+            }
+        } else {
+            session.chunks
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -139,7 +149,7 @@ private fun SessionRecordCard(
             text = buildString {
                 append(session.sourceLabel)
                 append(" · ")
-                append(session.resolution.label)
+                append(session.resolutionLine)
                 append(" · ")
                 append(session.extractionTarget.label)
                 append(" · started $startedLabel")
@@ -171,6 +181,16 @@ private fun SessionRecordCard(
             )
         }
 
+        if (session.albumFolderName.isNotEmpty()) {
+            Text(
+                text = "Gallery: ${session.galleryPath}",
+                color = Color(0xFF78909C),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                maxLines = 2,
+            )
+        }
+
         session.progressLine?.let { progress ->
             Text(
                 text = progress,
@@ -187,7 +207,7 @@ private fun SessionRecordCard(
             )
         }
 
-        if (session.chunks.isNotEmpty()) {
+        if (visibleChunks.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -196,7 +216,11 @@ private fun SessionRecordCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "${session.chunks.size} chunks",
+                    text = if (session.source == SessionSource.VideoImport) {
+                        "${visibleChunks.size} chunks with ${session.extractionTarget.keptNoun}"
+                    } else {
+                        "${visibleChunks.size} chunks"
+                    },
                     color = Color(0xFFB0BEC5),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.weight(1f),
@@ -210,7 +234,7 @@ private fun SessionRecordCard(
         }
 
         if (expanded) {
-            session.chunks.forEach { chunk ->
+            visibleChunks.forEach { chunk ->
                 ChunkRecordCard(
                     chunk = chunk,
                     expanded = expandedChunks[chunk.index] == true,

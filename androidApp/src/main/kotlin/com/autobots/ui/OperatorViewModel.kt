@@ -10,6 +10,7 @@ import com.autobots.camera.ChunkRecordingProgress
 import com.autobots.camera.PipelineSessionRecord
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
+import com.autobots.camera.SessionSource
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.formatChunkBytes
 import com.autobots.camera.load.DeviceLoadReader
@@ -112,10 +113,11 @@ data class OperatorUiState(
             return "Importing $name · splitting $importPercent%"
         }
 
-    /** Can Worker 2 keep up, and how long until a photo lands? Empty until a chunk finishes. */
+    /** Can Worker 2 keep up, and how long until a photo lands? Live capture only. */
     val throughputLine: String
         get() {
             if (lastRealtimeRatio <= 0f) return ""
+            if (sessionHistory.any { it.source == SessionSource.VideoImport }) return ""
             return buildString {
                 append(String.format("%.2fx realtime", lastRealtimeRatio))
                 if (avgPhotoLatencyMs > 0) {

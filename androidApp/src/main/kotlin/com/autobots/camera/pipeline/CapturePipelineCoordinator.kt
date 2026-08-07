@@ -14,7 +14,9 @@ import com.autobots.camera.capture.ChunkCaptureMeta
 import com.autobots.camera.capture.ImportSplitResult
 import com.autobots.camera.capture.ImportedVideoSplitter
 import com.autobots.camera.delivery.LocalDeliveryWriter
+import com.autobots.camera.delivery.SessionAlbumNaming
 import com.autobots.camera.delivery.WriteQueue
+import com.autobots.camera.toLogText
 import com.autobots.camera.perf.CamPerf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -216,8 +218,29 @@ class CapturePipelineCoordinator(
 
         val splitter = ImportedVideoSplitter(appContext, File(sessionDir, "video"))
         return try {
-            // Remuxing is blocking I/O — never on the caller's (main) thread.
-            val result = withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                val probe = splitter.probe(source)
+                if (probe != null) {
+                    val detected = StreamResolution.fromVideoDimensions(
+                        probe.width,
+                        probe.height,
+                        probe.rotationDegrees,
+                    )
+                    setResolution(detected)
+                    sessionMeta?.sourceVideoWidth = probe.width
+                    sessionMeta?.sourceVideoHeight = probe.height
+                    sessionMeta?.sourceRotationDegrees = probe.rotationDegrees
+                    sessionMeta?.sourceDurationMs = probe.durationMs.takeIf { it > 0 }
+                    Log.i(
+                        TAG,
+                        "Import probe ${probe.displayWidth}x${probe.displayHeight} " +
+                            "(rot ${probe.rotationDegrees}°) → ${detected.label}",
+                    )
+                    publishStats()
+                } else {
+                    Log.w(TAG, "Import probe failed; using UI resolution ${resolution.label}")
+                }
+
                 splitter.split(
                     source = source,
                     targetSegmentBytes = resolution.chunkTargetBytes,
@@ -229,20 +252,25 @@ class CapturePipelineCoordinator(
                         publishStats()
                     },
                 )
+            }.also { result ->
+                sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
+                if (result.videoWidth > 0 && result.videoHeight > 0) {
+                    sessionMeta?.sourceVideoWidth = result.videoWidth
+                    sessionMeta?.sourceVideoHeight = result.videoHeight
+                    sessionMeta?.sourceRotationDegrees = result.rotationDegrees
+                }
+                sessionMeta?.sourceDurationMs = result.sourceDurationMs.takeIf { it > 0 }
+                sessionMeta?.sourceSizeBytes = result.totalBytes.takeIf { it > 0 }
+                if (result.error != null || result.segments == 0) {
+                    sessionMeta?.failed = true
+                    sessionMeta?.errorMessage = result.error ?: "No video segments produced"
+                }
+                Log.i(
+                    TAG,
+                    "Import ${displayName ?: source} -> ${result.segments} chunk(s)" +
+                        (result.error?.let { " (error: $it)" } ?: ""),
+                )
             }
-            sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
-            sessionMeta?.sourceDurationMs = result.sourceDurationMs.takeIf { it > 0 }
-            sessionMeta?.sourceSizeBytes = result.totalBytes.takeIf { it > 0 }
-            if (result.error != null || result.segments == 0) {
-                sessionMeta?.failed = true
-                sessionMeta?.errorMessage = result.error ?: "No video segments produced"
-            }
-            Log.i(
-                TAG,
-                "Import ${displayName ?: source} -> ${result.segments} chunk(s)" +
-                    (result.error?.let { " (error: $it)" } ?: ""),
-            )
-            result
         } catch (t: Throwable) {
             sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
             sessionMeta?.failed = true
@@ -409,16 +437,36 @@ class CapturePipelineCoordinator(
 
     private fun maybeNotifyDrainComplete() {
         if (closed || recording || isBusy()) return
-        finalizeCurrentSession()
-        publishStats()
-        onDrainComplete()
+        scope.launch {
+            finalizeCurrentSession()
+            val session = historyLock.withLock { buildSessionRecord(chunkHistory.toList()) }
+            publishStats()
+            withContext(Dispatchers.IO) {
+                session?.let { writeSessionLog(it) }
+            }
+            onDrainComplete()
+        }
+    }
+
+    private fun writeSessionLog(session: PipelineSessionRecord) {
+        deliveryWriter.publishText(
+            LocalDeliveryWriter.SESSION_LOG_FILE,
+            session.toLogText(),
+        )
     }
 
     private fun beginSession(source: SessionSource, displayName: String) {
+        val startedAt = System.currentTimeMillis()
+        val albumFolder = when (source) {
+            SessionSource.VideoImport -> SessionAlbumNaming.importFolder(displayName)
+            SessionSource.LiveCapture -> SessionAlbumNaming.liveFolder(startedAt)
+        }
+        deliveryWriter.albumSubfolder = albumFolder
         sessionMeta = SessionMeta(
             source = source,
             displayName = displayName,
-            startedAtEpochMs = System.currentTimeMillis(),
+            startedAtEpochMs = startedAt,
+            albumFolderName = albumFolder,
         )
     }
 
@@ -481,6 +529,9 @@ class CapturePipelineCoordinator(
             startedAtEpochMs = meta.startedAtEpochMs,
             sourceDurationMs = meta.sourceDurationMs,
             sourceSizeBytes = meta.sourceSizeBytes,
+            sourceVideoWidth = meta.sourceVideoWidth,
+            sourceVideoHeight = meta.sourceVideoHeight,
+            sourceRotationDegrees = meta.sourceRotationDegrees,
             resolution = resolution,
             extractionTarget = extractionTarget,
             status = status,
@@ -492,6 +543,7 @@ class CapturePipelineCoordinator(
             facesKept = facesKeptTotal,
             facesSkipped = facesSkippedTotal,
             errorMessage = meta.errorMessage,
+            albumFolderName = meta.albumFolderName,
             chunks = chunks,
         )
     }
@@ -500,9 +552,13 @@ class CapturePipelineCoordinator(
         val source: SessionSource,
         val displayName: String,
         val startedAtEpochMs: Long,
+        val albumFolderName: String,
         var status: SessionStatus = SessionStatus.Processing,
         var sourceDurationMs: Long? = null,
         var sourceSizeBytes: Long? = null,
+        var sourceVideoWidth: Int? = null,
+        var sourceVideoHeight: Int? = null,
+        var sourceRotationDegrees: Int = 0,
         var splitDurationMs: Long = 0,
         var errorMessage: String? = null,
         var failed: Boolean = false,

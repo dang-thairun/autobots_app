@@ -13,14 +13,21 @@ enum class StreamResolution(val label: String, val width: Int, val height: Int) 
         get() = CHUNK_TARGET_BYTES
 
     val frameSampleIntervalMs: Long
-        get() = when (this) {
-            Fhd -> FRAME_SAMPLE_INTERVAL_FHD_MS
-            Uhd -> FRAME_SAMPLE_INTERVAL_UHD_MS
-        }
+        get() = FRAME_SAMPLE_INTERVAL_MS
 
     companion object {
         const val CHUNK_TARGET_BYTES = 50L * 1024L * 1024L
-        const val FRAME_SAMPLE_INTERVAL_FHD_MS = 300L
-        const val FRAME_SAMPLE_INTERVAL_UHD_MS = 180L
+        /** Frame sample interval for both 1080p and 4K — Worker 2 decodes every N ms. */
+        const val FRAME_SAMPLE_INTERVAL_MS = 120L
+
+        /** Map imported file dimensions to the pipeline profile (FHD vs UHD). */
+        fun fromVideoDimensions(width: Int, height: Int, rotationDegrees: Int = 0): StreamResolution {
+            val rotated = rotationDegrees == 90 || rotationDegrees == 270
+            val displayW = if (rotated) height else width
+            val displayH = if (rotated) width else height
+            val longEdge = maxOf(displayW, displayH)
+            // 2160p and above → UHD profile (lower sharpness threshold).
+            return if (longEdge >= 2160) Uhd else Fhd
+        }
     }
 }

@@ -31,14 +31,16 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 GPU Pipeline Components
+### 1.2 Pipeline Components (ปัจจุบัน)
 
-| Stage | Technology | Acceleration | Speedup |
-|-------|-----------|-------------|---------|
-| **Decode** | MediaCodec (Hardware) | VPU/NPU | 3–5× |
-| **Detect** | ML Kit + NNAPI | NPU | 5–10× |
-| **Sharpness** | OpenGL ES 2.0 | GPU (Vulkan) | 10–50× |
-| **Save** | MediaStore (Direct) | OS-level | — |
+| Stage | Technology | หมายเหตุ |
+|-------|-----------|----------|
+| **Decode** | MediaCodec (Hardware) | VPU — `VideoFrameSampler` |
+| **Detect** | ML Kit Face / Pose (bundled TFLite) | `OfflineFaceDetector` / `OfflinePoseDetector` |
+| **Sharpness** | Laplacian variance (CPU) | `FaceSharpnessScorer.scoreNormalized()` |
+| **Save** | MediaStore → `DCIM/AutoBots/{subfolder}/` | `LocalDeliveryWriter` + `session_log.txt` |
+
+> ML Kit จัดการ hardware delegate ภายใน SDK เอง — **ไม่ได้** เปิด NNAPI โดยตรงจากแอป
 
 ---
 
@@ -78,64 +80,74 @@ StreamResolution.Fhd -> ProcessProfile(minSharpness = 80.0)
 StreamResolution.Uhd -> ProcessProfile(minSharpness = 65.0)  // compensating ISP NR
 ```
 
-### 2.4 การชดเชย — Sampling Rate
+### 2.4 Frame Sample Interval (ค่าปัจจุบันในโค้ด)
+
+ค่าอยู่ที่ `StreamResolution.kt` — **ทุก resolution ใช้ interval เดียวกัน**:
+
+| Profile | Interval | ~samples/sec |
+|---------|----------|--------------|
+| **FHD (1080p)** | **120 ms** | ~8.3 fps |
+| **UHD (4K)** | **120 ms** | ~8.3 fps |
 
 ```kotlin
-// 4K ต้อง sample บ่อยขึ้น (120ms) เพื่อ compensating sharpness ที่ต่ำลง
-Fhd  → frameSampleIntervalMs = 300L   // sample ทุก 300ms
-Uhd  → frameSampleIntervalMs = 180L   // sample ทุก 180ms (ปรับปรุง)
+// shared/.../StreamResolution.kt
+const val FRAME_SAMPLE_INTERVAL_MS = 120L
+
+val frameSampleIntervalMs: Long
+    get() = FRAME_SAMPLE_INTERVAL_MS
 ```
+
+**ความต่าง FHD vs UHD** อยู่ที่ **min sharpness** (80 vs 65) ไม่ใช่ interval — UHD ยัง detect auto จากไฟล์ import (`long edge ≥ 2160`)
 
 ---
 
-## 3. GPU Pipeline — End-to-End Acceleration
+## 3. Worker 2 — ขั้นตอนประมวลผลต่อ Chunk
 
 ### 3.1 Hardware Decoder (MediaCodec)
 
 ```kotlin
-// VideoFrameSampler — ใช้ Hardware Decoder แทน Software
-val hwDecoder = findHardwareDecoder(mime)  // ค้นหา hardware decoder จาก MediaCodecList
+// VideoFrameSampler — hardware decoder ก่อน, fallback software
+val hwDecoder = findHardwareDecoder(mime)
 val decoder = if (hwDecoder != null) {
-    MediaCodec.createByCodecName(hwDecoder)  // ใช้ hardware decoder
+    MediaCodec.createByCodecName(hwDecoder)
 } else {
-    MediaCodec.createDecoderByType(mime)     // fallback: software
+    MediaCodec.createDecoderByType(mime)
 }
 ```
 
-**ผล:** Decode เร็วขึ้น 3–5× — ใช้ dedicated video decode hardware (VPU) แทน CPU
+Decoder อ่าน frame แล้ว **ข้ามไป sample ทุก 120 ms** — ไม่ decode ทุก frame ในวิดีโอ
 
-### 3.2 ML Kit + NNAPI (NPU)
+### 3.2 ML Kit Detection
 
 ```kotlin
-// OfflineFaceDetector — เปิด NNAPI (NPU) + Face Tracking
-val options = FaceDetectorOptions.Builder()
-    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)  // NNAPI
-    .setTrackingEnabled(true)  // Face tracking — detect ครั้งเดียว track ต่อ
+// Face — OfflineFaceDetector.kt
+FaceDetectorOptions.Builder()
+    .setPerformanceMode(PERFORMANCE_MODE_FAST)  // offline pipeline
     .setMinFaceSize(0.05f)
+    .enableTracking()
+    .build()
+
+// Pose — OfflinePoseDetector.kt
+PoseDetectorOptions.Builder()
+    .setDetectorMode(SINGLE_IMAGE_MODE)
     .build()
 ```
 
-**ผล:** Inference เร็วขึ้น 5–10× — ใช้ NPU (Neural Processing Unit) แทน CPU
+| Target | เงื่อนไขผ่าน | Detect bitmap |
+|--------|-------------|---------------|
+| **Face** | หน้าสูง ≥ 5% ความสูงเฟรม | scale กว้าง 640px |
+| **Pose** | ลำตัวสูง ≥ 25% (ไหล่+สะโพกครบ 4 จุด) | scale กว้าง 640px |
 
-### 3.3 GPU-Accelerated Sharpness (OpenGL ES 2.0)
+### 3.3 Sharpness (CPU Laplacian)
 
 ```kotlin
-// GpuSharpnessScorer — Laplacian variance บน GPU
-// Shader: Laplacian kernel (5-tap filter)
-//  0  1  0
-//  1 -4  1
-//  0  1  0
-// ทุก pixel ประมวลผล параллель — 10–50× เร็วขึ้น
+FaceSharpnessScorer.scoreNormalized(bitmap, roi)
+// threshold: FHD ≥ 80.0, UHD ≥ 65.0
 ```
 
-**ผล:** Sharpness scoring เร็วขึ้น 10–50× — GPU ประมวลผล parallel 1000+ pixels พร้อมกัน
+### 3.4 Dedup
 
-### 3.4 เปรียบเทียบความเร็ว
-
-| Method | Speed | CPU Load | Heat | Battery |
-|--------|-------|----------|------|---------|
-| **CPU เดิม** | 1x | 100% | สูง | 1x |
-| **GPU Pipeline** | 10–50x | 10% | ต่ำมาก | 0.2x |
+`DEDUP_WINDOW_US = 1_000_000` (1 วินาที) — เก็บเฟรมคมที่สุดต่อ window
 
 ---
 
@@ -182,31 +194,21 @@ VideoChunkRecorder.start()
 VideoFrameProcessor.process(chunkFile, chunkIndex, resolution, extractionTarget)
   │
   ├── [Stage 1: Frame Sampling — Hardware Decoder]
-  │  └─ MediaCodec (Hardware) อ่าน frame ทีละ sample ตาม interval:
+  │  └─ MediaCodec อ่าน frame ตาม interval จาก StreamResolution:
   │       │
-  │       ├── FHD: sample ทุก 300ms (~2 frames/sec)
-  │       ├── UHD: sample ทุก 180ms (~5 frames/sec)
+  │       ├── ทุก resolution: sample ทุก **120 ms** (~8.3 samples/sec)
   │       ├── YUV 420 → NV21 → JPEG 92% → Bitmap ARGB_8888
-  │       └── ถ้าไฟล์มี rotation ≠ 0 → rotate bitmap ให้ตั้งตรง
+  │       └── ถ้า rotation ≠ 0 → rotate bitmap
   │
-  ├── [Stage 2: Face/Pose Detection — NNAPI + Tracking]
+  ├── [Stage 2: Face / Pose Detection — ML Kit]
   │  └─ สำหรับแต่ละ frame ที่ sample ได้:
   │       │
-  │       ├── ถ้า target = Face:
-  │       │   ├── scale bitmap ลง 640px (detectBitmapWidth)
-  │       │   ├── ML Kit Face Detection (NNAPI + Tracking)
-  │       │   ├── Frame 1: Full detect → Frame 2–20: Track (fast!)
-  │       │   ├── map bounding box กลับไป full-size bitmap
-  │       │   ├── เลือก face ที่ใหญ่สุด (largest = ใกล้สุด)
-  │       │   ├── ตรวจสอบ subjectRatio ≥ 5% ของความสูง frame
-  │       │   ├── GpuSharpnessScorer.scoreGpu(bitmap, face)
-  │       │   │    └─ OpenGL ES 2.0 Laplacian shader (GPU parallel)
-  │       │   └── ถ้า sharpness ≥ threshold → FrameCandidate
+  │       ├── Face: scale 640px → ML Kit FAST + enableTracking()
+  │       │   → เลือก face ใหญ่สุด → subjectRatio ≥ 5%
+  │       │   → FaceSharpnessScorer (CPU) ≥ 80 (FHD) / 65 (UHD)
   │       │
-  │       └── ถ้า target = Pose:
-  │           ├── ML Kit Pose Detection (NNAPI)
-  │           ├── ตรวจสอบ torso bounds ≥ 25% ของความสูง frame
-  │           └── GpuSharpnessScorer.scoreGpu(bitmap, torso)
+  │       └── Pose: scale 640px → ML Kit Pose (ไหล่+สะโพก)
+  │           → torso ≥ 25% → sharpness เหมือน Face
   │
   ├── [Stage 3: Dedup + Best-of-Window]
   │  └─ DEDUP_WINDOW_US = 1,000,000 µs (1 วินาที):
@@ -231,13 +233,14 @@ WriteQueue.enqueue(jpegFile)
   │
   └─ [Dispatchers.IO — background thread]
        └─ LocalDeliveryWriter.publish(file)
-            ├── MediaStore.insert("DCIM/AutoBots")
-            │   ├── Android Q+: RELATIVE_PATH + IS_PENDING=1
-            │   ├── copy file bytes → output stream
-            │   └── IS_PENDING=0 → visible in gallery
-            │
+            ├── โฟลเดอร์ย่อยใต้ DCIM/AutoBots:
+            │   ├── Import: `{ชื่อไฟล์}_extraction` (เช่น `aa11_extraction`)
+            │   └── Live:   `{yyyyMMdd_HHmmss}` จากเวลา Start
+            ├── รูป: `face_c000_123456.jpg` / `pose_c000_123456.jpg`
+            ├── `session_log.txt` — สรุป session (chunks, photos, timing)
+            ├── IS_PENDING=0 → visible in gallery
             ├── ลบ temp file → file.delete()
-            └─ onPhotoDelivered(uri) → UI: keptPhotoCount++
+            └── onPhotoDelivered(uri) → UI: keptPhotoCount++
 ```
 
 ### Step 5: สรุป Live Capture Flow
@@ -279,8 +282,11 @@ OperatorViewModel.importVideo(uri)
   │    ├── videoQueue = Channel<ChunkWorkItem>(capacity=8)
   │    └── Worker 2 เริ่มรอรับ chunk
   │
-  ├── ตั้งค่า resolution (FHD/UHD) + extraction target (Face/Pose)
-  ├── ตรวจสอบพื้นที่เก็บข้อมูล (hasStorageForRecording)
+  ├── ตั้งค่า extraction target (Face/Pose) ใน UI
+  ├── **ไม่ใช้** resolution จาก UI — probe จากไฟล์แทน:
+  │    ImportedVideoSplitter.probe() → width × height × rotation
+  │    → StreamResolution.fromVideoDimensions() → sharpness profile FHD/UHD
+  ├── ตรวจสอบพื้นที่เก็บข้อมูล
   ├── UI state: isImporting = true, importPercent = 0
   │
   └─ เริ่ม coroutine: coordinator.importVideo(uri, displayName)
@@ -342,32 +348,54 @@ Import Video 5 นาที (FHD 1080p):
   │    ├── Hardware decode → NNAPI detect → GPU sharpness → dedup
   │    └── เก็บ ~30-50 photos (หลัง sharpness + dedup)
   │
-  └── Gallery: 30-50 JPEG ใน DCIM/AutoBots/
+  └── Gallery: JPEG + session_log.txt ใน `DCIM/AutoBots/{subfolder}/`
+```
+
+### Step 6: Session History (UI หน้า swipe ที่ 3)
+
+```
+Session history — สรุประดับ session (ไม่ใช่แค่ chunk รายตัว)
+  ├── Import: ชื่อไฟล์, 4K·3840×2160, chunks, photos, total time
+  ├── Live:   Live · HH:mm:ss, timestamp folder
+  ├── Import: แสดงเฉพาะ chunk ที่ detect ได้ (facesKept > 0)
+  └── Expand → รายละเอียด JPEG ต่อ chunk
 ```
 
 ---
 
-## 6. สรุปตัวเลข (FHD 1080p)
+## 6. สรุปตัวเลขสำคัญ
 
-| Parameter | ค่า |
-|-----------|-----|
-| **Chunk target** | 50 MB/chunk ( unified ทั้ง FHD/UHD ) |
-| **จำนวน chunk (5 นาที)** | ~10 chunks (FHD) / ~5 chunks (UHD) |
-| **Frame sample interval** | 300 ms (FHD) / 180 ms (UHD) |
-| **Frames ต่อ chunk** | ~40 frames (FHD) / ~100 frames (UHD) |
-| **Total frames sampled** | ~400 frames (FHD) / ~500 frames (UHD) |
-| **Photo kept** | ~30-50 photos (หลัง sharpness + dedup) |
-| **Output path** | `DCIM/AutoBots/face_c000_123456.jpg` |
+### Frame Sample Interval (source of truth)
 
-| Parameter | 1080p | 4K |
-|-----------|-------|----|
-| **Chunk target** | 50 MB ( unified ) | 50 MB ( unified ) |
-| **Frame sample interval** | 300 ms | 180 ms |
-| **Min sharpness** | 80.0 | 65.0 (แก้ไข) |
-| **Detect bitmap width** | 640 | 640 (เท่ากัน) |
-| **Decode** | Hardware MediaCodec | Hardware MediaCodec |
-| **Detect** | ML Kit + NNAPI | ML Kit + NNAPI |
-| **Sharpness** | GPU (OpenGL ES 2.0) | GPU (OpenGL ES 2.0) |
+| | **1080p (FHD)** | **4K (UHD)** |
+|--|-----------------|--------------|
+| **Interval** | **120 ms** | **120 ms** |
+| **~samples/sec** | ~8.3 | ~8.3 |
+| **Min sharpness** | 80.0 | 65.0 |
+| **Detect width** | 640 px | 640 px |
+| **Chunk target** | 50 MB | 50 MB |
+
+### โดยประมาณ (วิดีโอ 5 นาที)
+
+| Parameter | FHD | UHD |
+|-----------|-----|-----|
+| Chunks (~50 MB) | ~10 | ~5 |
+| Frames sampled (5 min) | 300s ÷ 0.12s ≈ **2500** | 300s ÷ 0.12s ≈ **2500** |
+| Photos kept (หลัง filter) | ~30–50 | ~30–50 |
+
+> จำนวน photos จริงขึ้นกับ sharpness, ขนาดหน้า/ลำตัว, และ dedup 1 วินาที
+
+### Gallery path
+
+```
+DCIM/AutoBots/
+├── aa11_extraction/          ← import aa11.mp4
+│   ├── face_c000_….jpg
+│   └── session_log.txt
+└── 20260806_160512/        ← live capture
+    ├── face_c001_….jpg
+    └── session_log.txt
+```
 
 ---
 
@@ -410,25 +438,14 @@ Import Video 5 นาที (FHD 1080p):
 │              │    MediaCodec (Hardware decoder)      │           │
 │              │    YUV 420 → NV21 → JPEG 92% →       │           │
 │              │    Bitmap ARGB_8888                   │           │
-│              │    Sample ตาม interval (300ms/180ms)  │           │
+│              │    Sample: 120ms (ทุก resolution)       │           │
 │              │                                       │           │
-│              │  [Stage 2: NNAPI Face/Pose Detection] │           │
-│              │    ML Kit + NNAPI (NPU acceleration)  │           │
-│              │    (detectBitmapWidth = 640)          │           │
-│              │    Face tracking — detect ครั้งเดียว   │           │
-│              │    Track ต่อ 10–20 frame (fast!)      │           │
-│              │    Map bounding box กลับไป full-size  │           │
+│              │  [Stage 2: ML Kit Face/Pose]          │           │
+│              │    scale 640px, FAST + tracking       │           │
 │              │                                       │           │
-│              │  [Stage 3: GPU Sharpness Scoring]     │           │
-│              │    GpuSharpnessScorer.scoreGpu()      │           │
-│              │    OpenGL ES 2.0 Laplacian shader     │           │
-│              │    GPU parallel 1000+ pixels/frame    │           │
-│              │    Laplacian kernel (5-tap filter):   │           │
-│              │       0  1  0                         │           │
-│              │       1 -4  1                         │           │
-│              │       0  1  0                         │           │
-│              │    subjectRatio ≥ 5% (face) / 25% (pose)│         │
-│              │    sharpness ≥ 80 (FHD) / 65 (UHD)    │           │
+│              │  [Stage 3: CPU Sharpness]             │           │
+│              │    FaceSharpnessScorer                │           │
+│              │    threshold 80 (FHD) / 65 (UHD)      │           │
 │              │                                       │           │
 │              │  [Stage 4: Dedup + Best-of-Window]    │           │
 │              │    DEDUP_WINDOW = 1 วินาที            │           │
@@ -456,58 +473,29 @@ Import Video 5 นาที (FHD 1080p):
 │                         ▼                                       │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │                    Gallery                                │   │
-│  │  DCIM/AutoBots/face_c000_123456.jpg                       │   │
-│  │  DCIM/AutoBots/face_c000_234567.jpg                       │   │
-│  │  DCIM/AutoBots/face_c001_345678.jpg                       │   │
+│  │    DCIM/AutoBots/{subfolder}/face_c….jpg              │   │
+│  │    DCIM/AutoBots/{subfolder}/session_log.txt          │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 8. สรุปการแก้ไขล่าสุด (GPU Pipeline)
+## 8. Changelog ล่าสุด
 
-### 8.1 ปัญหาเดิม: CPU-bound Pipeline
-
-```
-MediaCodec (Software) → ML Kit (CPU) → Laplacian (CPU) → JPEG save (Disk)
-  1× speed              1× speed       1× speed        —
-  ร้อนมาก               ร้อนมาก         ร้อนมาก         หมดแบตเร็ว
-```
-
-### 8.2 การแก้ไข: GPU Pipeline
-
-```kotlin
-// 1. VideoFrameSampler — Hardware Decoder
-val hwDecoder = findHardwareDecoder(mime)  // ค้นหา hardware decoder
-val decoder = MediaCodec.createByCodecName(hwDecoder)  // ใช้ hardware
-
-// 2. OfflineFaceDetector — NNAPI + Tracking
-.setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)  // NNAPI
-.setTrackingEnabled(true)  // Face tracking
-
-// 3. GpuSharpnessScorer — OpenGL ES 2.0 Laplacian shader
-GpuSharpnessScorer.scoreGpu(bitmap, roi)  // GPU parallel 1000+ pixels
-
-// 4. StreamResolution — Unified chunk target + adjusted sampling
-const val CHUNK_TARGET_BYTES = 50L * 1024L * 1024L  // unified 50MB
-const val FRAME_SAMPLE_INTERVAL_UHD_MS = 180L  // 120→180ms (ปรับ)
-```
-
-### 8.3 ผลลัพธ์
-
-| Metric | CPU เดิม | GPU Pipeline | เปลี่ยน |
-|--------|----------|-------------|--------|
-| **Decode speed** | 1× | 3–5× | ↑ 3–5× |
-| **Detect speed** | 1× | 5–10× | ↑ 5–10× |
-| **Sharpness speed** | 1× | 10–50× | ↑ 10–50× |
-| **CPU Load** | 100% | 10% | ↓ 90% |
-| **Heat** | สูง | ต่ำมาก | ↓ 90% |
-| **Battery** | 1× | 0.2× | ↓ 80% |
+| หัวข้อ | รายละเอียด |
+|--------|------------|
+| **Sample interval** | **120 ms** ทุก resolution (`StreamResolution.kt`) |
+| **Import resolution** | Auto-detect จากไฟล์ — ไม่ใช้ค่า UI |
+| **Gallery folders** | `DCIM/AutoBots/{name}_extraction` หรือ `{timestamp}` |
+| **Session log** | `session_log.txt` ในโฟลเดอร์เดียวกับรูป |
+| **Session history UI** | สรุป session + แสดงเฉพาะ chunk ที่ detect ได้ (import) |
+| **Sharpness** | CPU `FaceSharpnessScorer` (ไม่ใช่ GPU shader) |
+| **Detect** | ML Kit bundled TFLite (ไม่ใช่ NNAPI โดยตรง) |
 
 ---
 
-## 9. สรุปการแก้ไขล่าสุด (MIN_SHARPNESS_UHD)
+## 9. สรุปการแก้ไข MIN_SHARPNESS_UHD
 
 ### ปัญหา
 - 4K ถูกตัดเพราะ `sharpness score ~72 < threshold 80`

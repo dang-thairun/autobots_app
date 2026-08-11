@@ -407,7 +407,7 @@ private fun CompactStatusCard(
             StatChip(
                 label = "Ch",
                 value = "${state.videoChunksRecorded}",
-                tooltip = "Chunks — วิดีโอที่อัดเสร็จ (1080p 20 MB / 4K 50 MB)",
+                tooltip = "Chunks — วิดีโอที่อัดเสร็จ (rotate ที่ 50 MB ทุก resolution)",
                 highlight = state.isCapturing,
                 active = activeTooltip,
                 onTooltip = { activeTooltip = it },

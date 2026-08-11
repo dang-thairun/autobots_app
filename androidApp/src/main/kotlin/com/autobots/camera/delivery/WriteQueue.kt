@@ -31,12 +31,13 @@ class WriteQueue(
     init {
         scope.launch {
             for (file in channel) {
+                var delivered: Uri? = null
                 try {
                     val uri = writer.publish(file)
                     if (uri != null) {
                         onDeliveredFile(file)
                         file.delete()
-                        onDelivered(uri)
+                        delivered = uri
                     } else {
                         Log.w(TAG, "Delivery failed, keeping temp ${file.name}")
                     }
@@ -45,6 +46,11 @@ class WriteQueue(
                 } finally {
                     pending.decrementAndGet()
                 }
+                // Fires *after* the counter drops. Callers use [pendingCount] to decide the
+                // pipeline has drained; invoking this while the last file still counted as
+                // pending meant the final photo of a session never triggered that check, so
+                // session_log.txt and perf_report.json were never written.
+                delivered?.let(onDelivered)
             }
         }
     }

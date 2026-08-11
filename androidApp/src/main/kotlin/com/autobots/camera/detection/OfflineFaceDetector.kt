@@ -27,7 +27,10 @@ class OfflineFaceDetector(
                     FaceDetectorOptions.PERFORMANCE_MODE_FAST
                 },
             )
-            .setMinFaceSize(0.05f)
+            // Must sit below VideoFrameProcessor.MIN_FACE_HEIGHT_RATIO (0.035), or ML Kit
+            // drops distant runners before the pipeline's own size gate can judge them.
+            // Relative to image *width*; the pipeline gate is relative to height.
+            .setMinFaceSize(0.025f)
             // Reuse face IDs across consecutive frames in the same chunk.
             .enableTracking()
             .build(),

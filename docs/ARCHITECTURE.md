@@ -1,21 +1,84 @@
 # Architecture
 
-System design for AutoBots Sports Camera — modules, runtime pipeline, and **Design Flows**.
+System design for AutoBots Sports Camera — modules, runtime pipelines, and **Design Flows**.
+
+**Active operator build (v0.1.2):** Plan B video chunk pipeline — see [PIPELINE_FLOW.md](./PIPELINE_FLOW.md).  
+**Legacy (v0.1 stills):** Passage / Burst / Passage Gate — code retained, not wired in current shell.
 
 Domain: [CONTEXT.md](../CONTEXT.md) · Requirements: [PRD.md](./PRD.md) · Phases: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
 
 ---
 
-## 1. Modules
+## 1. Modules (current)
 
 | Module | Role |
 |--------|------|
-| `shared/` | Domain contracts: `CaptureMode`, `FocusStrategy`, `CaptureZone`, `PassageThresholds`, `SubjectFaceSelector` |
-| `androidApp/` | CameraX, ML Kit, burst, Write Queue, MediaStore, Compose Operator UI |
+| `shared/` | Plan B contracts: `StreamResolution`, `ExtractionTarget`, `PipelineSessionRecord`, `ChunkRecord`, `PipelineStats` · legacy: `CaptureMode`, `CaptureZone`, `PassageThresholds` |
+| `androidApp/` | CameraX Preview+VideoCapture, MediaCodec decode, ML Kit offline, Write Queue, MediaStore, Compose Operator UI |
 
 ---
 
-## 2. Runtime pipeline (tripod target)
+## 2. Runtime pipeline — Plan B (active, v0.1.2)
+
+Two inputs merge before Worker 2:
+
+```
+[Live: CameraX Preview + VideoCapture]     [Import: OpenDocument]
+         │                                        │
+         ▼                                        ▼
+  VideoChunkRecorder                    ImportedVideoSplitter
+  (rotate at 50 MB)                     (remux at 50 MB)
+         │                                        │
+         └────────────────┬───────────────────────┘
+                          ▼
+                   videoQueue (cap 8)
+                          ▼
+              VideoFrameProcessor
+              sample 120 ms → ML Kit Face/Pose
+              → Laplacian sharpness → dedup 1/sec
+                          ▼
+              WriteQueue → LocalDeliveryWriter
+                          ├─ JPEG → DCIM/AutoBots/{subfolder}/
+                          └─ session_log.txt → Download/AutoBots/{subfolder}/
+```
+
+**Backpressure:** recorder pauses when `videoQueue` is full (8 chunks).
+
+**Operator UI:** Layer 1 = `CameraPreviewPane`; Layer 2 pager = Controls | Clean preview | Session history.
+
+Detail: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · Operator: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
+
+### Subsystems (Plan B)
+
+| Subsystem | Key types | Role |
+|-----------|-----------|------|
+| Preview + record | `VideoPreviewController`, `VideoChunkRecorder` | CameraX Preview + VideoCapture; chunk rotation |
+| Import | `ImportedVideoSplitter` | Remux split without re-encode |
+| Orchestration | `CapturePipelineCoordinator` | Queues, session dirs, lifecycle |
+| Extract | `VideoFrameSampler`, `VideoFrameProcessor` | HW decode, ML Kit, sharpness, dedup |
+| Detect | `OfflineFaceDetector`, `OfflinePoseDetector` | Bitmap inference (not live analysis) |
+| Delivery | `WriteQueue`, `LocalDeliveryWriter`, `SessionAlbumNaming` | Gallery JPEG + session log |
+| Load | `DeviceLoadReader` | Thermal + RAM (display only) |
+| Remote | `AutobotsServer` | HTTP/WebSocket Start/Stop on `:8080` |
+
+### Plan B defaults (source of truth: `StreamResolution.kt`)
+
+| Parameter | Value | Notes |
+|-----------|--------|--------|
+| Chunk target | **50 MB** | FHD and UHD |
+| Sample interval | **120 ms** | FHD and UHD |
+| Video queue cap | **8** | Pause record when full |
+| Sharpness min | FHD **80** · UHD **65** | `FaceSharpnessScorer` |
+| Dedup window | **1 s** | Best sharpness per second |
+| Min free storage (live) | **2 GB** | `VideoPreviewController.MIN_FREE_STORAGE_MB` |
+| Gallery folder (live) | `yyyyMMdd_HHmmss` | `SessionAlbumNaming.liveFolder` |
+| Gallery folder (import) | `ext_DDMMYYYY_HHMM` | `SessionAlbumNaming.importFolder` |
+
+---
+
+## 3. Runtime pipeline — v0.1 stills (legacy)
+
+> **Not active** in v0.1.2 operator shell. Retained for B4 re-wire or retirement.
 
 ```
 [Camera Sensor]
@@ -35,21 +98,18 @@ Domain: [CONTEXT.md](../CONTEXT.md) · Requirements: [PRD.md](./PRD.md) · Phase
 
 **Passage Gate** (Flow 2): one burst until Subject Face leaves.
 
----
-
-## 3. Subsystems
+### Subsystems (legacy)
 
 | Subsystem | Key types | Role |
 |-----------|-----------|------|
-| Camera | `PreviewCameraController` | Bind preview, analysis, capture; exposure readout |
-| Detection | `MlKitFaceAnalyzer`, `SubjectFaceSelector` | Faces + largest = Subject |
-| Focus | `FocusStrategy`, Fixed Focus / `FaceFocusController` | Default = fixed distance; FaceAf = fallback |
+| Camera | `PreviewCameraController` | Bind preview, analysis, capture |
+| Detection | `MlKitFaceAnalyzer`, `SubjectFaceSelector` | Live faces + largest = Subject |
+| Focus | `FocusStrategy`, `FaceFocusController` | Fixed distance or FaceAf |
 | Zone | `CaptureZone` | Composition sweet spot for Fire |
 | Capture | `LeanBurstCapturer` | Sequential stills (~200 ms gap) |
 | Delivery | `WriteQueue`, `LocalDeliveryWriter` | Bounded async drain to gallery |
-| Load | `DeviceLoadReader` | Thermal + RAM (display only) |
 
-Operator UI: Layer 1 = preview; Layer 2 pager = Controls | Clean preview | Grid / Capture Zone observation.
+Operator UI (legacy): pager page 3 = Observation grid / Capture Zone.
 
 ---
 
@@ -57,13 +117,17 @@ Operator UI: Layer 1 = preview; Layer 2 pager = Controls | Clean preview | Grid 
 
 Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
+Flows **1–3, 7, 9–18** apply to the **v0.1 stills** path.  
+Flows **5, 6, 8, 11, 12** apply to **both** paths.  
+Plan B adds no new numbered Flow yet — behavior is documented in [PIPELINE_FLOW.md](./PIPELINE_FLOW.md).
+
 ### Flow 1 — Keep-All Lean Burst
 
 **Rule:** Every shot in a Lean Burst is kept; no on-device scoring on the default path.
 
 **Why:** Scoring adds latency, RAM, and heat; burst order is enough for MVP.
 
-**In code:** `LeanBurstCapturer` → all files enqueued.
+**In code:** `LeanBurstCapturer` → all files enqueued. **[legacy v0.1]**
 
 ---
 
@@ -73,7 +137,7 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
 **Why:** Prevents duplicate bursts on the same runner still in frame.
 
-**In code:** `OperatorViewModel` `passageGateOpen`.
+**In code:** `OperatorViewModel` `passageGateOpen`. **[legacy v0.1]**
 
 ---
 
@@ -83,25 +147,27 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
 **Why:** One runner at a time on a tripod lane; no tracking IDs.
 
-**In code:** `SubjectFaceSelector` in `shared`.
+**In code:** `SubjectFaceSelector` in `shared`. **[legacy v0.1 live path]**
 
 ---
 
-### Flow 4 — Still JPEG only
+### Flow 4 — Still JPEG product output
 
-**Rule:** No video capture in product scope.
+**Rule:** Deliverable product output is **still JPEGs** written to local storage — not video files for the operator.
 
-**Why:** Thermal, storage, and battery for multi-hour deployment.
+**Why:** Operators need gallery photos; video chunks are an internal implementation detail in Plan B.
+
+**Note:** Plan B **records MP4 chunks internally** but only **JPEGs** (+ `session_log.txt`) are delivered to gallery paths. Supersedes the older “no video capture” wording for v0.1.
 
 ---
 
 ### Flow 5 — Local delivery = success
 
-**Rule:** Passage success = Kept Photos on device (`DCIM/AutoBots`). Cloud upload is out of scope.
+**Rule:** Session success = Kept Photos on device (`DCIM/AutoBots`). Cloud upload is out of scope.
 
 **Why:** Field network is unreliable; operator retrieves files locally.
 
-**In code:** `LocalDeliveryWriter`, MediaStore.
+**In code:** `LocalDeliveryWriter`, MediaStore. **[both paths]**
 
 ---
 
@@ -119,7 +185,7 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
 **Why:** RAM and write latency; 50MP ×3 risks OOM.
 
-**In code:** `CaptureMode`, `CaptureResolutions`.
+**In code:** `CaptureMode`, `CaptureResolutions`. **[legacy v0.1]**
 
 ---
 
@@ -129,27 +195,25 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
 **Why:** Operator decides when to pause; silent throttle would miss runners.
 
-**In code:** `DeviceLoadReader` — display only.
+**In code:** `DeviceLoadReader` — display only. **[both paths]**
 
 ---
 
-### Flow 9 — Bounded Write Queue
+### Flow 9 — Bounded queue backpressure
 
-**Rule:** Async bounded queue (capacity 8) between burst cache and disk.
+**Rule:** Async bounded queue (capacity **8**) between producers and slow consumers.
 
-**Why:** Keep-All ×3 and large Max-Sensor frames must not block the camera thread.
+**Why:** Bursts / large frames / extract lag must not block the camera thread or OOM the app.
 
-**In code:** `WriteQueue`.
+**In code:** `WriteQueue` (delivery); `videoQueue` in `CapturePipelineCoordinator` (Plan B). **[both paths]**
 
 ---
 
 ### Flow 10 — Arm starts face-weighted AE (revised)
 
-**Rule:** Crossing Arm drives **AE** (and AF only if `FocusStrategy.FaceAf`) onto Subject Face. Detector supplies the metering region — it does not set focus distance.
+**Rule:** Crossing Arm drives **AE** (and AF only if `FocusStrategy.FaceAf`) onto Subject Face.
 
-**Why:** Outdoor backgrounds skew global metering; face must be exposed correctly before Fire.
-
-**In code:** `FaceFocusController` (FaceAf path); Fixed Focus skips AF (Flow 15).
+**In code:** `FaceFocusController`. **[legacy v0.1]**
 
 ---
 
@@ -157,57 +221,45 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
 **Rule:** Show thermal + approx RAM on Operator UI; no automated action.
 
-**Why:** Long tripod runs; operator visibility without hidden backoff.
-
-**In code:** `DeviceLoadReader`, status card.
+**In code:** `DeviceLoadReader`, status card. **[both paths]**
 
 ---
 
 ### Flow 12 — Delivery abstraction
 
-**Rule:** Camera controller enqueues files; delivery layer owns MediaStore writes.
+**Rule:** Capture/extract enqueues files; delivery layer owns MediaStore writes.
 
-**Why:** Decouples capture from I/O for testing and future upload path.
-
-**In code:** `WriteQueue` + `LocalDeliveryWriter`.
+**In code:** `WriteQueue` + `LocalDeliveryWriter`. **[both paths]**
 
 ---
 
 ### Flow 13 — Sustained lock through Passage
 
-**Rule:** After Arm, do not auto-cancel AE/AF metering on a short timeout. Cancel only when Passage ends, capture stops, or strategy changes.
+**Rule:** After Arm, do not auto-cancel AE/AF metering on a short timeout.
 
-**Why:** Runner may stay in the 1.5–3 s zone longer than a 3 s auto-cancel.
-
-**In code:** `FaceFocusController` — no `setAutoCancelDuration` on the live path.
+**In code:** `FaceFocusController`. **[legacy v0.1]**
 
 ---
 
 ### Flow 14 — Settle gate before Fire
 
-**Rule:** Fire only after a short settle window after Arm (or AE stable), e.g. ~150 ms field-tuned — especially important on FaceAf; Fixed Focus mainly waits on AE.
+**Rule:** Fire only after a short settle window after Arm (or AE stable).
 
-**Why:** Proximity/zone can be ready before exposure converges.
-
-**In code:** P9/P10 — `OperatorViewModel` / focus ready flag (not fully wired yet).
+**In code:** P9/P10 — legacy `OperatorViewModel` path. **[legacy v0.1]**
 
 ---
 
 ### Flow 15 — Fixed Focus default (tripod)
 
-**Rule:** Default `FocusStrategy.Fixed`: focus distance set once at setup for the Fire sweet-spot. Detector does not drive AF each Passage.
+**Rule:** Default `FocusStrategy.Fixed`: focus distance set once at setup for the Fire sweet-spot.
 
-**Why:** Tripod + fixed lane — AF hunt wastes the short zone and can miss sharpness.
-
-**In code:** `FocusStrategy` in `shared`; Camera2 / CameraX wiring in P9c.
+**In code:** `FocusStrategy` in `shared`. **[legacy v0.1]**
 
 ---
 
 ### Flow 16 — Proximity-calibrated focus (optional / later)
 
-**Rule:** If estimating focus distance from face size, require a calibrated curve for that lens + tripod point — never map box size to diopter without calibration.
-
-**Why:** Face size is not depth. Prefer Flow 15 for this product.
+**Rule:** Never map face box size to diopter without calibration.
 
 **In code:** Not scheduled.
 
@@ -215,25 +267,21 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 
 ### Flow 17 — Capture Zone Fire
 
-**Rule:** Fire when Subject Face center is inside the operator Capture Zone (grid cells) and size ≥ minimum; Arm does **not** require zone entry.
+**Rule:** Fire when Subject Face center is inside the operator Capture Zone and size ≥ minimum.
 
-**Why:** Composition like a still photographer — not “face large enough anywhere in frame.”
-
-**In code:** `CaptureZone` / evaluator in `shared`; wire in P10.
+**In code:** `CaptureZone` in `shared`. **[legacy v0.1]**
 
 ---
 
 ### Flow 18 — Face-weighted exposure
 
-**Rule:** AE meters on Subject Face after Arm; optional EV bias for the shooting point. Do not rely on full-frame metering for face brightness.
+**Rule:** AE meters on Subject Face after Arm; optional EV bias.
 
-**Why:** Backlight / bright pavement must not crush or blow the face.
-
-**In code:** Face metering today; EV slider in P9d.
+**In code:** Face metering in legacy path. **[legacy v0.1]**
 
 ---
 
-## 5. Defaults (field-tuned)
+## 5. Defaults — v0.1 stills (legacy, field-tuned)
 
 | Parameter | Value | Notes |
 |-----------|--------|--------|
@@ -243,12 +291,14 @@ Product and engineering rules. Use **Flow N**, not `ADR 000X`.
 | Burst interval | ~150 ms | 1080p Standard |
 | Standard burst | 3 shots | |
 | Analysis | ~640×360 | |
-| Detector | ML Kit FAST (interim) | |
+| Detector | ML Kit FAST | Live `ImageAnalysis` |
 
 ---
 
 ## 6. Related docs
 
+- Pipeline (Plan B): [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
+- Operator: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
 - Implementation slices: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
 - Field checklist: [FIELD_SETUP.md](./FIELD_SETUP.md)
 - APIs: [PLATFORM_APIS.md](./PLATFORM_APIS.md)

@@ -1,7 +1,7 @@
 package com.autobots.camera
 
 /**
- * Operator-selectable capture mode (Flow 7 in architecture.md).
+ * Operator-selectable capture mode (Flow 7 in ARCHITECTURE.md).
  * Factory default = Standard.
  */
 enum class CaptureMode {

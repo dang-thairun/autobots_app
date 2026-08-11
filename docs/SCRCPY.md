@@ -158,7 +158,7 @@ scrcpy
 | งาน                   | คำสั่ง                                                                |
 | --------------------- | --------------------------------------------------------------------- |
 | ติดตั้ง APK ใหม่      | `./gradlew :androidApp:installDebug` (ต้องมี device ใน `adb devices`) |
-| ดู log pipeline       | `adb logcat -s CapturePipeline VideoFaceProcessor VideoChunkRecorder` |
+| ดู log pipeline       | `adb logcat -s CapturePipeline VideoFrameProcessor VideoChunkRecorder` |
 | Mirror ขณะ field test | `scrcpy -m 1280` (ลด lag)                                             |
 
 
@@ -196,7 +196,13 @@ adb usb
 
 
 
-## ลิงก์
+## Related
+
+- Build + wireless install: [BUILD.md](./BUILD.md)
+- Operator workflow: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
+- Doc index: [DOCS.md](./DOCS.md)
+
+## External links
 
 - scrcpy: [https://github.com/Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)
 - Android platform tools: [https://developer.android.com/tools/releases/platform-tools](https://developer.android.com/tools/releases/platform-tools)

@@ -19,7 +19,7 @@ class LocalDeliveryWriter(
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
 
-    /** Subfolder under DCIM/AutoBots, e.g. `ext_07082026_1415` or `20260806_140532`. */
+    /** Subfolder under DCIM/AutoBots, e.g. `ext_v0_1_3_07082026_1415` or `v0_1_3_20260806_140532`. */
     @Volatile
     var albumSubfolder: String = ""
 
@@ -84,18 +84,10 @@ class LocalDeliveryWriter(
     }
 
     private fun publishTextToDownloads(fileName: String, content: String): Uri? {
-        val relativePath = buildString {
-            append(Environment.DIRECTORY_DOWNLOADS)
-            append("/")
-            append(ALBUM_NAME)
-            if (albumSubfolder.isNotEmpty()) {
-                append("/")
-                append(albumSubfolder)
-            }
-        }
+        val relativePath = SessionAlbumNaming.downloadsRelativePath(albumSubfolder)
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeTypeFor(fileName))
             put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
@@ -119,9 +111,17 @@ class LocalDeliveryWriter(
         }
     }
 
+    /**
+     * MediaStore rewrites DISPLAY_NAME to match MIME_TYPE, so `perf_report.json`
+     * declared as text/plain would land as `perf_report.json.txt`.
+     */
+    private fun mimeTypeFor(fileName: String): String =
+        if (fileName.endsWith(".json", ignoreCase = true)) "application/json" else "text/plain"
+
     private fun galleryRelativePath(): String =
         SessionAlbumNaming.galleryRelativePath(albumSubfolder)
 
+    /** Pre-API-29 path — same flat `AutoBots/{session}` shape as the MediaStore one. */
     private fun legacyAlbumDir(): File {
         val base = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),

@@ -10,7 +10,7 @@ object AutobotsApp {
     const val name: String = "AutoBots"
 
     /** Sync with `gradle.properties` → `appVersionName`. */
-    const val version: String = "0.1.2"
+    const val version: String = "0.1.3"
 
     val versionLabel: String get() = "v$version"
 

@@ -1,9 +1,25 @@
 # Implementation plan
 
 **Current release:** [CHANGELOG.md](./CHANGELOG.md) (**v0.1.2** — Plan B video pipeline).  
-**Operator flow:** [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).
+**Operator flow:** [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · **Pipeline:** [PIPELINE_FLOW.md](./PIPELINE_FLOW.md).
 
 The **P9 / P10** sections below describe the **v0.1 stills** path (burst + Passage Gate). That code remains in the repo but is **not wired** in the v0.1.2 operator shell.
+
+---
+
+## Plan B — B1 shipped (v0.1.2)
+
+| Slice | Work | Status |
+|-------|------|--------|
+| **B1a** | Live video chunk record (`VideoChunkRecorder`, 50 MB rotate) | ✅ |
+| **B1b** | Offline extract (`VideoFrameProcessor`, 120 ms sample, sharpness, dedup) | ✅ |
+| **B1c** | Gallery delivery (`WriteQueue`, `LocalDeliveryWriter`, subfolders) | ✅ |
+| **B1d** | Partial chunk on Stop + queue backpressure (cap 8) | ✅ |
+| **B1e** | **Import video** (`ImportedVideoSplitter`, OpenDocument) | ✅ |
+| **B1f** | **ExtractionTarget** Face + Pose (experimental) | ✅ |
+| **B1g** | **Session history** (`PipelineSessionRecord`, `ChunkHistoryPage`) | ✅ |
+| **B1h** | **`session_log.txt`** → Download/AutoBots + cache mirror | ✅ |
+| **B1i** | Operator UI shell (3-page pager, processing card, Import button) | ✅ |
 
 ---
 
@@ -11,12 +27,12 @@ The **P9 / P10** sections below describe the **v0.1 stills** path (burst + Passa
 
 | Slice | Work | Status |
 |-------|------|--------|
-| **B2a** | Per-reject logging in `VideoFaceProcessor` (no_face / small / soft / decode_fail) | ⏳ |
+| **B2a** | Per-reject logging in `VideoFrameProcessor` (no_face / small / soft / decode_fail) | ⏳ |
 | **B2b** | Sharpness on fixed-size face crop (resolution-agnostic threshold) | ⏳ |
 | **B2c** | 4K: optional `detectBitmapWidth` 1280 + ML Kit ACCURATE offline | ⏳ |
 | **B2d** | Skip YUV→JPEG roundtrip in `VideoFrameSampler` for 4K | ⏳ |
 | **B3** | HTTP upload worker (replace or extend local-only `WriteQueue`) | ⏳ |
-| **B4** | Body/person pre-filter before face (see [ROADMAP.md](./ROADMAP.md)) | ⏳ note |
+| **B4** | Re-wire or retire v0.1 stills path (`LeanBurstCapturer`, live overlay, Passage Gate) | ⏳ |
 
 ---
 
@@ -25,11 +41,11 @@ The **P9 / P10** sections below describe the **v0.1 stills** path (burst + Passa
 Tripod-mounted, fixed shooting point. Runner in frame ~**1.5–3 s**.  
 Keep each slice small — do not merge P9 + P10 into one change set.
 
-Naming: [CONVENTIONS.md](./CONVENTIONS.md) · Rules: [architecture.md](./architecture.md) · Field: [FIELD_SETUP.md](./FIELD_SETUP.md)
+Naming: [CONVENTIONS.md](./CONVENTIONS.md) · Rules: [ARCHITECTURE.md](./ARCHITECTURE.md) · Field: [FIELD_SETUP.md](./FIELD_SETUP.md)
 
 ---
 
-## Assumptions
+## Assumptions (v0.1 stills)
 
 | Assumption | Implication |
 |------------|-------------|
@@ -80,5 +96,15 @@ Naming: [CONVENTIONS.md](./CONVENTIONS.md) · Rules: [architecture.md](./archite
 
 - Domain types in `shared/` first; Android wires later.
 - One slice ≈ one focused change (camera **or** UI).
-- Prefer small helpers over growing `PreviewCameraController`.
+- Prefer small helpers over growing legacy `PreviewCameraController`.
 - No half-wired toggles left in the UI.
+
+---
+
+## Related
+
+- Doc index: [DOCS.md](./DOCS.md)
+- Plan B pipeline: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
+- Phase table: [DOCS.md § Implementation phases](./DOCS.md#implementation-phases)
+- Design rules: [ARCHITECTURE.md](./ARCHITECTURE.md)
+- Later ideas: [ROADMAP.md](./ROADMAP.md)

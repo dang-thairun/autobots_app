@@ -1,16 +1,40 @@
 #!/usr/bin/env bash
 # Sync AutoBots gallery from Android → Mac (incremental).
 # Sources:
-#   - DCIM/AutoBots/{session}/          ← JPEGs
-#   - Download/AutoBots/{session}/      ← session_log.txt (Android 10+ fallback)
-#   - app cache (debug builds)          ← session_log.txt mirror
+#   - DCIM/AutoBots/{session}/       ← JPEGs
+#   - Download/AutoBots/{session}/   ← session_log.txt + perf_report.json
+#   - app cache (debug builds)       ← mirrors of both files
 #
-# Usage: ./sync_gallery.sh [destination_dir]
+# Session folder names carry the app version: ext_v0_1_3_11082026_1228 (import),
+# v0_1_3_20260811_143052 (live). Folders from builds before that sit alongside them.
+#
+# Usage:
+#   ./sync_gallery.sh [destination_dir]
+#   ./sync_gallery.sh --logs-only [destination_dir]   # skip JPEGs — fast analyze loop
+#   ./sync_gallery.sh --logcat [destination_dir]      # also dump the CamPerf logcat buffer
 
 set -euo pipefail
 
+LOGS_ONLY=0
+GRAB_LOGCAT=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --logs-only) LOGS_ONLY=1; shift ;;
+    --logcat) GRAB_LOGCAT=1; shift ;;
+    -h|--help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) break ;;
+  esac
+done
+
 DEST="${1:-$HOME/Downloads/AutoBots-export}"
 SESSION_LOG="session_log.txt"
+PERF_REPORT="perf_report.json"
+# Every per-session text artifact the app writes. Pulled from Downloads and, as a
+# fallback, from the app cache mirror when the MediaStore write did not land.
+SESSION_FILES=("$SESSION_LOG" "$PERF_REPORT")
 
 die() {
   echo "error: $*" >&2
@@ -169,23 +193,10 @@ sync_existing_folder() {
   fi
 }
 
-contains_name() {
-  local needle="$1"
-  shift
-  local item
-  for item in "$@"; do
-    if [[ "$item" == "$needle" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 sync_remote_root() {
   local remote_base="$1"
-  local -a remote_names=()
-  local -a local_names=()
-  local name
+  local -a session_paths=()
+  local relpath
 
   echo "==> $remote_base"
 
@@ -194,75 +205,38 @@ sync_remote_root() {
     return 0
   fi
 
-  adb shell "ls -la '$remote_base'" | tr -d '\r' | sed 's/^/  /'
-  echo
-
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    remote_names+=("$name")
+  while IFS= read -r relpath; do
+    [[ -z "$relpath" ]] && continue
+    session_paths+=("$relpath")
   done < <(list_remote_names "$remote_base")
 
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    local_names+=("$name")
-  done < <(list_names "$DEST")
-
-  if [[ "${#remote_names[@]}" -eq 0 ]]; then
+  if [[ "${#session_paths[@]}" -eq 0 ]]; then
     echo "  (empty)"
     return 0
   fi
 
-  local to_pull=()
-  local to_update=()
+  echo "  ${#session_paths[@]} session folder(s): ${session_paths[*]}"
 
-  for name in "${remote_names[@]}"; do
-    if contains_name "$name" "${local_names[@]+"${local_names[@]}"}"; then
-      to_update+=("$name")
-    else
-      to_pull+=("$name")
-    fi
-  done
-
-  if [[ "${#to_pull[@]}" -gt 0 ]]; then
-    echo "  จะดึง (ยังไม่มี): ${to_pull[*]}"
-  fi
-  if [[ "${#to_update[@]}" -gt 0 ]]; then
-    echo "  เช็คเพิ่ม (มีแล้ว): ${to_update[*]}"
-  fi
-
-  for name in "${to_pull[@]+"${to_pull[@]}"}"; do
-    echo "  [$name]"
-    local remote_path="$remote_base/$name"
-    local local_path="$DEST/$name"
-    if is_remote_dir "$remote_path"; then
-      echo "    pull folder (new)"
-      pull_remote_folder "$remote_path" "$local_path"
-    else
-      echo "    pull file (new)"
-      pull_remote_file "$remote_path" "$local_path"
-    fi
-  done
-
-  for name in "${to_update[@]+"${to_update[@]}"}"; do
-    echo "  [$name]"
-    if is_remote_dir "$remote_base/$name"; then
-      sync_existing_folder "$remote_base" "$name"
-    else
-      local remote_path="$remote_base/$name"
-      local local_path="$DEST/$name"
-      if [[ -f "$local_path" ]]; then
-        remote_mtime="$(remote_file_epoch "$remote_path")"
-        local_mtime="$(local_file_epoch "$local_path")"
-        if [[ "$remote_mtime" -le "$local_mtime" ]]; then
-          echo "    skip (up to date): $name"
-        else
-          echo "    pull file (newer on device)"
-          pull_remote_file "$remote_path" "$local_path"
-        fi
+  for relpath in "${session_paths[@]}"; do
+    local remote_path="$remote_base/$relpath"
+    local local_path="$DEST/$relpath"
+    echo "  [$relpath]"
+    if ! is_remote_dir "$remote_path"; then
+      # A loose file directly under the album root — pull it as-is.
+      if [[ -f "$local_path" ]] &&
+        [[ "$(remote_file_epoch "$remote_path")" -le "$(local_file_epoch "$local_path")" ]]; then
+        echo "    skip (up to date)"
       else
-        echo "    pull file (new)"
+        echo "    pull file"
         pull_remote_file "$remote_path" "$local_path"
       fi
+      continue
+    fi
+    if [[ -d "$local_path" ]]; then
+      sync_existing_folder "$remote_base" "$relpath"
+    else
+      echo "    pull folder (new)"
+      pull_remote_folder "$remote_path" "$local_path"
     fi
   done
   echo
@@ -280,22 +254,30 @@ sync_session_logs() {
     return 0
   fi
 
-  echo "==> session logs ($download_base)"
-  local name
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    local remote_log="$download_base/$name/$SESSION_LOG"
-    local local_log="$DEST/$name/$SESSION_LOG"
-    if ! adb shell "[ -f '$remote_log' ]" >/dev/null 2>&1; then
-      continue
-    fi
-    if [[ -f "$local_log" ]]; then
-      echo "  skip (have log): $name"
-      continue
-    fi
-    mkdir -p "$DEST/$name"
-    echo "  pull log: $name/$SESSION_LOG"
-    pull_remote_file "$remote_log" "$local_log"
+  echo "==> session logs + perf reports ($download_base)"
+  local relpath artifact
+  while IFS= read -r relpath; do
+    [[ -z "$relpath" ]] && continue
+    for artifact in "${SESSION_FILES[@]}"; do
+      local remote_file="$download_base/$relpath/$artifact"
+      local local_file="$DEST/$relpath/$artifact"
+      if ! adb shell "[ -f '$remote_file' ]" >/dev/null 2>&1; then
+        continue
+      fi
+      # Reports are rewritten per run, so refresh whenever the device copy is newer.
+      if [[ -f "$local_file" ]]; then
+        local remote_mtime local_mtime
+        remote_mtime="$(remote_file_epoch "$remote_file")"
+        local_mtime="$(local_file_epoch "$local_file")"
+        if [[ "$remote_mtime" -le "$local_mtime" ]]; then
+          echo "  skip (up to date): $relpath/$artifact"
+          continue
+        fi
+      fi
+      mkdir -p "$DEST/$relpath"
+      echo "  pull: $relpath/$artifact"
+      pull_remote_file "$remote_file" "$local_file"
+    done
   done < <(list_remote_names "$download_base")
   echo
 }
@@ -311,36 +293,71 @@ sync_debug_session_logs() {
     return 0
   fi
 
-  echo "==> debug cache session logs"
-  local folder
-  for folder in $folders; do
-    [[ -z "$folder" ]] && continue
-    local dest="$DEST/$folder/$SESSION_LOG"
-    if [[ -f "$dest" ]]; then
-      echo "  skip (have log): $folder"
-      continue
-    fi
-    mkdir -p "$DEST/$folder"
-    if adb exec-out run-as com.autobots.camera cat "cache/autobots/logs/$folder/$SESSION_LOG" >"$dest" 2>/dev/null; then
-      echo "  pull log: $folder/$SESSION_LOG"
-    fi
+  local -a relpaths=()
+  local name
+  for name in $folders; do
+    [[ -z "$name" ]] && continue
+    relpaths+=("$name")
   done
+
+  echo "==> debug cache mirrors"
+  local relpath artifact
+  for relpath in "${relpaths[@]}"; do
+    mkdir -p "$DEST/$relpath"
+    for artifact in "${SESSION_FILES[@]}"; do
+      local dest="$DEST/$relpath/$artifact"
+      if [[ -s "$dest" ]]; then
+        echo "  skip (have): $relpath/$artifact"
+        continue
+      fi
+      if adb exec-out run-as com.autobots.camera \
+        cat "cache/autobots/logs/$relpath/$artifact" >"$dest" 2>/dev/null && [[ -s "$dest" ]]; then
+        echo "  pull: $relpath/$artifact"
+      else
+        # run-as writes an empty file even when the source is missing.
+        rm -f "$dest"
+      fi
+    done
+  done
+  echo
+}
+
+# The CamPerf logcat buffer holds stage tables from runs whose session never drained
+# (crash, force-stop). Cheap insurance next to perf_report.json.
+sync_logcat() {
+  local out="$DEST/camperf_$(date +%Y%m%d_%H%M%S).txt"
+  echo "==> logcat (CamPerf, VideoFrameProcessor, CapturePipeline)"
+  mkdir -p "$DEST"
+  if adb logcat -d -s CamPerf VideoFrameProcessor CapturePipeline VideoFrameSampler LocalDelivery \
+    >"$out" 2>/dev/null && [[ -s "$out" ]]; then
+    echo "  saved: $(basename "$out") ($(wc -l <"$out" | tr -d ' ') lines)"
+  else
+    rm -f "$out"
+    echo "  (buffer empty — run the test, then sync before rebooting)"
+  fi
   echo
 }
 
 report_missing_logs() {
   local missing=0
-  local dir name
+  local dir name artifact
   for dir in "$DEST"/*; do
     [[ -d "$dir" ]] || continue
-    name="$(basename "$dir")"
-    if compgen -G "$dir/"'*.jpg' >/dev/null && [[ ! -f "$dir/$SESSION_LOG" ]]; then
-      echo "  warning: $name has photos but no $SESSION_LOG"
-      missing=$((missing + 1))
-    fi
+    compgen -G "$dir/"'*.jpg' >/dev/null || continue
+    name="${dir#"$DEST"/}"
+    for artifact in "${SESSION_FILES[@]}"; do
+      if [[ ! -s "$dir/$artifact" ]]; then
+        echo "  warning: $name has photos but no $artifact"
+        missing=$((missing + 1))
+      fi
+    done
   done
   if [[ "$missing" -eq 0 ]]; then
-    echo "  all session folders with photos have $SESSION_LOG (or no photos yet)"
+    echo "  every session folder with photos has ${SESSION_FILES[*]}"
+  else
+    echo
+    echo "  perf_report.json needs a CAM_PERF build:"
+    echo "    ./gradlew :androidApp:installDebug     (or -PcamPerf=true for release)"
   fi
 }
 
@@ -363,12 +380,20 @@ main() {
   echo
 
   local root
-  for root in "${remote_roots[@]}"; do
-    sync_remote_root "$root"
-  done
+  if [[ "$LOGS_ONLY" -eq 1 ]]; then
+    echo "(--logs-only: skipping JPEG sync)"
+    echo
+  else
+    for root in "${remote_roots[@]}"; do
+      sync_remote_root "$root"
+    done
+  fi
 
   sync_session_logs
   sync_debug_session_logs
+  if [[ "$GRAB_LOGCAT" -eq 1 ]]; then
+    sync_logcat
+  fi
 
   echo "Done. Files are in: $DEST"
   echo

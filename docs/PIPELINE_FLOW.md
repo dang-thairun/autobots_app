@@ -6,30 +6,59 @@
 
 ## 1. ภาพรวม Architecture
 
-### 1.1 GPU Pipeline (ปัจจุบัน)
+### 1.1 Video Pipeline (ปัจจุบัน)
+
+มี **สองทางเข้า** ที่รวมก่อน Worker 2 เหมือนกัน:
+
+| ทางเข้า | Worker 1 | ไฟล์ชั่วคราว |
+|---------|----------|----------------|
+| **Live Capture** — กล้อง CameraX | `VideoChunkRecorder` บันทึก MP4 | `cache/autobots/{sessionId}/video/` |
+| **Import Video** — เลือกไฟล์จากเครื่อง (`OpenDocument`) | `ImportedVideoSplitter` remux แบ่ง chunk | โฟลเดอร์เดียวกัน |
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    AutoBots GPU Pipeline                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────┐       ┌──────────────┐       ┌──────────────────┐    │
-│  │  Camera  │──────▶│  Video Chunk │──────▶│  Worker 2        │    │
-│  │  (CameraX)│      │  Recorder    │      │  (Frame Processor)│    │
-│  │          │      │  (MP4 chunks) │      │                  │    │
-│  └──────────┘      └──────────────┘      └────────┬─────────┘    │
-│                                                     │              │
-│  ┌──────────┐       ┌──────────────┐               │              │
-│  │  Gallery │◀──────│  Write Queue │◀──────────────┘              │
-│  │  (JPEG)  │       │  (MediaStore)│                              │
-│  └──────────┘       └──────────────┘                              │
-│                                                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  Worker 1: VideoChunkRecorder  │  Worker 2: VideoFrameProcessor     │
-│  (บันทึกวิดีโอเป็น chunk)       │  (GPU decode → GPU detect → GPU  │
-│                                 │   sharpness → บันทึก)            │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         AutoBots Video Pipeline                           │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌─────────────────┐              ┌──────────────────────┐              │
+│   │ Live Capture    │              │ Import Video           │              │
+│   │ Camera (CameraX)│              │ Browse ไฟล์บนเครื่อง    │              │
+│   └────────┬────────┘              │ (OpenDocument picker)  │              │
+│            │                       └──────────┬─────────────┘              │
+│            ▼                                  ▼                            │
+│   ┌─────────────────┐              ┌──────────────────────┐              │
+│   │ VideoChunkRecorder│            │ ImportedVideoSplitter │              │
+│   │ บันทึก MP4 chunks │            │ remux → MP4 chunks    │              │
+│   └────────┬────────┘              └──────────┬─────────────┘              │
+│            │                                  │                            │
+│            └──────────────┬───────────────────┘                            │
+│                           ▼                                                │
+│                  ┌─────────────────┐                                       │
+│                  │   videoQueue    │  Channel capacity = 8                 │
+│                  └────────┬────────┘                                       │
+│                           ▼                                                │
+│                  ┌─────────────────────────┐                               │
+│                  │ Worker 2                │                               │
+│                  │ VideoFrameProcessor     │                               │
+│                  │ sample 120ms → ML Kit   │                               │
+│                  │ → CPU sharpness → dedup │                               │
+│                  └────────┬────────────────┘                               │
+│                           ▼                                                │
+│                  ┌─────────────────┐       ┌──────────────────┐            │
+│                  │  Write Queue    │──────▶│ Gallery (JPEG)   │            │
+│                  │  MediaStore     │       │ DCIM/AutoBots/…  │            │
+│                  └─────────────────┘       └──────────────────┘            │
+│                           │                                                │
+│                           ▼ (เมื่อ drain เสร็จ)                              │
+│                  session_log.txt → Download/AutoBots/{subfolder}/          │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────┤
+│  Worker 1A: VideoChunkRecorder  │  Worker 1B: ImportedVideoSplitter      │
+│  Worker 2: VideoFrameProcessor — HW decode → ML Kit → CPU sharpness       │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
+
+> หลังแยก chunk แล้ว **import กับ live ใช้ pipeline เดียวกัน** (`CapturePipelineCoordinator` → `videoQueue` → Worker 2 → Gallery)
 
 ### 1.2 Pipeline Components (ปัจจุบัน)
 
@@ -38,7 +67,8 @@
 | **Decode** | MediaCodec (Hardware) | VPU — `VideoFrameSampler` |
 | **Detect** | ML Kit Face / Pose (bundled TFLite) | `OfflineFaceDetector` / `OfflinePoseDetector` |
 | **Sharpness** | Laplacian variance (CPU) | `FaceSharpnessScorer.scoreNormalized()` |
-| **Save** | MediaStore → `DCIM/AutoBots/{subfolder}/` | `LocalDeliveryWriter` + `session_log.txt` |
+| **Save** | MediaStore Images → `DCIM/AutoBots/{subfolder}/` | `LocalDeliveryWriter.publish()` |
+| **Session log** | `session_log.txt` → `Download/AutoBots/{subfolder}/` (API 29+) | `LocalDeliveryWriter.publishText()` + cache mirror |
 
 > ML Kit จัดการ hardware delegate ภายใน SDK เอง — **ไม่ได้** เปิด NNAPI โดยตรงจากแอป
 
@@ -192,10 +222,10 @@ VideoChunkRecorder.start()
 
 > **ทำไม UHD ไม่ได้ยาวกว่า?** — เป้าคือ **ขนาดไฟล์** (50 MB) ไม่ใช่เวลา 4K encode ข้อมูลหนักกว่าต่อวินาที → ครบ 50 MB **เร็วกว่า** → สลับ chunk บ่อยกว่า FHD (เอกสารเก่าที่เขียน ~60s สำหรับ UHD **ผิด**)
 
-### Step 3: Worker 2 ประมวลผล Chunk (GPU Pipeline)
+### Step 3: Worker 2 ประมวลผล Chunk
 
 ```
-VideoFrameProcessor.process(chunkFile, chunkIndex, resolution, extractionTarget)
+VideoFrameProcessor.process(chunkFile, chunkIndex, resolution, extractionTarget, sampleIntervalMs)
   │
   ├── [Stage 1: Frame Sampling — Hardware Decoder]
   │  └─ MediaCodec อ่าน frame ตาม interval จาก StreamResolution:
@@ -222,30 +252,46 @@ VideoFrameProcessor.process(chunkFile, chunkIndex, resolution, extractionTarget)
   │       └── ถ้า frame ใหม่ใกล้กว่า:
   │           └── ถ้า sharpness ดีกว่า → replace best frame
   │
-  └── [Stage 4: Save Final Frames]
-       └─ สำหรับทุก FrameCandidate ที่ถูก kept:
-            └─ saveFrame() → "${prefix}_c${chunkIndex}_${ptsUs}.jpg"
-                 (prefix = "face" หรือ "pose")
+  └── [Stage 4: Save Final Frames + Chunk stats]
+       ├─ saveFrame() → "${prefix}_c${chunkIndex}_${ptsUs}.jpg" (prefix = face / pose)
+       └─ อัปเดต ChunkRecord:
+            ├── framesSampled, facesKept, processDurationMs
+            ├── detectionSummary: "Found X … from Y frames (Z%)"
+            └── avgFrameProcessMs = processDurationMs ÷ framesSampled (pipeline ทั้ง frame ไม่ใช่แค่ detect)
 ```
 
-### Step 4: ส่งภาพลง Gallery
+### Step 4: ส่งภาพลง Gallery + Session log
 
 ```
 WriteQueue.enqueue(jpegFile)
   │
   ├── Channel.trySend(file) → ถ้า queue full → drop (log warning)
   │
-  └─ [Dispatchers.IO — background thread]
-       └─ LocalDeliveryWriter.publish(file)
-            ├── โฟลเดอร์ย่อยใต้ DCIM/AutoBots:
-            │   ├── Import: `ext_DDMMYYYY_HHMM` (เช่น `ext_07082026_1415`)
-            │   └── Live:   `{yyyyMMdd_HHmmss}` จากเวลา Start
-            ├── รูป: `face_c000_123456.jpg` / `pose_c000_123456.jpg`
-            ├── `session_log.txt` — สรุป session (chunks, photos, timing)
+  └─ [Dispatchers.IO]
+       └─ LocalDeliveryWriter.publish(file)   ← JPEG
+            ├── MediaStore.Images → DCIM/AutoBots/{subfolder}/
+            ├── รูป: face_c000_123456.jpg / pose_c000_123456.jpg
             ├── IS_PENDING=0 → visible in gallery
-            ├── ลบ temp file → file.delete()
-            └── onPhotoDelivered(uri) → UI: keptPhotoCount++
+            └── ลบ temp file หลัง publish
+
+เมื่อ pipeline drain เสร็จ (maybeNotifyDrainComplete):
+  └─ writeSessionLog(session)
+       ├── mirror: cache/autobots/logs/{subfolder}/session_log.txt
+       ├── mirror: cache/autobots/{sessionId}/session_log.txt
+       └─ LocalDeliveryWriter.publishText("session_log.txt")
+            ├── ลอง legacy File → DCIM/AutoBots/{subfolder}/ (มักไม่สำเร็จบน API 29+)
+            └── fallback: MediaStore.Downloads → Download/AutoBots/{subfolder}/session_log.txt
 ```
+
+**โฟลเดอร์ session** (`SessionAlbumNaming`):
+
+| แหล่ง | ชื่อโฟลเดอร์ |
+|--------|----------------|
+| Import | `ext_DDMMYYYY_HHMM` (เวลาเริ่ม session) |
+| Live | `{yyyyMMdd_HHmmss}` |
+
+> รูปกับ log ใช้ **ชื่อโฟลเดอร์เดียวกัน** แต่บน Android 10+ มักอยู่คนละ root: JPEG ใน **DCIM** · log ใน **Download**  
+> ดึงกลับ Mac: `./sync_gallery.sh` รวมทั้งสอง path เข้า `~/Downloads/AutoBots-export/{subfolder}/`
 
 ### Step 5: สรุป Live Capture Flow
 
@@ -255,11 +301,13 @@ Live Capture (5 นาที):
   ├── Worker 1: บันทึก ~8–10 chunks (FHD) หรือ ~15–25 chunks (UHD) — ทุก chunk 50 MB
   │
   ├── Worker 2: ประมวลผล chunks (ตาม queue)
-  │    ├── Hardware decode → NNAPI detect → GPU sharpness → dedup
-  │    └── เก็บ ~30-50 photos (หลัง sharpness + dedup)
+  │    ├── HW decode → ML Kit detect → CPU sharpness → dedup
+  │    └── เก็บ ~30–50 photos (หลัง filter)
   │
-  └── Gallery: 30-50 JPEG ใน DCIM/AutoBots/
+  └── Gallery: JPEG ใน DCIM/AutoBots/{subfolder}/ · log ใน Download/AutoBots/{subfolder}/
 ```
+
+> แอปล็อค **portrait only** (`AndroidManifest` `screenOrientation=portrait`) — ไม่หมุนจอระหว่าง capture
 
 ---
 
@@ -323,22 +371,19 @@ ImportedVideoSplitter.split(source, targetSegmentBytes)
 > **Key Point:** ใช้ **remux** (copy codec stream) ไม่ใช่ decode+reencode → เร็ว + lossless
 > แต่ละ chunk ต้อง start ที่ **Keyframe** เท่านั้น → decoder downstream เปิดแล้วได้ภาพถูกต้อง
 
-### Step 4: Chunk เข้า Queue → Worker 2 ประมวลผล (GPU Pipeline)
+### Step 4: Chunk เข้า Queue → Worker 2 ประมวลผล
 
 ```
 onChunkRecorded(meta)
   │
   ├── chunksRecorded++
-  ├── สร้าง ChunkRecord (status = Pending)
+  ├── สร้าง ChunkRecord (status = Pending, sampleIntervalMs จาก resolution)
   ├── ส่งเข้า videoQueue: trySend(ChunkWorkItem(index, file))
   │
   └─ [Worker 2 — Dispatchers.Default]
        └─ สำหรับแต่ละ chunk:
-            ├── frameProcessor.process(chunkFile, ...)
-            │  └─ [GPU Pipeline: Hardware decode → NNAPI detect → GPU sharpness]
-            └─ สำหรับทุก JPEG ที่ถูก save:
-                 └─ imageDelivery.enqueue(jpegFile)
-                      └─ [เหมือน Live Capture — Step 4]
+            ├── frameProcessor.process(...) → VideoProcessResult(framesSampled, kept, durationMs)
+            └─ imageDelivery.enqueue(jpegFile) → WriteQueue → DCIM
 ```
 
 ### Step 5: สรุป Import Video Flow
@@ -346,24 +391,53 @@ onChunkRecorded(meta)
 ```
 Import Video 5 นาที (FHD 1080p):
   │
-  ├── ImportedVideoSplitter.split(): remux → ~10 chunks (50MB/chunk)
+  ├── ImportedVideoSplitter.split(): remux → ~8–10 chunks (50 MB/chunk)
   │
-  ├── Worker 2: ประมวลผล ~10 chunks (GPU Pipeline)
-  │    ├── Hardware decode → NNAPI detect → GPU sharpness → dedup
-  │    └── เก็บ ~30-50 photos (หลัง sharpness + dedup)
+  ├── Worker 2: ประมวลผล chunks
+  │    └── HW decode → ML Kit → CPU sharpness → dedup
   │
-  └── Gallery: JPEG + session_log.txt ใน `DCIM/AutoBots/{subfolder}/`
+  └── Gallery: JPEG (DCIM) + session_log.txt (Download) · โฟลเดอร์ ext_DDMMYYYY_HHMM
 ```
 
-### Step 6: Session History (UI หน้า swipe ที่ 3)
+### Step 6: Session History + session_log.txt
+
+**UI** (หน้า swipe ที่ 3 — `ChunkHistoryPage`):
 
 ```
-Session history — สรุประดับ session (ไม่ใช่แค่ chunk รายตัว)
-  ├── Import: ชื่อไฟล์, 4K·3840×2160, chunks, photos, total time
-  ├── Live:   Live · HH:mm:ss, timestamp folder
-  ├── Import: แสดงเฉพาะ chunk ที่ detect ได้ (facesKept > 0)
-  └── Expand → รายละเอียด JPEG ต่อ chunk
+Session card
+  ├── ชื่อ session · resolution · target · status
+  ├── headline: "N chunks · X faces · total time"
+  ├── detectionSummary: Found X from Y frames (Z%) · avg Nms/frame · sample 120ms
+  └── Expand chunks:
+       ├── Import: แสดงเฉพาะ chunk ที่ facesKept > 0
+       ├── Live: แสดงทุก chunk
+       └── ต่อ chunk:
+            ├── Duration: 45.123 s (วินาทีทศนิยม 3 ตำแหน่ง)
+            ├── Sample 120ms · N frames
+            └── Found X from N frames (%) · avg Nms/frame · extract 12.456 s
 ```
+
+**`session_log.txt`** (`PipelineSessionRecord.toLogText()`):
+
+```
+Chunk #4
+  Video: chunk_004.mp4
+  Duration: 45.123 s · 48 MB
+  Sample interval: 120 ms
+  Frames sampled: 375
+  Found 3 faces from 375 frames (0%)
+  avg 33ms/frame · extract 12.456 s
+    - face_c004_2880000.jpg (1.8 MB)
+```
+
+| ตัวเลข | ความหมาย |
+|--------|----------|
+| **Duration** | ความยาววิดีโอ chunk (`recordDurationMs`) — รูปแบบ `SS.mmm s` |
+| **Frames sampled** | จำนวน frame ที่ decode จริง (ทุก 120 ms) |
+| **Found X from Y** | รูปที่เก็บ (หลัง dedup) จาก frame ที่ sample |
+| **(Z%)** | `facesKept ÷ framesSampled × 100` (ปัดเป็น int — ค่าน้อยอาจแสดง 0%) |
+| **avg Nms/frame** | `processDurationMs ÷ framesSampled` — เวลา pipeline ต่อ frame (decode+detect+sharpness+dedup) **ไม่ใช่แค่ face detect** |
+| **extract** | wall-clock ทั้ง chunk ใน Worker 2 |
 
 ---
 
@@ -392,113 +466,86 @@ Session history — สรุประดับ session (ไม่ใช่แ�
 > Bitrate จริงขึ้นกับเครื่อง/codec — ตัวเลข chunk เป็นค่าประมาณ  
 > Frames sampled เท่ากันเพราะอิง **ความยาววิดีโอรวม** (5 นาที) ไม่ใช่จำนวน chunk
 
-### Gallery path
+### Gallery path (บนเครื่อง)
+
+**เวอร์ชันแอปฝังอยู่ในชื่อโฟลเดอร์** ไม่ใช่ชั้นไดเรกทอรีเพิ่ม — บอกได้ว่ารูปชุดไหนมาจาก build ไหน
+โดยที่ไฟล์เบราว์เซอร์บนมือถือไม่ต้องกดลึกขึ้นอีกชั้น (`versionTag` มาจาก `appVersionName` แปลง `.` เป็น `_`)
 
 ```
 DCIM/AutoBots/
-├── ext_07082026_1415/        ← import video
+├── ext_v0_1_3_07082026_1415/   ← import (JPEG)
 │   ├── face_c000_….jpg
-│   └── session_log.txt
-└── 20260806_160512/        ← live capture
-    ├── face_c001_….jpg
-    └── session_log.txt
+│   └── …
+└── v0_1_3_20260806_160512/     ← live (JPEG)
+    └── face_c001_….jpg
+
+Download/AutoBots/              ← session_log + perf_report (Android 10+)
+├── ext_v0_1_3_07082026_1415/
+│   ├── session_log.txt
+│   └── perf_report.json
+└── v0_1_3_20260806_160512/
+    └── …
 ```
+
+> โฟลเดอร์จาก build เก่าที่ยังไม่มี versionTag (`ext_07082026_1415`) จะอยู่ปนกันในระดับเดียวกัน — `sync_gallery.sh` ดึงได้หมด
+
+**ดึงกลับ Mac:** `./sync_gallery.sh` รวม DCIM + Download (+ debug cache) → `~/Downloads/AutoBots-export/{subfolder}/`
 
 ---
 
-## 7. สรุป Flow แบบ Diagram (GPU Pipeline)
+## 7. สรุป Flow แบบ Diagram
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                       User Action                                 │
 │  ┌──────────────┐       ┌──────────────────┐                     │
 │  │ Live Capture │       │ Import Video     │                     │
-│  │ (เริ่ม capture)│       │ (เลือกไฟล์)       │                     │
 │  └──────┬───────┘       └────────┬─────────┘                     │
-│         │                         │                               │
 ├─────────┼─────────────────────────┼───────────────────────────────┤
-│         │                         │                               │
 │         ▼                         ▼                               │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │              CapturePipelineCoordinator                   │    │
-│  │  sessionDir = cache/autobots/{id}                         │    │
-│  │  facesDir = sessionDir/faces                              │    │
-│  │  videoQueue = Channel<ChunkWorkItem>(capacity=8)          │    │
+│  │  cache/autobots/{sessionId}/faces  ·  videoQueue (8)    │    │
 │  └──────────────────────────────────────────────────────────┘    │
-│         │                         │                               │
 │         ▼                         ▼                               │
 │  ┌──────────────────┐    ┌──────────────────────┐                │
-│  │ VideoChunkRecorder │    │ ImportedVideoSplitter│               │
-│  │ (Worker 1)       │    │ (Remux splitting)    │               │
-│  │                  │    │                      │               │
-│  │ บันทึก MP4 chunks │    │ Split → MP4 chunks  │               │
-│  │ (50MB unified)   │    │ (Keyframe-aligned)   │               │
+│  │ VideoChunkRecorder│    │ ImportedVideoSplitter │               │
+│  │ 50 MB/chunk      │    │ remux, keyframe-aligned│              │
 │  └────────┬─────────┘    └──────────┬───────────┘               │
-│           │                         │                            │
-│           ▼                         ▼                            │
+│           └────────────┬────────────┘                            │
+│                        ▼                                         │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    videoQueue (Channel)                   │   │
-│  │          ┌───────────────────────────────────────┐       │   │
-│  └─────────▶│  Worker 2: VideoFrameProcessor (GPU)  │◀────────┘   │
-│              │                                       │           │
-│              │  [Stage 1: Hardware Frame Sampling]   │           │
-│              │    MediaCodec (Hardware decoder)      │           │
-│              │    YUV 420 → NV21 → JPEG 92% →       │           │
-│              │    Bitmap ARGB_8888                   │           │
-│              │    Sample: 120ms (ทุก resolution)       │           │
-│              │                                       │           │
-│              │  [Stage 2: ML Kit Face/Pose]          │           │
-│              │    scale 640px, FAST + tracking       │           │
-│              │                                       │           │
-│              │  [Stage 3: CPU Sharpness]             │           │
-│              │    FaceSharpnessScorer                │           │
-│              │    threshold 80 (FHD) / 65 (UHD)      │           │
-│              │                                       │           │
-│              │  [Stage 4: Dedup + Best-of-Window]    │           │
-│              │    DEDUP_WINDOW = 1 วินาที            │           │
-│              │    เก็บ frame ที่ sharp ที่สุด           │           │
-│              │                                       │           │
-│              │  [Stage 5: Save JPEG]                 │           │
-│              │    "${prefix}_c${chunkIndex}_${ptsUs}.jpg"│        │
-│              └───────────────────────────────────────┘           │
-│                         │                                       │
-│                         ▼                                       │
+│  │         Worker 2: VideoFrameProcessor                     │   │
+│  │  sample 120ms → ML Kit → CPU sharpness → dedup 1s        │   │
+│  │  → JPEG temp → WriteQueue → DCIM/AutoBots/{subfolder}/   │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                        │ drain complete                          │
+│                        ▼                                         │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    WriteQueue                             │   │
-│  │  Channel<File>(capacity=8)                                │   │
-│  │  Dispatchers.IO — background drain loop                   │   │
-│  └──────────────────────────────────────────────────────────┘    │
-│                         │                                       │
-│                         ▼                                       │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │              LocalDeliveryWriter                          │   │
-│  │    MediaStore.insert("DCIM/AutoBots")                     │   │
-│  │    copy file → output stream                              │   │
-│  │    IS_PENDING=0 → visible in gallery                      │   │
-│  └──────────────────────────────────────────────────────────┘    │
-│                         │                                       │
-│                         ▼                                       │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Gallery                                │   │
-│  │    DCIM/AutoBots/{subfolder}/face_c….jpg              │   │
-│  │    DCIM/AutoBots/{subfolder}/session_log.txt          │   │
+│  │  session_log.txt → Download/AutoBots/{subfolder}/        │   │
+│  │  (+ cache mirror สำหรับ debug sync)                        │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 8. Changelog ล่าสุด
+## 8. Changelog ล่าสุด (สอดคล้องโค้ดปัจจุบัน)
 
 | หัวข้อ | รายละเอียด |
 |--------|------------|
-| **Sample interval** | **120 ms** ทุก resolution (`StreamResolution.kt`) |
-| **Import resolution** | Auto-detect จากไฟล์ — ไม่ใช้ค่า UI |
-| **Gallery folders** | `DCIM/AutoBots/ext_DDMMYYYY_HHMM` (import) หรือ `{yyyyMMdd_HHmmss}` (live) |
-| **Session log** | `session_log.txt` ในโฟลเดอร์เดียวกับรูป |
-| **Session history UI** | สรุป session + แสดงเฉพาะ chunk ที่ detect ได้ (import) |
-| **Sharpness** | CPU `FaceSharpnessScorer` (ไม่ใช่ GPU shader) |
-| **Detect** | ML Kit bundled TFLite (ไม่ใช่ NNAPI โดยตรง) |
+| **Sample interval** | **120 ms** ทุก resolution (`StreamResolution.FRAME_SAMPLE_INTERVAL_MS`) |
+| **Chunk size** | **50 MB** ทั้ง FHD และ UHD |
+| **Import resolution** | Auto-detect (`ImportedVideoSplitter.probe` + `fromVideoDimensions`) |
+| **Gallery JPEG** | `DCIM/AutoBots/{subfolder}/` ผ่าน `MediaStore.Images` |
+| **Session log** | `Download/AutoBots/{subfolder}/session_log.txt` (API 29+); mirror ใน app cache |
+| **โฟลเดอร์** | Import: `ext_DDMMYYYY_HHMM` · Live: `yyyyMMdd_HHmmss` |
+| **Session history** | `ChunkHistoryPage` — chunk stats, import แสดงเฉพาะ chunk ที่มี faces |
+| **Chunk metrics** | `framesSampled`, `Found X from Y frames`, `avg ms/frame`, duration `SS.mmm s` |
+| **Sharpness** | CPU `FaceSharpnessScorer` — FHD ≥ 80, UHD ≥ 65 |
+| **Detect** | ML Kit FAST + `enableTracking()` (ไม่ใช่ NNAPI โดยตรง) |
+| **Orientation** | Portrait only (`MainActivity` `screenOrientation=portrait`) |
+| **Mac sync** | `./sync_gallery.sh` — รวม DCIM + Download |
 
 ---
 
@@ -523,3 +570,13 @@ StreamResolution.Uhd -> ProcessProfile(minSharpness = 65.0)
 - 4K ที่เคยถูกตัด (score 72) ตอนนี้ผ่าน (threshold 65)
 - 1080p ไม่ได้รับผลกระทบ (threshold 80 คงเดิม)
 - จำนวน photo ที่ kept จาก 4K เพิ่มขึ้น → compensating coverage เท่ากับ 1080p
+
+---
+
+## Related
+
+- Operator guide: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
+- UI layout: [SCREEN.md](./SCREEN.md)
+- Code layout: [STRUCTURE.md](./STRUCTURE.md)
+- Platform APIs: [PLATFORM_APIS.md](./PLATFORM_APIS.md)
+- Doc index: [DOCS.md](./DOCS.md)

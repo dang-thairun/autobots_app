@@ -10,6 +10,7 @@ import com.autobots.camera.detection.OfflineFaceDetector
 import com.autobots.camera.detection.OfflinePoseDetector
 import com.autobots.camera.detection.PoseDetectionResult
 import com.autobots.camera.perf.CamPerf
+import com.autobots.camera.perf.PerfReport
 import com.autobots.camera.perf.StageStats
 import java.io.File
 import java.io.FileOutputStream
@@ -23,6 +24,8 @@ data class VideoProcessResult(
     val savedFiles: List<File> = emptyList(),
     val framesSampled: Int = 0,
     val decodeFailures: Int = 0,
+    /** Populated only when [CamPerf.enabled]; feeds `perf_report.json`. */
+    val diag: PerfReport.ChunkDiag? = null,
 )
 
 /**
@@ -39,7 +42,19 @@ class VideoFrameProcessor(
     /** Per-chunk stage timings; safe as a field because chunks are processed serially. */
     private var perf: StageStats? = null
     private val sharpnessSamples = ArrayList<Double>()
+    /** Per-frame verdicts for `perf_report.json`; same serial-chunk assumption as [perf]. */
+    private val frameLog = ArrayList<PerfReport.FrameDiag>()
     private var currentChunkIndex = 0
+
+    private fun logFrame(
+        timestampUs: Long,
+        outcome: String,
+        sharpness: Double? = null,
+        subjectRatio: Float? = null,
+    ) {
+        if (!CamPerf.enabled) return
+        frameLog.add(PerfReport.FrameDiag(timestampUs, outcome, sharpness, subjectRatio))
+    }
 
     suspend fun process(
         file: File,
@@ -60,54 +75,65 @@ class VideoFrameProcessor(
         val started = System.currentTimeMillis()
         perf = CamPerf.stageStats()
         sharpnessSamples.clear()
+        frameLog.clear()
         outputDir.mkdirs()
         var kept = 0
         var skipped = 0
         val savedFiles = mutableListOf<File>()
-        var bestInWindow: FrameCandidate? = null
+        // Candidates are written to disk as they arrive and ranked afterwards. Ranking them
+        // in memory would mean holding several full-resolution frames at once — ~33 MB each
+        // at UHD — while a JPEG write costs ~83 ms on a frame that already passed two gates.
+        val windowFrames = mutableListOf<SavedCandidate>()
         var windowStartUs = -1L
         val estimatedFrames = estimateFrameCount(file, sampleIntervalMs)
         var scannedFrames = 0
         val rejects = RejectStats()
 
-        val sampleStats = VideoFrameSampler.sampleFrames(file, sampleIntervalMs, perf) { timestampUs, bitmap ->
+        fun closeWindow() {
+            if (windowFrames.isEmpty()) return
+            val ranked = windowFrames.sortedByDescending { it.sharpness }
+            for ((index, entry) in ranked.withIndex()) {
+                if (index < MAX_KEEP_PER_WINDOW) {
+                    kept++
+                    savedFiles.add(entry.file)
+                } else {
+                    skipped++
+                    entry.file.delete()
+                }
+            }
+            windowFrames.clear()
+        }
+
+        val sampleStats = VideoFrameSampler.sampleFrames(
+            file,
+            sampleIntervalMs,
+            perf,
+        ) { timestampUs, bitmap, rotationDegrees ->
             scannedFrames++
             val percent = ((scannedFrames * 100) / estimatedFrames).coerceIn(0, 99)
             onProgress(percent)
 
-            val candidate = evaluateFrame(bitmap, timestampUs, rejects)
+            val candidate = evaluateFrame(bitmap, timestampUs, rotationDegrees, rejects)
             if (candidate == null) {
                 skipped++
                 bitmap.recycle()
                 return@sampleFrames
             }
 
-            val windowUs = DEDUP_WINDOW_US
-            if (windowStartUs < 0 || timestampUs - windowStartUs >= windowUs) {
-                bestInWindow?.let { previous ->
-                    saveFrame(previous)?.let { saved ->
-                        kept++
-                        savedFiles.add(saved)
-                    } ?: run { skipped++ }
-                }
-                bestInWindow = candidate
-                windowStartUs = timestampUs
-            } else if (candidate.sharpness > (bestInWindow?.sharpness ?: 0.0)) {
-                bestInWindow?.bitmap?.recycle()
-                bestInWindow = candidate
-            } else {
-                candidate.bitmap.recycle()
+            // saveFrame recycles the bitmap, so memory stays flat regardless of window size.
+            val saved = saveFrame(candidate)
+            if (saved == null) {
                 skipped++
+                return@sampleFrames
             }
+            if (windowStartUs < 0 || timestampUs - windowStartUs >= DEDUP_WINDOW_US) {
+                closeWindow()
+                windowStartUs = timestampUs
+            }
+            windowFrames.add(SavedCandidate(saved, candidate.sharpness))
         }
 
-        bestInWindow?.let { previous ->
-            saveFrame(previous)?.let { saved ->
-                kept++
-                savedFiles.add(saved)
-            } ?: run { skipped++ }
-        }
-
+        closeWindow()
         onProgress(100)
 
         val durationMs = System.currentTimeMillis() - started
@@ -128,103 +154,209 @@ class VideoFrameProcessor(
             savedFiles = savedFiles,
             framesSampled = scannedFrames,
             decodeFailures = sampleStats.decodeFailures,
+            diag = if (!CamPerf.enabled) {
+                null
+            } else {
+                PerfReport.ChunkDiag(
+                    framesSampled = scannedFrames,
+                    kept = kept,
+                    skipped = skipped,
+                    decodeFailures = sampleStats.decodeFailures,
+                    processDurationMs = durationMs,
+                    noSubject = rejects.noSubject,
+                    tooSmall = rejects.tooSmall,
+                    tooSoft = rejects.tooSoft,
+                    roiInvalid = rejects.roiInvalid,
+                    sharpnessCutoff = profile.minSharpness,
+                    detectWidth = profile.detectBitmapWidth,
+                    decodePath = if (sampleStats.usedSurfacePath) "surface" else "yuv",
+                    stages = perf?.snapshot().orEmpty(),
+                    frames = frameLog.toList(),
+                    // Dedup picks the winner after the fact; the saved file name carries its PTS.
+                    keptPtsUs = savedFiles.mapNotNull {
+                        it.nameWithoutExtension.substringAfterLast('_').toLongOrNull()
+                    },
+                )
+            },
         )
     }
 
     private suspend fun evaluateFrame(
-        bitmap: Bitmap,
+        raw: Bitmap,
         timestampUs: Long,
+        rotationDegrees: Int,
         rejects: RejectStats,
     ): FrameCandidate? {
         return when (target) {
-            ExtractionTarget.Face -> evaluateFaceFrame(bitmap, timestampUs, rejects)
-            ExtractionTarget.Pose -> evaluatePoseFrame(bitmap, timestampUs, rejects)
+            ExtractionTarget.Face -> evaluateFaceFrame(raw, timestampUs, rotationDegrees, rejects)
+            ExtractionTarget.Pose -> evaluatePoseFrame(raw, timestampUs, rotationDegrees, rejects)
         }
     }
 
     private suspend fun evaluateFaceFrame(
-        bitmap: Bitmap,
+        raw: Bitmap,
         timestampUs: Long,
+        rotationDegrees: Int,
         rejects: RejectStats,
     ): FrameCandidate? {
-        val scaled = CamPerf.timed(perf, "scale_for_detect") { scaleForDetect(bitmap) }
+        val detectBmp = CamPerf.timed(perf, "scale_for_detect") {
+            uprightDetectBitmap(raw, rotationDegrees)
+        }
         val faces = try {
-            CamPerf.timed(perf, "mlkit_face") { faceDetector.detect(scaled) }
-        } finally {
-            if (scaled !== bitmap) scaled.recycle()
+            CamPerf.timed(perf, "mlkit_face") { faceDetector.detect(detectBmp) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Face detect failed at ${timestampUs}us", t)
+            emptyList()
         }
-        if (faces.isEmpty()) {
-            rejects.noSubject++
-            return null
-        }
+        // Size is judged in detect space, so a rejected frame never pays for a full-res rotate.
+        val largest = faces.maxByOrNull { it.height() }
+        val detectWidth = detectBmp.width
+        val detectHeight = detectBmp.height
+        if (detectBmp !== raw) detectBmp.recycle()
 
-        val scaleX = bitmap.width.toFloat() / scaled.width
-        val scaleY = bitmap.height.toFloat() / scaled.height
-        val mapped = faces.map { face ->
-            Rect(
-                (face.left * scaleX).toInt(),
-                (face.top * scaleY).toInt(),
-                (face.right * scaleX).toInt(),
-                (face.bottom * scaleY).toInt(),
-            )
-        }
-        val largest = mapped.maxByOrNull { it.height() } ?: run {
+        if (largest == null) {
             rejects.noSubject++
+            logFrame(timestampUs, "no_subject")
             return null
         }
-        val subjectRatio = largest.height().toFloat() / bitmap.height
+        val subjectRatio = largest.height().toFloat() / detectHeight
         if (subjectRatio < MIN_FACE_HEIGHT_RATIO) {
             rejects.tooSmall++
+            logFrame(timestampUs, "too_small", subjectRatio = subjectRatio)
             return null
         }
 
-        val sharpness = scoreSharpness(bitmap, largest)
+        val upright = uprightFullFrame(raw, rotationDegrees)
+        val roi = mapRect(largest, upright, detectWidth, detectHeight)
+        if (!isUsableRoi(roi)) {
+            rejects.roiInvalid++
+            logFrame(timestampUs, "roi_invalid", subjectRatio = subjectRatio)
+            upright.recycle()
+            return null
+        }
+        val sharpness = scoreSharpness(upright, roi)
         if (sharpness < profile.minSharpness) {
             rejects.tooSoft++
+            logFrame(timestampUs, "too_soft", sharpness, subjectRatio)
+            upright.recycle()
             return null
         }
 
-        return FrameCandidate(timestampUs, bitmap, sharpness, subjectRatio)
+        logFrame(timestampUs, "candidate", sharpness, subjectRatio)
+        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio)
     }
 
     private suspend fun evaluatePoseFrame(
-        bitmap: Bitmap,
+        raw: Bitmap,
         timestampUs: Long,
+        rotationDegrees: Int,
         rejects: RejectStats,
     ): FrameCandidate? {
-        val scaled = CamPerf.timed(perf, "scale_for_detect") { scaleForDetect(bitmap) }
-        val detection = try {
-            CamPerf.timed(perf, "mlkit_pose") { detectPose(scaled) }
-        } finally {
-            if (scaled !== bitmap) scaled.recycle()
+        val detectBmp = CamPerf.timed(perf, "scale_for_detect") {
+            uprightDetectBitmap(raw, rotationDegrees)
         }
+        val detection = try {
+            CamPerf.timed(perf, "mlkit_pose") { detectPose(detectBmp) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Pose detect failed at ${timestampUs}us", t)
+            null
+        }
+        val detectWidth = detectBmp.width
+        val detectHeight = detectBmp.height
+        if (detectBmp !== raw) detectBmp.recycle()
+
         if (detection == null) {
             rejects.noSubject++
+            logFrame(timestampUs, "no_subject")
             return null
         }
-
-        val scaleX = bitmap.width.toFloat() / scaled.width
-        val scaleY = bitmap.height.toFloat() / scaled.height
-        val torso = Rect(
-            (detection.torsoBounds.left * scaleX).toInt(),
-            (detection.torsoBounds.top * scaleY).toInt(),
-            (detection.torsoBounds.right * scaleX).toInt(),
-            (detection.torsoBounds.bottom * scaleY).toInt(),
-        )
-        val subjectRatio = torso.height().toFloat() / bitmap.height
+        val subjectRatio = detection.torsoBounds.height().toFloat() / detectHeight
         if (subjectRatio < MIN_TORSO_HEIGHT_RATIO) {
             rejects.tooSmall++
+            logFrame(timestampUs, "too_small", subjectRatio = subjectRatio)
             return null
         }
 
-        val sharpness = scoreSharpness(bitmap, torso)
+        val upright = uprightFullFrame(raw, rotationDegrees)
+        val roi = mapRect(detection.torsoBounds, upright, detectWidth, detectHeight)
+        if (!isUsableRoi(roi)) {
+            rejects.roiInvalid++
+            logFrame(timestampUs, "roi_invalid", subjectRatio = subjectRatio)
+            upright.recycle()
+            return null
+        }
+        val sharpness = scoreSharpness(upright, roi)
         if (sharpness < profile.minSharpness) {
             rejects.tooSoft++
+            logFrame(timestampUs, "too_soft", sharpness, subjectRatio)
+            upright.recycle()
             return null
         }
 
-        return FrameCandidate(timestampUs, bitmap, sharpness, subjectRatio)
+        logFrame(timestampUs, "candidate", sharpness, subjectRatio)
+        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio)
     }
+
+    /**
+     * Detect input, upright and ~[ProcessProfile.detectBitmapWidth] wide.
+     *
+     * Scaling happens **before** rotation so the rotate runs on a 640px frame rather than a
+     * 4K one (~52 ms → ~5 ms at UHD). The result is the same size as the pre-0.1.3
+     * rotate-then-scale order, so detection sees an identical image.
+     */
+    private fun uprightDetectBitmap(raw: Bitmap, rotationDegrees: Int): Bitmap {
+        val swapsAxes = rotationDegrees == 90 || rotationDegrees == 270
+        val uprightWidth = if (swapsAxes) raw.height else raw.width
+        val target = profile.detectBitmapWidth
+
+        val scaled = if (uprightWidth <= target) {
+            raw
+        } else {
+            val factor = target.toFloat() / uprightWidth
+            Bitmap.createScaledBitmap(
+                raw,
+                max(1, (raw.width * factor).toInt()),
+                max(1, (raw.height * factor).toInt()),
+                true,
+            )
+        }
+        if (rotationDegrees == 0) return scaled
+        if (scaled === raw) {
+            // rotate() recycles its input, and the caller still owns the raw frame.
+            val copy = raw.copy(raw.config ?: Bitmap.Config.ARGB_8888, false) ?: return raw
+            return VideoFrameSampler.rotate(copy, rotationDegrees)
+        }
+        return VideoFrameSampler.rotate(scaled, rotationDegrees)
+    }
+
+    /** Upright full-resolution frame — only frames that passed the size gate pay for this. */
+    private fun uprightFullFrame(raw: Bitmap, rotationDegrees: Int): Bitmap {
+        if (rotationDegrees == 0) return raw
+        return CamPerf.timed(perf, "rotate") { VideoFrameSampler.rotate(raw, rotationDegrees) }
+    }
+
+    /**
+     * Detect-space rect → full-frame rect. Both are upright, so this is a pure scale.
+     *
+     * ML Kit with `enableTracking()` can report a box that runs past the frame edge for a
+     * subject at the border. Unclamped, [FaceSharpnessScorer] sees an empty region and
+     * returns 0.0 — which the caller would then read as "too blurry" rather than
+     * "not measurable". Clamp here and let the caller check the result.
+     */
+    private fun mapRect(rect: Rect, target: Bitmap, detectWidth: Int, detectHeight: Int): Rect {
+        val scaleX = target.width.toFloat() / detectWidth
+        val scaleY = target.height.toFloat() / detectHeight
+        return Rect(
+            (rect.left * scaleX).toInt().coerceIn(0, target.width),
+            (rect.top * scaleY).toInt().coerceIn(0, target.height),
+            (rect.right * scaleX).toInt().coerceIn(0, target.width),
+            (rect.bottom * scaleY).toInt().coerceIn(0, target.height),
+        )
+    }
+
+    /** Matches [FaceSharpnessScorer]'s own floor, so a usable ROI always yields a real score. */
+    private fun isUsableRoi(roi: Rect): Boolean =
+        roi.width() >= MIN_ROI_PX && roi.height() >= MIN_ROI_PX
 
     private suspend fun detectPose(bitmap: Bitmap): PoseDetectionResult? {
         return poseDetector.detect(bitmap)
@@ -240,13 +372,6 @@ class VideoFrameProcessor(
         }
         if (CamPerf.enabled) sharpnessSamples.add(score)
         return score
-    }
-
-    private fun scaleForDetect(bitmap: Bitmap): Bitmap {
-        val targetW = profile.detectBitmapWidth
-        if (bitmap.width <= targetW) return bitmap
-        val height = (bitmap.height * (targetW.toFloat() / bitmap.width)).toInt()
-        return Bitmap.createScaledBitmap(bitmap, targetW, max(1, height), true)
     }
 
     private fun saveFrame(candidate: FrameCandidate): File? {
@@ -327,13 +452,21 @@ class VideoFrameProcessor(
         val subjectRatio: Float,
     )
 
+    /** A candidate already on disk, waiting to be ranked against the rest of its window. */
+    private data class SavedCandidate(
+        val file: File,
+        val sharpness: Double,
+    )
+
     private data class RejectStats(
         var noSubject: Int = 0,
         var tooSmall: Int = 0,
         var tooSoft: Int = 0,
+        /** Subject found, but its box mapped outside the frame — not a quality verdict. */
+        var roiInvalid: Int = 0,
     ) {
         override fun toString(): String =
-            "noSubject=$noSubject,small=$tooSmall,soft=$tooSoft"
+            "noSubject=$noSubject,small=$tooSmall,soft=$tooSoft,roiInvalid=$roiInvalid"
     }
 
     private data class ProcessProfile(
@@ -362,7 +495,28 @@ class VideoFrameProcessor(
     companion object {
         private const val TAG = "VideoFrameProcessor"
         private const val DEDUP_WINDOW_US = 1_000_000L
-        private const val MIN_FACE_HEIGHT_RATIO = 0.05f
+
+        /**
+         * Photos kept per dedup window.
+         *
+         * 0.1.2–0.1.3 kept the single sharpest frame, which turned a runner's whole pass in
+         * front of the lens into one photo — 42 candidates became 7 in the UHD test. Keeping
+         * three matches the Passage Outcome in CONTEXT.md (Keep-All Policy, ~3 per passage).
+         */
+        private const val MAX_KEEP_PER_WINDOW = 3
+
+        /** Smallest ROI the sharpness scorer can work with. */
+        private const val MIN_ROI_PX = 8
+
+        /**
+         * Minimum subject height as a fraction of frame height.
+         *
+         * 0.1.2 used 0.05 and threw away 96 of 507 UHD frames whose faces measured
+         * 0.023–0.048 — runners approaching the lens, rejected one step short of the gate.
+         * Must stay above [OfflineFaceDetector]'s own `setMinFaceSize`, or ML Kit filters
+         * the face out before this check ever sees it.
+         */
+        private const val MIN_FACE_HEIGHT_RATIO = 0.035f
         private const val MIN_TORSO_HEIGHT_RATIO = 0.25f
         const val MIN_SHARPNESS = 80.0
         const val MIN_SHARPNESS_UHD = 65.0

@@ -34,6 +34,26 @@ class StageStats {
     @Synchronized
     fun totalMs(): Long = order.sumOf { totalNs.getValue(it) } / 1_000_000L
 
+    /** One row per stage, in pipeline order — the machine-readable form of [table]. */
+    @Synchronized
+    fun snapshot(): List<StageRow> = order.map { stage ->
+        StageRow(
+            stage = stage,
+            n = counts.getValue(stage),
+            totalNs = totalNs.getValue(stage),
+            maxNs = maxNs.getValue(stage),
+        )
+    }
+
+    data class StageRow(
+        val stage: String,
+        val n: Int,
+        val totalNs: Long,
+        val maxNs: Long,
+    ) {
+        val avgNs: Long get() = if (n == 0) 0L else totalNs / n
+    }
+
     @Synchronized
     fun table(title: String): String = buildString {
         append("┌─ ").append(title).append('\n')

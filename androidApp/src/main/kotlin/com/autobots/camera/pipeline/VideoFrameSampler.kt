@@ -36,6 +36,10 @@ import java.io.File
  *
  * Frames are emitted **unrotated**, with the container rotation passed alongside. Rotating
  * a 4K frame costs ~52 ms, and only the handful of frames that survive detection need it.
+ *
+ * Since 0.1.4 `onFrame` is expected to **hand the frame off and return**, not to process it.
+ * This loop is the producer half of the two-stage pipeline described on [VideoFrameProcessor];
+ * blocking it is blocking the decoder.
  */
 object VideoFrameSampler {
     private const val TAG = "VideoFrameSampler"
@@ -310,8 +314,10 @@ object VideoFrameSampler {
                     }
 
                     if (bitmap != null) {
-                        // Everything downstream runs here, blocking the decoder.
-                        CamPerf.timed(perf, "decoder_blocked") {
+                        // Handing the frame to Worker 2. Since 0.1.4 the callback only
+                        // enqueues, so this measures backpressure — how long the decoder
+                        // waited for a detect worker to free a slot — not detection itself.
+                        CamPerf.timed(perf, "queue_wait") {
                             runBlocking { onFrame(ptsUs, bitmap, rotationDegrees) }
                         }
                         lastEmitUs = ptsUs

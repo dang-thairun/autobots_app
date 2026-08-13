@@ -4,6 +4,11 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.lifecycle.lifecycleScope
+import com.autobots.camera.detection.DetectorProbe
+import com.autobots.camera.perf.CamPerf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
@@ -24,6 +29,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Which detector backends this build and device can actually run. Off the main
+        // thread: initialising QNN compiles the graph, which is not instant.
+        if (CamPerf.enabled) {
+            lifecycleScope.launch(Dispatchers.Default) {
+                DetectorProbe.run(applicationContext)
+            }
+        }
         enableEdgeToEdge()
 
         val currentServer = AutobotsServer(applicationContext, operatorViewModel)
@@ -71,6 +84,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onStreamResolution = operatorViewModel::setStreamResolution,
                     onExtractionTarget = operatorViewModel::setExtractionTarget,
+                    onDetectorBackend = operatorViewModel::setDetectorBackend,
                     onRecordingProgress = operatorViewModel::onRecordingProgress,
                     onPhotoDelivered = operatorViewModel::onPhotoDelivered,
                     onExposureReadout = operatorViewModel::onExposureReadout,

@@ -44,6 +44,19 @@ class PerfReport {
         val detectWidth: Int,
         /** "surface" (0.1.3 fast path) or "yuv" (legacy fallback). */
         val decodePath: String,
+        /** Detect workers running alongside the decoder (0.1.4 two-stage pipeline). */
+        val detectWorkers: Int,
+        /** Frames buffered between decoder and workers — the memory ceiling. */
+        val frameQueueCapacity: Int,
+        /** "halving" or "single" — how the detect bitmap was downscaled. */
+        val downscaleMode: String,
+        /**
+         * What the detector reports about itself: requested backend, the backend actually in
+         * use after any fallback, and tile count. Recorded so a session that quietly fell back
+         * to ML Kit — because the QNN libraries were missing, say — can never be read as a
+         * result for the backend that was asked for.
+         */
+        val detector: Map<String, Any>,
         val stages: List<StageStats.StageRow>,
         val frames: List<FrameDiag>,
         val keptPtsUs: List<Long>,
@@ -199,7 +212,17 @@ class PerfReport {
         }
     }
 
-    /** Stage totals across the whole session — the table to read first. */
+    /**
+     * Stage totals across the whole session — the table to read first.
+     *
+     * `sharePercent` is measured against the chunks' **real wall clock**, not against a sum
+     * of stage timings. Up to 0.1.3 the denominator was "top-level stages added together",
+     * which required knowing which stages nested inside which — and got it wrong for
+     * `rotate`, inflating the divisor and understating every share. Since 0.1.4 the pipeline
+     * runs on two threads and no sum of stages equals wall time at all: the producer and the
+     * consumers overlap, so the stage totals deliberately add up to **more** than 100%.
+     * That is the whole point, and it is exactly what the overlap is worth.
+     */
     private fun mergedStagesJson(diags: List<ChunkDiag>): JSONArray {
         val order = mutableListOf<String>()
         val n = HashMap<String, Int>()
@@ -213,11 +236,7 @@ class PerfReport {
                 max[row.stage] = maxOf(max[row.stage] ?: 0L, row.maxNs)
             }
         }
-        // `decoder_blocked` wraps everything downstream of the decoder, so summing all
-        // stages double-counts it. Wall time is the top-level stages only.
-        val wallNs = order.filter { it !in NESTED_STAGES }
-            .sumOf { total.getValue(it) }
-            .coerceAtLeast(1L)
+        val wallNs = (diags.sumOf { it.processDurationMs } * 1_000_000L).coerceAtLeast(1L)
         return JSONArray().apply {
             for (stage in order) {
                 val stageTotal = total.getValue(stage)
@@ -230,7 +249,7 @@ class PerfReport {
                         put("maxMs", round3(max.getValue(stage) / 1e6))
                         put("totalMs", round3(stageTotal / 1e6))
                         put("sharePercent", round3(stageTotal * 100.0 / wallNs))
-                        put("nestedInDecoderBlocked", stage in NESTED_STAGES)
+                        put("thread", if (stage in PRODUCER_STAGES) "producer" else "consumer")
                     },
                 )
             }
@@ -238,7 +257,11 @@ class PerfReport {
                 JSONObject().apply {
                     put("stage", "__wallTotal")
                     put("totalMs", round3(wallNs / 1e6))
-                    put("note", "decode + yuv_jpeg_argb + rotate + decoder_blocked")
+                    put(
+                        "note",
+                        "real wall clock (sum of chunk processDurationMs). Producer and " +
+                            "consumer stages overlap, so shares sum to more than 100%.",
+                    )
                 },
             )
         }
@@ -265,6 +288,13 @@ class PerfReport {
                         put("processDurationMs", diag.processDurationMs)
                         put("detectWidth", diag.detectWidth)
                         put("decodePath", diag.decodePath)
+                        put("detectWorkers", diag.detectWorkers)
+                        put("frameQueueCapacity", diag.frameQueueCapacity)
+                        put("downscaleMode", diag.downscaleMode)
+                        put(
+                            "detector",
+                            JSONObject().apply { diag.detector.forEach { (k, v) -> put(k, v) } },
+                        )
                         put(
                             "rejects",
                             JSONObject().apply {
@@ -372,11 +402,23 @@ class PerfReport {
     }
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        /**
+         * 2 — `sharePercent` measured against real wall time, stages carry `thread` instead of
+         * `nestedInDecoderBlocked`, `decoder_blocked` became `queue_wait`, chunks report
+         * `detectWorkers` / `frameQueueCapacity` / `downscaleMode`. Schema 1 reports are not
+         * share-comparable.
+         *
+         * 3 — the detector became selectable, so `mlkit_face` is now simply **`detect`** (and
+         * `mlkit_pose` → `detect_pose`): one stage name across every backend, which is what
+         * makes two runs directly comparable. Chunks gained `detector`, and the session gained
+         * `detectorBackend`.
+         */
+        const val SCHEMA_VERSION = 3
         const val FILE_NAME = "perf_report.json"
 
-        /** Stages timed *inside* `decoder_blocked` — excluded from the wall-time total. */
-        private val NESTED_STAGES = setOf("scale_for_detect", "mlkit_face", "mlkit_pose", "sharpness", "save_jpeg")
+        /** Stages timed on the decoder thread; everything else runs on a detect worker. */
+        private val PRODUCER_STAGES =
+            setOf("decode", "yuv_jpeg_argb", "surface_rgba", "queue_wait")
 
         /** Backstops so a runaway session cannot grow the file without bound. */
         private const val MAX_EVENTS = 4000

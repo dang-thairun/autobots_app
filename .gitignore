@@ -13,3 +13,16 @@ captures/
 .cxx/
 xcuserdata/
 Pods/
+
+# Detector models — third-party artifacts under their own licences, fetched per-machine.
+# See androidApp/src/main/assets/models/README.md
+androidApp/src/main/assets/models/*.tflite
+androidApp/src/main/assets/models/*.bin
+androidApp/src/main/assets/models/*.dlc
+
+# QNN runtime libs — Qualcomm SDK redistributables, fetched per-machine.
+# See androidApp/src/main/jniLibs/README.md
+androidApp/src/main/jniLibs/**/*.so
+
+# Qualcomm QAIRT SDK — vendor download, not redistributable. See androidApp/src/main/jniLibs/README.md
+/tools/

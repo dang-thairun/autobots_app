@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
+import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
@@ -60,6 +61,7 @@ fun OperatorShellScreen(
     onRequestCameraPermission: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
     onExtractionTarget: (ExtractionTarget) -> Unit,
+    onDetectorBackend: (DetectorBackend) -> Unit,
     onRecordingProgress: (Int, Long, Long) -> Unit,
     onPhotoDelivered: (String) -> Unit,
     onExposureReadout: (String) -> Unit,
@@ -109,6 +111,7 @@ fun OperatorShellScreen(
                         onRequestCameraPermission = onRequestCameraPermission,
                         onStreamResolution = onStreamResolution,
                         onExtractionTarget = onExtractionTarget,
+                        onDetectorBackend = onDetectorBackend,
                         onOpenGallery = onOpenGallery,
                         onImportVideo = onImportVideo,
                     )
@@ -142,6 +145,7 @@ private fun OperatorControlsPage(
     onRequestCameraPermission: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
     onExtractionTarget: (ExtractionTarget) -> Unit,
+    onDetectorBackend: (DetectorBackend) -> Unit,
     onOpenGallery: () -> Unit,
     onImportVideo: () -> Unit,
 ) {
@@ -153,6 +157,7 @@ private fun OperatorControlsPage(
             onPipelineToggle = onPipelineToggle,
             onStreamResolution = onStreamResolution,
             onExtractionTarget = onExtractionTarget,
+            onDetectorBackend = onDetectorBackend,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -350,6 +355,7 @@ private fun CompactStatusCard(
     onPipelineToggle: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
     onExtractionTarget: (ExtractionTarget) -> Unit,
+    onDetectorBackend: (DetectorBackend) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var activeTooltip by remember { mutableStateOf<String?>(null) }
@@ -519,6 +525,33 @@ private fun CompactStatusCard(
                         )
                     }
                 }
+
+                // Detector bench (0.1.4). Import the same clip once per backend and the
+                // resulting perf_report.json files differ in exactly one variable.
+                Text(
+                    text = "Detector — same clip, one backend at a time",
+                    color = Color(0xFF90A4AE),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                DetectorBackend.entries.chunked(2).forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        row.forEach { candidate ->
+                            FilterChip(
+                                selected = state.detectorBackend == candidate,
+                                onClick = { onDetectorBackend(candidate) },
+                                enabled = !state.isCapturing,
+                                modifier = Modifier.weight(1f),
+                                label = {
+                                    Text(candidate.label, style = MaterialTheme.typography.labelSmall)
+                                },
+                            )
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -625,6 +658,7 @@ private fun OperatorShellPreview() {
             onRequestCameraPermission = {},
             onStreamResolution = {},
             onExtractionTarget = {},
+            onDetectorBackend = {},
             onRecordingProgress = { _, _, _ -> },
             onPhotoDelivered = {},
             onExposureReadout = {},

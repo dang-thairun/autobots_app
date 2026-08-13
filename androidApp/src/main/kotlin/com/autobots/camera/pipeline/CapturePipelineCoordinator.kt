@@ -3,6 +3,7 @@ package com.autobots.camera.pipeline
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.ChunkProcessStatus
 import com.autobots.camera.ChunkRecord
@@ -64,7 +65,7 @@ class CapturePipelineCoordinator(
     private val chunkHistory = mutableListOf<ChunkRecord>()
     private var sessionMeta: SessionMeta? = null
 
-    private val frameProcessor = VideoFrameProcessor(facesDir)
+    private val frameProcessor = VideoFrameProcessor(facesDir, appContext)
     private val deliveryWriter = LocalDeliveryWriter(appContext)
     private val perfReport = PerfReport()
     private val loadReader = if (CamPerf.enabled) {
@@ -104,6 +105,7 @@ class CapturePipelineCoordinator(
     private var lastChunkProcessMs = 0L
     private var resolution = StreamResolution.Fhd
     private var extractionTarget = ExtractionTarget.Face
+    private var detectorBackend = DetectorBackend.DEFAULT
     private var recording = false
     private var awaitingRecorderFinalize = false
     private var pipelinePaused = false
@@ -143,6 +145,7 @@ class CapturePipelineCoordinator(
                         resolution = resolution,
                         extractionTarget = extractionTarget,
                         sampleIntervalMs = resolution.frameSampleIntervalMs,
+                        detectorBackend = detectorBackend,
                     ) { percent ->
                         currentChunkPercent = percent
                         publishStats()
@@ -214,6 +217,15 @@ class CapturePipelineCoordinator(
         publishStats()
     }
 
+    /**
+     * Which detector Worker 2 runs. Changing it between imports of the same clip is how the
+     * 0.1.4 bench isolates the detector as the single variable — see [DetectorBackend].
+     */
+    fun setDetectorBackend(value: DetectorBackend) {
+        detectorBackend = value
+        publishStats()
+    }
+
     fun sessionDirectory(): File = sessionDir
 
     fun canAcceptVideoChunk(): Boolean = videoPending.get() < VIDEO_QUEUE_CAPACITY
@@ -281,6 +293,7 @@ class CapturePipelineCoordinator(
                 )
             }.also { result ->
                 sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
+                sessionMeta?.splitBlockedMs = result.blockedMs
                 if (result.videoWidth > 0 && result.videoHeight > 0) {
                     sessionMeta?.sourceVideoWidth = result.videoWidth
                     sessionMeta?.sourceVideoHeight = result.videoHeight
@@ -603,12 +616,18 @@ class CapturePipelineCoordinator(
             put("status", session.status.name)
             put("startedAtEpochMs", session.startedAtEpochMs)
             put("totalDurationMs", session.totalDurationMs)
+            // splitDurationMs is wall clock and therefore dominated by backpressure on any
+            // clip long enough to fill the video queue. splitActiveMs is the remux itself,
+            // and is the only one of the three comparable between runs.
             put("splitDurationMs", session.splitDurationMs)
+            put("splitBlockedMs", session.splitBlockedMs)
+            put("splitActiveMs", (session.splitDurationMs - session.splitBlockedMs).coerceAtLeast(0L))
             put("errorMessage", session.errorMessage ?: JSONObject.NULL)
             // Config that the numbers must be read against.
             put("resolutionLabel", session.resolution.label)
             put("resolution", session.resolution.name)
             put("extractionTarget", session.extractionTarget.name)
+            put("detectorBackend", detectorBackend.slug)
             put("sampleIntervalMs", session.resolution.frameSampleIntervalMs)
             put("chunkTargetBytes", session.resolution.chunkTargetBytes)
             put("videoQueueCapacity", VIDEO_QUEUE_CAPACITY)
@@ -720,6 +739,7 @@ class CapturePipelineCoordinator(
             extractionTarget = extractionTarget,
             status = status,
             splitDurationMs = meta.splitDurationMs,
+            splitBlockedMs = meta.splitBlockedMs,
             processDurationMs = processDurationMs,
             totalDurationMs = totalDurationMs,
             chunkCount = chunks.size,
@@ -744,6 +764,8 @@ class CapturePipelineCoordinator(
         var sourceVideoHeight: Int? = null,
         var sourceRotationDegrees: Int = 0,
         var splitDurationMs: Long = 0,
+        /** Of [splitDurationMs], how much was spent waiting on backpressure. */
+        var splitBlockedMs: Long = 0,
         var errorMessage: String? = null,
         var failed: Boolean = false,
         var finalized: Boolean = false,

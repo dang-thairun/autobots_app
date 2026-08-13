@@ -20,6 +20,17 @@ data class ImportSplitResult(
     val videoWidth: Int = 0,
     val videoHeight: Int = 0,
     val error: String? = null,
+    /**
+     * Time spent parked in [ImportedVideoSplitter.awaitQueueSpace] waiting for the video
+     * queue to drain.
+     *
+     * Without this, the caller's wall-clock timing of `split()` is unreadable: v0.1.3
+     * reported 2,912 ms for a 1-minute clip and 455,841 ms for a 4-minute one, because the
+     * long clip kept the queue at 8/8 and the splitter produced exactly one chunk per chunk
+     * consumed. That number measured the whole pipeline, not the remux. Subtracting this
+     * gives `splitActiveMs`, which is comparable across runs.
+     */
+    val blockedMs: Long = 0L,
 )
 
 data class VideoProbeResult(
@@ -51,6 +62,9 @@ class ImportedVideoSplitter(
     private val context: Context,
     private val videoDir: File,
 ) {
+    /** Accumulated backpressure wait for the current [split]; see [ImportSplitResult.blockedMs]. */
+    private var blockedMs = 0L
+
     fun probe(source: Uri): VideoProbeResult? {
         val retriever = MediaMetadataRetriever()
         return try {
@@ -81,6 +95,7 @@ class ImportedVideoSplitter(
         onProgress: (Int) -> Unit,
     ): ImportSplitResult {
         videoDir.mkdirs()
+        blockedMs = 0L
         val extractor = MediaExtractor()
         var segments = 0
         var totalBytes = 0L
@@ -104,6 +119,7 @@ class ImportedVideoSplitter(
                 return ImportSplitResult(
                     0, 0L, 0L, rotation, 0, 0,
                     "No video track in the selected file",
+                    blockedMs = blockedMs,
                 )
             }
 
@@ -207,6 +223,7 @@ class ImportedVideoSplitter(
                 videoWidth = videoWidth,
                 videoHeight = videoHeight,
                 error = t.message ?: t::class.java.simpleName,
+                blockedMs = blockedMs,
             )
         } finally {
             runCatching { extractor.release() }
@@ -215,7 +232,8 @@ class ImportedVideoSplitter(
         Log.i(
             TAG,
             "Imported $segments segment(s), ${totalBytes / 1024}KB, " +
-                "source ${videoWidth}x${videoHeight} ${durationUs / 1000}ms, rotation ${rotation}°",
+                "source ${videoWidth}x${videoHeight} ${durationUs / 1000}ms, rotation ${rotation}°, " +
+                "backpressure ${blockedMs}ms",
         )
         return ImportSplitResult(
             segments,
@@ -224,14 +242,22 @@ class ImportedVideoSplitter(
             rotation,
             videoWidth,
             videoHeight,
+            blockedMs = blockedMs,
         )
     }
 
-    /** Honour the same backpressure the live recorder obeys — never overrun the queue. */
+    /**
+     * Honour the same backpressure the live recorder obeys — never overrun the queue.
+     * Time parked here is accumulated so it can be subtracted from the split wall clock;
+     * see [ImportSplitResult.blockedMs].
+     */
     private suspend fun awaitQueueSpace(canAcceptChunk: () -> Boolean) {
+        if (canAcceptChunk()) return
+        val startMs = System.currentTimeMillis()
         while (!canAcceptChunk()) {
             delay(QUEUE_POLL_MS)
         }
+        blockedMs += System.currentTimeMillis() - startMs
     }
 
     private fun sampleBufferSize(format: MediaFormat): Int {

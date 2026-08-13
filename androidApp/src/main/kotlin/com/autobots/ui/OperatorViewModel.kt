@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobots.camera.ChunkRecordingProgress
 import com.autobots.camera.PipelineSessionRecord
+import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
 import com.autobots.camera.SessionSource
@@ -28,6 +29,7 @@ data class OperatorUiState(
     val isCapturing: Boolean = false,
     val streamResolution: StreamResolution = StreamResolution.Fhd,
     val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
+    val detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
     val videoChunksRecorded: Int = 0,
     val videoQueueDepth: Int = 0,
     val facesKept: Int = 0,
@@ -199,6 +201,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         val extractionTarget = _state.value.extractionTarget
         coordinator.setResolution(resolution)
         coordinator.setExtractionTarget(extractionTarget)
+        coordinator.setDetectorBackend(_state.value.detectorBackend)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -249,6 +252,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         )
         coordinator.setResolution(_state.value.streamResolution)
         coordinator.setExtractionTarget(_state.value.extractionTarget)
+        coordinator.setDetectorBackend(_state.value.detectorBackend)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -358,6 +362,14 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     fun setExtractionTarget(target: ExtractionTarget) {
         if (_state.value.isCapturing) return
         _state.update { it.copy(extractionTarget = target) }
+    }
+
+    /** Bench control: pick the detector, import the same clip, compare `perf_report.json`. */
+    fun setDetectorBackend(backend: DetectorBackend) {
+        if (_state.value.isCapturing) return
+        // Applied when the coordinator is built for the next session; the chip is disabled
+        // while capturing, so there is never a live pipeline to retarget.
+        _state.update { it.copy(detectorBackend = backend) }
     }
 
     fun onExposureReadout(line: String) {

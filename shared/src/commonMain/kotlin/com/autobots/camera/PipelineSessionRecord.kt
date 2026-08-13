@@ -31,6 +31,13 @@ data class PipelineSessionRecord(
     val extractionTarget: ExtractionTarget,
     val status: SessionStatus,
     val splitDurationMs: Long = 0,
+    /**
+     * Of [splitDurationMs], the part spent parked on video-queue backpressure rather than
+     * remuxing. On any clip long enough to fill the queue this is nearly all of it — v0.1.3
+     * measured 455.8 s of "split time" for a remux worth about 20 s — so the two must be
+     * reported apart for the numbers to mean anything.
+     */
+    val splitBlockedMs: Long = 0,
     val processDurationMs: Long = 0,
     val totalDurationMs: Long = 0,
     val chunkCount: Int = 0,
@@ -156,7 +163,11 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
     appendLine(headlineSummary)
     if (totalDurationMs > 0) appendLine(timingSummary)
     splitDurationMs.takeIf { it > 0 }?.let {
-        appendLine("Split time: ${formatDurationMs(it)}")
+        val active = (it - splitBlockedMs).coerceAtLeast(0L)
+        appendLine(
+            "Split time: ${formatDurationMs(active)} active" +
+                if (splitBlockedMs > 0) " + ${formatDurationMs(splitBlockedMs)} waiting on queue" else "",
+        )
     }
     processDurationMs.takeIf { it > 0 }?.let {
         appendLine("Extract time: ${formatDurationMs(it)}")

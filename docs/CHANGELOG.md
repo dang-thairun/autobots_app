@@ -6,7 +6,52 @@ Also sync: `shared/.../AutobotsApp.kt` → `version` (KMP, docs, non-Android).
 
 ---
 
-## v0.1.3 (current)
+## v0.1.4 (current)
+
+**Theme:** Worker 2 เป็นสองเธรด — ทำให้ decode กับ detect ทำงานทับซ้อนกันแทนที่จะรอกัน
+**Phase:** B1 (ไม่เปลี่ยน UI หรือ operator flow)
+
+เหตุผลเต็มพร้อมคำทำนายที่รอผลวัด: **[RELEASE_0_1_4.md](./RELEASE_0_1_4.md)**
+
+### วัดบนเครื่องแล้ว — `run4mins.mp4` UHD, Xiaomi peridot (SM8635)
+
+| | v0.1.3 | **v0.1.4** | |
+|--|--|--|--|
+| **realtimeRatio** | 2.196× | **1.499×** | **−32%** |
+| wall time | 588.5 s | **401.7 s** | −31.7% |
+
+invariant ทั้งสามยังตรงเป๊ะที่ 302 / 579 / 550 · `decodeFailures` 0 · thermal OK ตลอด · `splitActiveMs` = **19.9 s** สำหรับ remux 1.93 GB (จากที่เคยรายงาน 455.8 s)
+
+**pipeline เป็น producer-bound แบบสุดขั้วตามที่ออกแบบ** — `worker_idle` 373.5 s เทียบ `queue_wait` 0.89 s (420 เท่า) และ `yuv_jpeg_argb` ตัวเดียวกินไป **89.5% ของ wall** งานที่เหลือจึงเหลือเป้าหมายเดียว และตัวเลขบอกว่า**ลดมันครึ่งเดียวก็ข้ามเส้น 1.0 แล้ว** (consumer จะกลายเป็นเพดานที่ 0.77×)
+
+**สองสิ่งที่ไม่เป็นไปตามคาด:**
+- 📉 **สมมติฐาน aliasing ผิด** — `noSubject` 1,441 → 1,458 ไม่ลด การย่อแบบ halving ไม่ช่วย recall เลย ทั้งที่ `scale_for_detect` แพงขึ้น 4.1 เท่า (ฟรีในแง่ wall เพราะอยู่ฝั่งที่ว่าง 46.5%) OQ-01 กลับไปเป็นคำถามเปิด
+- 🐛 **`enableTracking()` ถูกผ่าครึ่งโดยไม่ตั้งใจ** — detector 2 ตัวเห็นเฟรมคนละครึ่ง ช่องว่างเวลาโตเป็น 2 เท่า `roiInvalid` จึงเพิ่มจาก 16 → 29 เกือบเท่าตัว เป็นตัวแปรแฝงที่ทำให้ผลของ halving แยกไม่ออก
+
+**ราคาของการทับซ้อน:** ทุก stage ช้าลงต่อเฟรม 17–78% จากการแย่ง CPU/memory bandwidth (`rotate` +78% · `mlkit_face` +29% · `yuv_jpeg_argb` +17%) แต่ wall ยังลง 32% — overlap ชนะ contention ขาดลอย เพดานทฤษฎี 1.09× จึงไปไม่ถึง
+
+### Why
+
+v0.1.3 จบที่ `realtimeRatio` 2.196× และสรุปว่าทางเดียวที่เหลือคือแก้ `yuv_jpeg_argb` (49.5%) ซึ่งลองแล้วล้มเหลว ข้อสรุปนั้นมองข้ามไปว่า **`yuv_jpeg_argb` ไม่ได้ทำงานพร้อมกับอะไรเลย** — `runBlocking { onFrame(...) }` ในลูป decode ทำให้ Worker 2 ทั้งตัวรันเรียงกับ decoder เวลาของ chunk จึงเป็น *ผลบวก* ของทั้งสองฝั่ง ทั้งที่เครื่องมี 8 คอร์และ thermal OK ตลอด
+
+### Shipped
+
+| Area | What | Why |
+|------|------|-----|
+| **Pipeline** | Worker 2 แยกเป็น producer (decode + YUV→Bitmap) กับ consumer (`DETECT_WORKERS = 2`) คั่นด้วย `Channel(2)` · worker แต่ละตัวถือ ML Kit detector ของตัวเอง (lazy ตาม target) | wall เปลี่ยนจาก `producer + consumer` (93%) เป็น `max(producer, consumer/2)` → คาด ratio 2.196 → **~1.3–1.5×** และทำให้ pipeline เป็น **producer-bound** ซึ่งแปลว่าต้นทุน detection ที่เพิ่มหลังจากนี้แทบไม่กระทบ wall |
+| **Pipeline** | dedup ย้ายไปทำครั้งเดียวท้าย chunk หลังเรียง candidate ตาม PTS (`selectKeepers`) | worker เสร็จไม่เรียงลำดับ — การคัดแบบ streaming จึงใช้ไม่ได้อีก กติกาเดิมทุกประการ แต่ไม่ขึ้นกับลำดับที่ worker ทำเสร็จ |
+| **Yield** | `downscale()` ย่อแบบ halving (4K → 1080 → 640) แทนขั้นเดียว · สวิตช์ `MULTISTEP_DOWNSCALE` + ฟิลด์ `downscaleMode` | `createScaledBitmap(filter=true)` เป็น bilinear อ่านแค่ 2×2 — ย่อ 3.4× ในขั้นเดียวทำให้ aliasing กินรายละเอียดที่ detector ใช้ หน้าที่เกณฑ์ขนาดเหลือ ~40 px พอดี **สมมติฐานที่ทดสอบได้สำหรับ OQ-01 (`no_subject` 63–79%)** |
+| **Instrumentation** | stage ใหม่ `worker_idle` · `decoder_blocked` → `queue_wait` | คู่นี้บอกตรงๆ ว่าฝั่งไหนคือคอขวด: `queue_wait` สูง → เพิ่ม worker · `worker_idle` สูง → มีแต่งาน `yuv_jpeg_argb` ที่ช่วยได้ |
+| **Instrumentation** | 🐛 `sharePercent` หารด้วย wall clock จริงแทนผลบวกของ stage · stage ติดป้าย `thread` · `SCHEMA_VERSION` 1 → **2** | `NESTED_STAGES` ของ v0.1.3 **ตก `rotate`** ทำให้ตัวหารเฟ้อ ~5% และ `sharePercent` ทุกตัวใน v0.1.3 ต่ำกว่าจริง วิธีเดิมต้องรู้ว่า stage ไหนซ้อนใน stage ไหน ซึ่งพลาดมาสองครั้งแล้วและใช้ไม่ได้อีกหลังแยกเธรด |
+| **Instrumentation** | `splitDurationMs` แยกเป็น `splitActiveMs` / `splitBlockedMs` (NA-03) | v0.1.3 รายงาน 2,912 ms กับ 455,841 ms สำหรับ remux ที่ควรใช้ ~20 s ทั้งคู่ — ค่าเดิมวัดทั้ง pipeline ไม่ใช่ความเร็ว remux |
+
+### ยังไม่ได้แก้ (ตั้งใจ)
+
+`yuv_jpeg_argb` 49.5% ยังอยู่ (NA-02 · OQ-02) — แต่ตอนนี้เป็น**คอขวดตัวเดียวที่เหลือ** ซึ่งทำให้วัดผลงานชิ้นนั้นง่ายขึ้นมาก · `detectBitmapWidth` 640→960 เก็บไว้เป็นการทดลองตัวแปรเดียวรอบถัดไป · **NPU / LiteRT ยังไม่ใช่รอบนี้** — detection เป็นแค่ 30.9% ของ wall และหลังแยกเธรดแล้วยิ่งได้ผลตอบแทนน้อยลงอีก เหตุผลเต็มอยู่ใน RELEASE_0_1_4.md · live capture ยังไม่ได้ทดสอบตั้งแต่ v0.1.3 (NA-06)
+
+---
+
+## v0.1.3
 
 **Theme:** Worker 2 performance & yield — make **UHD faster than realtime** and stop discarding runners that were merely one step short of the size gate.
 **Phase:** B1 (no change to pipeline shape, operator flow, or UI).

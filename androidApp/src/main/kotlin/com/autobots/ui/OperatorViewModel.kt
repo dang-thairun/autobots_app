@@ -6,10 +6,12 @@ import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.autobots.camera.ChunkRecord
 import com.autobots.camera.ChunkRecordingProgress
+import com.autobots.camera.PipelineSessionRecord
+import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
+import com.autobots.camera.SessionSource
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.formatChunkBytes
 import com.autobots.camera.load.DeviceLoadReader
@@ -27,6 +29,7 @@ data class OperatorUiState(
     val isCapturing: Boolean = false,
     val streamResolution: StreamResolution = StreamResolution.Fhd,
     val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
+    val detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
     val videoChunksRecorded: Int = 0,
     val videoQueueDepth: Int = 0,
     val facesKept: Int = 0,
@@ -55,7 +58,9 @@ data class OperatorUiState(
     val importPercent: Int = 0,
     val importName: String? = null,
     val importError: String? = null,
-    val chunkHistory: List<ChunkRecord> = emptyList(),
+    val lastRealtimeRatio: Float = 0f,
+    val avgPhotoLatencyMs: Long = 0,
+    val sessionHistory: List<PipelineSessionRecord> = emptyList(),
 ) {
     val deviceLoadLine: String
         get() = if (totalRamMb > 0) {
@@ -84,14 +89,11 @@ data class OperatorUiState(
         get() {
             if (!isProcessing) return ""
             val chunkLabel = processingChunkName?.substringBefore('.') ?: "chunk"
-            val queue = videoQueueDepth
             val gallery = imageQueuePending
             return buildString {
                 append("Processing $chunkLabel")
-                append(" · ${processingPercent}%")
                 append(" · ${chunksProcessed}/${videoChunksRecorded} chunks")
                 if (currentChunkPercent in 1..99) append(" · scan $currentChunkPercent%")
-                if (queue > 0) append(" · VQ $queue")
                 if (gallery > 0) append(" · save $gallery")
             }
         }
@@ -109,6 +111,23 @@ data class OperatorUiState(
             val name = importName ?: "video"
             return "Importing $name · splitting $importPercent%"
         }
+
+    /** Can Worker 2 keep up, and how long until a photo lands? Live capture only. */
+    val throughputLine: String
+        get() {
+            if (lastRealtimeRatio <= 0f) return ""
+            if (sessionHistory.any { it.source == SessionSource.VideoImport }) return ""
+            return buildString {
+                append(String.format("%.2fx realtime", lastRealtimeRatio))
+                if (avgPhotoLatencyMs > 0) {
+                    append(String.format(" · photo in ~%.1fs", avgPhotoLatencyMs / 1000.0))
+                }
+                if (isThroughputTooSlow) append(" · TOO SLOW, queue will back up")
+            }
+        }
+
+    val isThroughputTooSlow: Boolean
+        get() = lastRealtimeRatio >= 1f
 }
 
 /** ≥1000 MB → "X.X GB", else "NNN MB". */
@@ -182,6 +201,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         val extractionTarget = _state.value.extractionTarget
         coordinator.setResolution(resolution)
         coordinator.setExtractionTarget(extractionTarget)
+        coordinator.setDetectorBackend(_state.value.detectorBackend)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -208,7 +228,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 chunksProcessed = 0,
                 processingChunkName = null,
                 imageQueuePending = 0,
-                chunkHistory = emptyList(),
+                lastRealtimeRatio = 0f,
+                avgPhotoLatencyMs = 0,
+                sessionHistory = emptyList(),
             )
         }
         applyDeviceLoad(deviceLoadReader.sample())
@@ -230,6 +252,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         )
         coordinator.setResolution(_state.value.streamResolution)
         coordinator.setExtractionTarget(_state.value.extractionTarget)
+        coordinator.setDetectorBackend(_state.value.detectorBackend)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -252,7 +275,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 facesSkipped = 0,
                 chunksProcessed = 0,
                 imageQueuePending = 0,
-                chunkHistory = emptyList(),
+                lastRealtimeRatio = 0f,
+                avgPhotoLatencyMs = 0,
+                sessionHistory = emptyList(),
             )
         }
 
@@ -339,6 +364,14 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(extractionTarget = target) }
     }
 
+    /** Bench control: pick the detector, import the same clip, compare `perf_report.json`. */
+    fun setDetectorBackend(backend: DetectorBackend) {
+        if (_state.value.isCapturing) return
+        // Applied when the coordinator is built for the next session; the chip is disabled
+        // while capturing, so there is never a live pipeline to retarget.
+        _state.update { it.copy(detectorBackend = backend) }
+    }
+
     fun onExposureReadout(line: String) {
         _state.update { it.copy(exposureLine = line) }
     }
@@ -364,7 +397,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 isImporting = stats.isImporting,
                 importPercent = stats.importPercent,
                 importName = stats.importName ?: it.importName,
-                chunkHistory = stats.chunkHistory,
+                lastRealtimeRatio = stats.lastRealtimeRatio,
+                avgPhotoLatencyMs = stats.avgPhotoLatencyMs,
+                sessionHistory = stats.sessionHistory,
             )
         }
     }

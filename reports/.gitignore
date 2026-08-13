@@ -1,0 +1,14 @@
+# Version report media — kept locally, never committed (see docs/REPORT_GUIDELINE.md §2)
+*/input/
+*/output/
+*/logs/
+
+# Safety net: no raw media anywhere under reports/
+*.mp4
+*.mov
+*.jpg
+*.jpeg
+*.zip
+
+# assets/ screenshots are allowed
+!*/assets/*.png

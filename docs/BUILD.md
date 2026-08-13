@@ -1,7 +1,7 @@
 # Build & install (Android)
 
 How to build the APK and install on a device via USB.  
-Field use after install: [FIELD_SETUP.md](./FIELD_SETUP.md)
+After install: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · Field tripod (v0.1 stills): [FIELD_SETUP.md](./FIELD_SETUP.md)
 
 ---
 
@@ -33,7 +33,15 @@ androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ```
 
 **App id:** `com.autobots.camera`  
-**Version:** `appVersionName` in root `gradle.properties` (e.g. `0.1`). Sync `AutobotsApp.version` in shared. See [CHANGELOG.md](./CHANGELOG.md).
+**Version:** `appVersionName` in root `gradle.properties` (currently **0.1.2**). Sync `AutobotsApp.version` in shared. See [CHANGELOG.md](./CHANGELOG.md).
+
+### Install directly (skip manual `adb install`)
+
+```bash
+./gradlew :androidApp:installDebug
+```
+
+Requires a device in `adb devices`.
 
 ### Optional: release APK
 
@@ -65,6 +73,27 @@ adb connect <ip>:5555
 adb devices
 ```
 
+See [SCRCPY.md](./SCRCPY.md) for Wi‑Fi setup details.
+
+### Build + install over Wi‑Fi (specific device)
+
+After `adb connect <ip>:5555` and `adb devices` shows the device:
+
+```bash
+./gradlew :androidApp:assembleDebug
+adb -s <ip>:5555 install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
+```
+
+Example:
+
+```bash
+adb connect 192.168.1.147:5555
+./gradlew :androidApp:assembleDebug
+adb -s 192.168.1.147:5555 install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
+```
+
+Use `-s <serial>` when more than one device is attached. Shortcut: `./gradlew :androidApp:installDebug` works if only one device is listed.
+
 ---
 
 ## 3. Install
@@ -90,26 +119,74 @@ adb install androidApp/build/outputs/apk/debug/androidApp-debug.apk
 ## 4. First launch
 
 1. Open **AutoBots** on the device.
-2. Grant **Camera** when prompted (required).
-3. For field timing: **Start** capture on the Operator screen.
-4. Photos save to **`DCIM/AutoBots`** after a successful burst.
+2. Grant **Camera** when prompted (required for live capture).
+3. On Operator screen: expand **Video pipeline** → choose **Face/Pose** and **1080p/4K**.
+4. Tap **Start** to record video chunks, or **Import** to process an existing video file.
+5. JPEGs appear in **`DCIM/AutoBots/{subfolder}/`** after offline extract completes.
+6. Session log: **`Download/AutoBots/{subfolder}/session_log.txt`** (Android 10+).
 
-Tripod and zone setup: [FIELD_SETUP.md](./FIELD_SETUP.md).
+Operator workflow: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
 
 ---
 
-## 5. Logs (debug)
+## 5. Helper scripts (repo root)
 
-Face detector timing (1 s summary):
+### `install_with_log.sh`
+
+Build, install, launch app, and capture logcat to `crash.log`:
+
+```bash
+./install_with_log.sh
+```
+
+Reproduce the issue, then **Ctrl+C** — script greps fatal lines from `crash.log`.
+
+### `sync_gallery.sh`
+
+Pull JPEGs and session logs from the device to Mac (incremental):
+
+```bash
+./sync_gallery.sh
+# or custom destination:
+./sync_gallery.sh ~/Downloads/my-export
+```
+
+Sources: `DCIM/AutoBots/`, `Download/AutoBots/`, app cache mirrors.
+
+### Doc drift check
+
+```bash
+./scripts/check_docs_drift.sh
+```
+
+See [CONVENTIONS.md](./CONVENTIONS.md) §7 — catches stale patterns (e.g. old chunk sizes) in docs and UI tooltips.
+
+---
+
+## 6. Logs (debug)
+
+Plan B pipeline:
+
+```bash
+adb logcat -s CapturePipeline VideoFrameProcessor VideoChunkRecorder ImportedVideoSplitter
+```
+
+Broader app filter:
+
+```bash
+adb logcat | grep -E 'CapturePipeline|VideoFrame|VideoChunk|OperatorViewModel|LocalDelivery'
+```
+
+Crash / fatal:
+
+```bash
+adb logcat -d -v time | grep -E 'com\.autobots\.camera|AndroidRuntime|FATAL' | tail -100
+```
+
+Legacy v0.1 stills path (if debugging old code):
 
 ```bash
 adb logcat -s MlKitFaceAnalyzer
-```
-
-Broader app logs:
-
-```bash
-adb logcat | grep -E 'PreviewCamera|LeanBurst|OperatorViewModel|MlKitFaceAnalyzer'
 ```
 
 ---
@@ -124,6 +201,7 @@ adb logcat | grep -E 'PreviewCamera|LeanBurst|OperatorViewModel|MlKitFaceAnalyze
 | `INSTALL_FAILED_VERSION_DOWNGRADE` | Use `adb install -r` or uninstall first |
 | Gradle / JDK errors | Use **JDK 17**; run `./gradlew :androidApp:assembleDebug` from repo root |
 | Camera black / permission denied | Settings → Apps → AutoBots → Permissions → Camera → Allow |
+| Gallery empty | Wait for processing to finish; check chip **K** > 0; run `./sync_gallery.sh` to verify on device |
 
 ---
 
@@ -138,4 +216,6 @@ adb logcat | grep -E 'PreviewCamera|LeanBurst|OperatorViewModel|MlKitFaceAnalyze
 ## Related
 
 - Code layout: [STRUCTURE.md](./STRUCTURE.md)
+- Platform APIs: [PLATFORM_APIS.md](./PLATFORM_APIS.md)
 - Doc index: [DOCS.md](./DOCS.md)
+- Mirror UI on Mac: [SCRCPY.md](./SCRCPY.md)

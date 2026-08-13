@@ -1,10 +1,79 @@
 # AutoBots Sports Camera — Product Requirements Document (PRD)
 
-Edge-AI still camera for marathon and running-event photography on a tripod-mounted Android phone.
+Edge-AI sports camera for marathon and running-event photography on a tripod-mounted Android phone.
+
+**Active build (v0.1.2):** Plan B — video chunk pipeline → offline extract → still JPEG gallery.  
+See **§ Plan B (v0.1.2)** below. Sections §3–5 without a label describe the **v0.1 stills MVP baseline** (retained for domain vocabulary and possible B4 re-wire).
+
+Operator guide: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · Pipeline: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
 
 ---
 
-## 1. Objective & Product Goals
+## Plan B — v0.1.2 (active)
+
+### Objective
+
+Automatically produce **still JPEGs** of runners from **continuous video** (live capture or imported file), saved locally for post-event retrieval. Video MP4 chunks are an internal processing stage — not the operator deliverable.
+
+### Key objectives
+
+* **Continuous capture:** Record video on a tripod; rotate MP4 chunks at a size target without stopping the camera.
+* **Offline extract:** Sample decoded frames → ML Kit Face (or experimental Pose) → sharpness filter → deduplicate → full-frame JPEG.
+* **Two entry paths:** Live Start/Stop and Import from device storage.
+* **Local delivery:** JPEGs to `DCIM/AutoBots/{subfolder}/`; session summary to `session_log.txt` in `Download/AutoBots/`.
+* **Operator visibility:** Status chips, processing progress, session history — no live face overlay during record.
+
+### Plan B scope — in
+
+| # | Requirement |
+|---|-------------|
+| 1 | **Still JPEG output** — gallery deliverable; video chunks stay in app cache |
+| 2 | **Live capture** — CameraX Preview + VideoCapture; 1080p or 4K selectable |
+| 3 | **Import video** — file picker; auto-detect FHD/UHD profile from file |
+| 4 | **Extraction target** — Face (default) or Pose (experimental) |
+| 5 | **Chunk rotation** — 50 MB per chunk; partial chunk on Stop |
+| 6 | **Queue backpressure** — pause record when extract queue full (cap 8) |
+| 7 | **Bounded Write Queue** — async MediaStore writes |
+| 8 | **Session history UI** — per-session cards with chunk expand |
+| 9 | **Device load readout** — thermal + RAM (display only) |
+| 10 | **Remote Start/Stop** — HTTP/WebSocket on device IP (no screen mirror) |
+| 11 | **Android-first** — KMP `shared/` models; iOS deferred |
+
+### Plan B scope — out
+
+| Item | Notes |
+|------|--------|
+| Live face overlay on preview | Preview only while recording |
+| Passage Gate / Capture Zone / Lean Burst | v0.1 path not wired in shell |
+| Cloud upload | Local retrieval only (B3 future) |
+| Thermal auto-throttle | Readout only |
+| iOS operator app | Deferred |
+
+### Plan B acceptance criteria
+
+**Live session**
+
+1. Operator selects Face/Pose and 1080p/4K (IDLE only).
+2. Operator taps **Start** (≥ 2 GB free disk).
+3. App records MP4 chunks; UI shows REC progress and chips (Ch, VQ, …).
+4. Each finalized chunk enters extract queue; worker samples every **120 ms**.
+5. Passing frames become JPEGs in `DCIM/AutoBots/{yyyyMMdd_HHmmss}/`.
+6. Operator taps **Stop** — record ends; partial chunk processed; pipeline drains.
+7. `session_log.txt` written to `Download/AutoBots/{subfolder}/` when session completes.
+8. Session appears in history page with chunk stats.
+
+**Import session**
+
+1. Operator taps **Import** (pipeline idle).
+2. User picks a video file; app remux-splits into 50 MB chunks with progress %.
+3. Same extract + deliver path as live; folder `ext_DDMMYYYY_HHMM`.
+4. Session history shows import metadata and filtered chunk list.
+
+Design detail: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
+
+---
+
+## 1. Objective & Product Goals (v0.1 stills baseline)
 
 The goal of the AutoBots Sports Camera is to automatically capture high-quality, focused, and well-exposed still photos of marathon runners as they approach the camera capture zone, saving them locally on the device for operators to retrieve post-event.
 
@@ -26,9 +95,9 @@ The goal of the AutoBots Sports Camera is to automatically capture high-quality,
 
 ---
 
-## 3. Domain Dictionary
+## 3. Domain Dictionary (v0.1 stills)
 
-To align development and product design, the following terminology must be strictly used:
+To align development and product design, the following terminology must be strictly used for the **legacy stills path**. Plan B terms: [CONTEXT.md](../CONTEXT.md).
 
 ### Capture Lifecycle
 * **Passage**: One instance of a runner moving through the camera's capture zone where the system attempts to capture kept photos.
@@ -49,8 +118,8 @@ To align development and product design, the following terminology must be stric
 * **Focus Strategy**: Fixed (tripod default) vs FaceAf fallback (Flow 15).
 * **Face Lock**: Drive AE (and AF if FaceAf) to the subject face once Arm is crossed.
 
-### Operations & Output
-* **Still Photo Product**: The system captures and stores still JPEGs only. Video recording is out of scope.
+### Operations & Output (v0.1)
+* **Still Photo Product**: Deliverable output is still JPEGs. *(Plan B: video is recorded internally but not delivered to the operator gallery.)*
 * **Standard Capture Mode**: Lean burst of ~3 still JPEGs per passage at normal full quality.
 * **Max-Sensor Capture Mode**: Single high-resolution shot per passage (Flow 7).
 * **Capture Mode Option**: Operator toggle Standard vs Max-Sensor.
@@ -63,7 +132,7 @@ To align development and product design, the following terminology must be stric
 
 ---
 
-## 4. MVP Scope Definition
+## 4. MVP Scope Definition (v0.1 stills — superseded in operator shell by Plan B)
 
 ### In Scope
 1. **Still Photo Output**: Only JPEGs are written.
@@ -82,16 +151,16 @@ To align development and product design, the following terminology must be stric
 * **Frame Scoring**: No ranking or quality-based discarding (all burst shots are kept).
 * **Thermal Auto-Throttle**: No automatic shutdown/throttling; readout only.
 * **Cloud/Remote Delivery**: No upload logic or network sync; local retrieval only.
-* **Video Recording**: Video capture is fully excluded.
+* **Video Recording**: Video capture is fully excluded *(v0.1 only — Plan B uses video internally)*.
 * **iOS Support**: iOS target compilation is deferred.
 
 ---
 
-## 5. Behavioral Acceptance Criteria
+## 5. Behavioral Acceptance Criteria (v0.1 stills)
 
 ### Standard Passage Flow
 
-Runtime **steps** for one runner (not the same as **Flow** design rules in architecture.md):
+Runtime **steps** for one runner (not the same as **Flow** design rules in ARCHITECTURE.md):
 
 1. Operator taps **Start Capture**.
 2. Runner approaches → proximity crosses **Arm**.
@@ -104,9 +173,19 @@ Runtime **steps** for one runner (not the same as **Flow** design rules in archi
 9. Runner leaves → proximity below arm release.
 10. **Passage Gate** re-opens.
 
-Design rules behind steps 3, 5, 7: see [architecture.md — Design Flows](./architecture.md#4-design-flows).
+Design rules behind steps 3, 5, 7: see [ARCHITECTURE.md — Design Flows](./ARCHITECTURE.md#4-design-flows).
 
 ### Max-Sensor Passage Flow
 1. Flow matches Standard Passage Flow except Step 5 and 6:
 2. System captures **1 high-resolution Candidate Shot** instead of a burst.
 3. 1 Candidate Shot is queued in the Write Queue.
+
+---
+
+## Related
+
+- Doc index: [DOCS.md](./DOCS.md)
+- Operator guide (Plan B): [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
+- Pipeline technical: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
+- Design rules: [ARCHITECTURE.md](./ARCHITECTURE.md)
+- Domain glossary: [CONTEXT.md](../CONTEXT.md)

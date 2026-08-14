@@ -32,6 +32,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -64,6 +65,14 @@ class CapturePipelineCoordinator(
     private val workerBusy = AtomicBoolean(false)
     private val historyLock = Mutex()
     private val chunkHistory = mutableListOf<ChunkRecord>()
+
+    /**
+     * Set when a session begins and read from every thread that reports on it — the worker,
+     * the drain watchdog and the stats publisher. The *fields inside* [SessionMeta] are
+     * mutable and still unsynchronised; they are written during the split and read once the
+     * split has finished, which the drain check orders for us.
+     */
+    @Volatile
     private var sessionMeta: SessionMeta? = null
 
     private val frameProcessor = VideoFrameProcessor(facesDir, appContext)
@@ -99,30 +108,88 @@ class CapturePipelineCoordinator(
     @Volatile
     private var lastRealtimeRatio = 0f
 
+    /**
+     * State that decides whether a session may finish — see [isBusy].
+     *
+     * These four are written from the caller's thread (the ViewModel's scope, so the main
+     * thread) and read from [startDrainWatchdog]'s coroutine on a different dispatcher. As
+     * plain fields there is no happens-before edge between those two, so the watchdog is not
+     * guaranteed to ever observe `importing` going false — and a watchdog that never sees the
+     * pipeline go idle is a session that writes neither `session_log.txt` nor
+     * `perf_report.json`. That is exactly the symptom behind NA-05, which has bitten twice
+     * and whose cause is still unproven; `@Volatile` cannot confirm it was this, but it does
+     * remove it from the list of candidates for the price of four words.
+     *
+     * The rest of [isBusy] was already safe: `workerBusy`, `videoPending` and
+     * `WriteQueue.pending` are atomics.
+     */
+    @Volatile
+    private var recording = false
+
+    @Volatile
+    private var awaitingRecorderFinalize = false
+
+    @Volatile
+    private var closed = false
+
+    @Volatile
+    private var importing = false
+
+    /**
+     * Progress and tally fields, written on the Worker 2 coroutine ([Dispatchers.Default]) and
+     * read by [publishStats] on the caller's scope. Stale reads here only make the UI show a
+     * value one update behind, but `chunksProcessed`/`chunksRecorded` also feed
+     * [currentSessionStatus], where a stale pair reads as "still working" — so they are
+     * published properly rather than left to chance.
+     *
+     * `@Volatile` rather than `AtomicInteger` because the `+=` and `++` below have exactly one
+     * writer — the single Worker 2 coroutine — so there is no update to lose, only a value to
+     * publish. An atomic would buy nothing and read worse at the call sites.
+     */
+    @Volatile
     private var chunksRecorded = 0
+
+    @Volatile
     private var chunksProcessed = 0
+
+    @Volatile
     private var facesKept = 0
+
+    @Volatile
     private var facesSkipped = 0
+
+    @Volatile
     private var lastChunkProcessMs = 0L
+
+    @Volatile
+    private var currentChunkPercent = 0
+
+    @Volatile
+    private var processingChunkName: String? = null
+
+    @Volatile
+    private var importPercent = 0
+
+    @Volatile
+    private var importName: String? = null
+
+    @Volatile
+    private var pipelinePaused = false
+
     private var resolution = StreamResolution.Fhd
     private var extractionTarget = ExtractionTarget.Face
     private var detectorBackend = DetectorBackend.DEFAULT
-    private var recording = false
-    private var awaitingRecorderFinalize = false
-    private var pipelinePaused = false
-    private var currentChunkPercent = 0
-    private var processingChunkName: String? = null
-    private var closed = false
-    private var importing = false
-    private var importPercent = 0
-    private var importName: String? = null
 
     /**
      * Projected chunk total for an import, so the UI can show one smooth bar while the
      * splitter is blocked on queue backpressure. Projected from the splitter's timeline
      * percentage at each segment boundary, then pinned to the real count when the split ends.
      * Monotonic on purpose: the bar must never walk backwards.
+     *
+     * Written from the splitter's thread via [onChunkRecorded] and from [importVideo]; read by
+     * [publishStats] on the caller's scope.
      */
+    @Volatile
     private var expectedChunks = 0
     private val chunkIndexSeq = AtomicInteger(0)
     /** Guards against writing the session log more than once per session. */
@@ -205,6 +272,7 @@ class CapturePipelineCoordinator(
                     }
                 } finally {
                     samplePerfLoad("chunk_process_end", item.index)
+                    releaseChunkFile(item)
                     workerBusy.set(false)
                     processingChunkName = null
                     currentChunkPercent = 0
@@ -233,6 +301,36 @@ class CapturePipelineCoordinator(
     fun setDetectorBackend(value: DetectorBackend) {
         detectorBackend = value
         publishStats()
+    }
+
+    /**
+     * Give back the chunk's disk once Worker 2 is finished with it.
+     *
+     * Until 0.1.4 nothing deleted these, and `videoQueue`'s capacity only bounds how many
+     * chunks are *waiting* — not how many exist. So the cache accumulated a complete second
+     * copy of the source: run4mins left 1.93 GB behind, which nobody noticed at 4½ minutes
+     * and which extrapolates to **~25 GB for a one-hour import and ~51 GB for two**, on top
+     * of the original file. `hasStorageForRecording()` is checked once when the import starts
+     * and never again, so nothing would have stopped it filling the device mid-run.
+     *
+     * Safe to delete here: the only thing that outlives a chunk is its **name**, recorded in
+     * [ChunkRecord.videoFileName] for `session_log.txt`. No path re-opens the file — the
+     * photos were written to `facesDir` and handed to the delivery queue inside the try above,
+     * and [recordChunkEndToEnd] read `length()` before this runs.
+     *
+     * Set [KEEP_PROCESSED_CHUNKS] to inspect what the splitter actually produced. That costs
+     * the whole source size in cache, so it is a debugging switch, not a setting.
+     */
+    private fun releaseChunkFile(item: ChunkWorkItem) {
+        if (KEEP_PROCESSED_CHUNKS) return
+        val file = item.videoFile
+        val bytes = runCatching { file.length() }.getOrDefault(0L)
+        val deleted = runCatching { file.delete() }.getOrDefault(false)
+        if (!deleted) {
+            // Not fatal on its own, but a run of these is how the cache fills up — say so
+            // once per chunk rather than letting it be silent.
+            Log.w(TAG, "Could not delete processed chunk ${file.name} (${bytes / 1024}KB)")
+        }
     }
 
     fun sessionDirectory(): File = sessionDir
@@ -321,6 +419,13 @@ class CapturePipelineCoordinator(
                         (result.error?.let { " (error: $it)" } ?: ""),
                 )
             }
+        } catch (t: CancellationException) {
+            // The user backed out; that is not an import failure and must not be recorded as
+            // one. Rethrowing also keeps the caller's coroutine cancellation intact — the
+            // catch below would otherwise report success-with-an-error-string and let the
+            // job carry on as if nothing had been cancelled. The finally still runs.
+            sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
+            throw t
         } catch (t: Throwable) {
             sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
             sessionMeta?.failed = true
@@ -722,9 +827,18 @@ class CapturePipelineCoordinator(
         }
     }
 
-    private fun currentSessionStatus(meta: SessionMeta): SessionStatus {
+    /**
+     * @param chunks the same snapshot the caller is reporting counts from.
+     *
+     * It is passed in rather than read off [chunkHistory] so that the status and the numbers
+     * shown beside it describe one moment. Reading the live list here also meant touching a
+     * plain `MutableList` without [historyLock] — `isEmpty()` is a size read and cannot throw,
+     * but the worker coroutine mutates that list, and a status derived from a different
+     * observation than the counts is a report that contradicts itself.
+     */
+    private fun currentSessionStatus(meta: SessionMeta, chunks: List<ChunkRecord>): SessionStatus {
         if (meta.finalized) return meta.status
-        if (meta.failed && chunkHistory.isEmpty()) return SessionStatus.Failed
+        if (meta.failed && chunks.isEmpty()) return SessionStatus.Failed
 
         val pipelineActive = importing ||
             recording ||
@@ -732,7 +846,7 @@ class CapturePipelineCoordinator(
             videoPending.get() > 0 ||
             chunksProcessed < chunksRecorded
 
-        if (!pipelineActive && chunkHistory.isNotEmpty()) {
+        if (!pipelineActive && chunks.isNotEmpty()) {
             return SessionStatus.Done
         }
 
@@ -751,7 +865,7 @@ class CapturePipelineCoordinator(
         val chunksDone = chunks.count {
             it.status == ChunkProcessStatus.Done || it.status == ChunkProcessStatus.Failed
         }
-        val status = currentSessionStatus(meta)
+        val status = currentSessionStatus(meta, chunks)
         val totalDurationMs = when {
             meta.finalized && meta.finishedAtEpochMs != null ->
                 meta.finishedAtEpochMs!! - meta.startedAtEpochMs
@@ -848,6 +962,14 @@ class CapturePipelineCoordinator(
     companion object {
         private const val TAG = "CapturePipeline"
         const val VIDEO_QUEUE_CAPACITY = 8
+
+        /**
+         * Debugging switch — keep every chunk `.mp4` after Worker 2 has read it.
+         *
+         * Costs the full size of the source in cache (1.93 GB for run4mins, ~51 GB for a
+         * two-hour import), which is why it is off. See [releaseChunkFile].
+         */
+        private const val KEEP_PROCESSED_CHUNKS = false
 
         /** Watchdog cadence — a session ends at most this late. */
         private const val DRAIN_POLL_MS = 1_000L

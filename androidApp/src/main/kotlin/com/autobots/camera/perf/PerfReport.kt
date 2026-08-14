@@ -6,6 +6,7 @@ import com.autobots.camera.load.DeviceLoadSnapshot
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Machine-readable companion to `session_log.txt`.
@@ -76,6 +77,24 @@ class PerfReport {
         val queueWaitMs: Long,
         val realtimeRatio: Double,
         val diag: ChunkDiag?,
+        /**
+         * Filled in by [addChunk], not by the caller — it is computed there so that
+         * [ChunkDiag.frames] can be dropped afterwards without taking the sharpness
+         * distribution with it.
+         */
+        val sharpness: SharpnessSummary? = null,
+    )
+
+    /** Percentiles of what reached the scorer in one chunk, against the cutoff that judged it. */
+    data class SharpnessSummary(
+        val cutoff: Double,
+        val n: Int,
+        val min: Double,
+        val p25: Double,
+        val p50: Double,
+        val p75: Double,
+        val max: Double,
+        val belowCutoff: Int,
     )
 
     data class Event(
@@ -99,6 +118,17 @@ class PerfReport {
     private val chunks = Collections.synchronizedList(mutableListOf<ChunkEntry>())
     private val events = Collections.synchronizedList(mutableListOf<Event>())
     private val load = Collections.synchronizedList(mutableListOf<LoadSample>())
+
+    /** Per-frame diagnostics kept vs. dropped for size — see [addChunk]. */
+    private val framesKept = AtomicInteger(0)
+    private val framesDropped = AtomicInteger(0)
+
+    /** Events lost to [MAX_EVENTS]; reported rather than swallowed. */
+    private val eventsDropped = AtomicInteger(0)
+
+    /** Load-sample thinning state — see [addLoad]. Guarded by [load]'s own monitor. */
+    private var loadSeen = 0L
+    private var loadStride = 1L
 
     /**
      * Events arrive from the worker, the recorder callback and the delivery thread.
@@ -128,11 +158,65 @@ class PerfReport {
         session = JSONObject().apply(build)
     }
 
+    /**
+     * Record one chunk, keeping its per-frame detail only while there is budget for it.
+     *
+     * `frames[]` is one JSON object per **sampled frame**. At 4½ minutes that is 2,281 of
+     * them and the file is a couple of MB; a two-hour import samples ~60,000 and would build
+     * an ~11 MB string through an in-memory `JSONObject` tree several times that size, at
+     * drain time, on a device that has just been pinned for two hours. The detail is what
+     * gets dropped, because everything a long run is actually read for — reject tallies,
+     * stage timings, `cpuProbeMs`, and the sharpness distribution — lives outside it.
+     *
+     * The sharpness percentiles are computed **here**, before the drop, precisely so they
+     * survive. Early chunks keep full detail and late ones lose it, which is the right way
+     * round: a run is diagnosed from where it started, and `framesDropped` in the totals
+     * says plainly what is missing rather than letting a short `frames[]` read as a short
+     * chunk.
+     */
     fun addChunk(entry: ChunkEntry) {
         if (!enabled) return
-        chunks.add(entry)
+        val diag = entry.diag
+        if (diag == null) {
+            chunks.add(entry)
+            return
+        }
+        val summary = summarise(diag)
+        val kept = framesKept.get()
+        val withinBudget = kept + diag.frames.size <= MAX_FRAME_DIAGS
+        if (withinBudget) {
+            framesKept.addAndGet(diag.frames.size)
+            chunks.add(entry.copy(sharpness = summary))
+        } else {
+            framesDropped.addAndGet(diag.frames.size)
+            chunks.add(entry.copy(diag = diag.copy(frames = emptyList()), sharpness = summary))
+        }
     }
 
+    private fun summarise(diag: ChunkDiag): SharpnessSummary {
+        val scores = diag.frames.mapNotNull { it.sharpness }.sorted()
+        if (scores.isEmpty()) {
+            return SharpnessSummary(diag.sharpnessCutoff, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0)
+        }
+        fun percentile(p: Int) = scores[((scores.size - 1) * p / 100).coerceIn(0, scores.size - 1)]
+        return SharpnessSummary(
+            cutoff = diag.sharpnessCutoff,
+            n = scores.size,
+            min = scores.first(),
+            p25 = percentile(25),
+            p50 = percentile(50),
+            p75 = percentile(75),
+            max = scores.last(),
+            belowCutoff = scores.count { it < diag.sharpnessCutoff },
+        )
+    }
+
+    /**
+     * Events are individually meaningful — the drain trace is read as a sequence, so thinning
+     * it the way [addLoad] thins its samples would destroy it. It is capped and the overflow
+     * is **counted**, because the previous behaviour was to return silently and let a
+     * truncated timeline read as a session that simply stopped doing things.
+     */
     fun addEvent(
         atMs: Long,
         type: String,
@@ -141,23 +225,52 @@ class PerfReport {
         imageQueuePending: Int = -1,
     ) {
         if (!enabled) return
-        if (events.size >= MAX_EVENTS) return
-        events.add(Event(atMs, type, chunkIndex, videoQueueDepth, imageQueuePending))
+        synchronized(events) {
+            if (events.size >= MAX_EVENTS) {
+                eventsDropped.incrementAndGet()
+                return
+            }
+            events.add(Event(atMs, type, chunkIndex, videoQueueDepth, imageQueuePending))
+        }
     }
 
+    /**
+     * Device load, thinned by **halving** rather than truncated.
+     *
+     * The old cap stopped recording at 600 samples. Two go in per chunk, so a two-hour import
+     * (~950 chunks) went blind about a third of the way through — which is precisely where a
+     * long run gets interesting, since the whole reason these samples exist is to catch the
+     * thermal and DVFS decline that TC-12 measured at −43% clock in four and a half minutes.
+     *
+     * On overflow every second sample is dropped and the intake stride doubles, so the series
+     * always spans the **whole** session at a resolution that halves as the session grows:
+     * ~600 points over 4 minutes, ~600 over 4 hours. `loadStride` in the JSON says how many
+     * real samples one recorded point now stands for.
+     */
     fun addLoad(atMs: Long, snapshot: DeviceLoadSnapshot) {
         if (!enabled) return
-        if (load.size >= MAX_LOAD_SAMPLES) return
-        load.add(
-            LoadSample(
-                atMs = atMs,
-                thermalLabel = snapshot.thermalLabel,
-                thermalLevel = snapshot.thermalLevel,
-                usedRamMb = snapshot.usedRamMb,
-                availRamMb = snapshot.availRamMb,
-                cpuMaxFreqKhz = snapshot.cpuMaxFreqKhz,
-            ),
+        val sample = LoadSample(
+            atMs = atMs,
+            thermalLabel = snapshot.thermalLabel,
+            thermalLevel = snapshot.thermalLevel,
+            usedRamMb = snapshot.usedRamMb,
+            availRamMb = snapshot.availRamMb,
+            cpuMaxFreqKhz = snapshot.cpuMaxFreqKhz,
         )
+        synchronized(load) {
+            // Skip whatever the current stride says is between kept samples.
+            if (loadSeen++ % loadStride != 0L) return
+            load.add(sample)
+            if (load.size < MAX_LOAD_SAMPLES) return
+            // Full: keep the even-indexed half and take one in two from here on. The first
+            // sample is always index 0, so the start of the session is never the part lost.
+            var write = 0
+            for (read in load.indices) {
+                if (read % 2 == 0) load[write++] = load[read]
+            }
+            while (load.size > write) load.removeAt(load.size - 1)
+            loadStride *= 2
+        }
     }
 
     /** @return pretty-printed JSON, or null when instrumentation is off / nothing collected. */
@@ -174,11 +287,38 @@ class PerfReport {
                 put("chunks", chunksJson())
                 put("events", eventsJson())
                 put("deviceLoad", loadJson())
+                put("truncation", truncationJson())
             }.toString(2)
         } catch (t: Throwable) {
             CamPerf.log { "PerfReport render failed: ${t.message}" }
             null
         }
+    }
+
+    /**
+     * What this report is **not** telling you.
+     *
+     * Every cap in here used to fail silently, which is the worst way for a diagnostic to
+     * fail: a two-hour run produced a report that looked complete and was missing two thirds
+     * of its device-load series. Read this block before concluding anything from a long
+     * session — all zeroes means nothing was dropped.
+     */
+    private fun truncationJson() = JSONObject().apply {
+        put("frameDiagsKept", framesKept.get())
+        put("frameDiagsDropped", framesDropped.get())
+        put("frameDiagBudget", MAX_FRAME_DIAGS)
+        put("eventsDropped", eventsDropped.get())
+        put("eventBudget", MAX_EVENTS)
+        synchronized(load) {
+            put("loadStride", loadStride)
+            put("loadSamplesSeen", loadSeen)
+        }
+        put(
+            "note",
+            "frameDiagsDropped > 0: later chunks report aggregates and sharpness but an " +
+                "empty frames[] (see framesOmitted per chunk). loadStride > 1: deviceLoad " +
+                "still spans the whole session, one point per that many samples.",
+        )
     }
 
     private fun envJson() = JSONObject().apply {
@@ -345,8 +485,13 @@ class PerfReport {
                             },
                         )
                         put("stages", stagesJson(diag.stages))
-                        put("sharpness", sharpnessJson(diag))
+                        entry.sharpness?.let { put("sharpness", sharpnessJson(it)) }
                         put("frames", framesJson(diag))
+                        // An empty frames[] on a chunk that sampled frames means the budget
+                        // ran out, not that nothing happened. Say which.
+                        if (diag.frames.isEmpty() && diag.framesSampled > 0) {
+                            put("framesOmitted", diag.framesSampled)
+                        }
                     }
                 },
             )
@@ -370,22 +515,20 @@ class PerfReport {
     /**
      * Percentiles of what actually reached the scorer, against the cutoff that judged it.
      * A cutoff far below p25 means the gate is not discriminating at all.
+     *
+     * Rendered from the summary taken in [addChunk], so it is unaffected by whether that
+     * chunk's `frames[]` survived the budget.
      */
-    private fun sharpnessJson(diag: ChunkDiag): JSONObject {
-        val scores = diag.frames.mapNotNull { it.sharpness }.sorted()
-        return JSONObject().apply {
-            put("cutoff", diag.sharpnessCutoff)
-            put("n", scores.size)
-            if (scores.isEmpty()) return@apply
-            fun percentile(p: Int) =
-                scores[((scores.size - 1) * p / 100).coerceIn(0, scores.size - 1)]
-            put("min", round3(scores.first()))
-            put("p25", round3(percentile(25)))
-            put("p50", round3(percentile(50)))
-            put("p75", round3(percentile(75)))
-            put("max", round3(scores.last()))
-            put("belowCutoff", scores.count { it < diag.sharpnessCutoff })
-        }
+    private fun sharpnessJson(summary: SharpnessSummary): JSONObject = JSONObject().apply {
+        put("cutoff", summary.cutoff)
+        put("n", summary.n)
+        if (summary.n == 0) return@apply
+        put("min", round3(summary.min))
+        put("p25", round3(summary.p25))
+        put("p50", round3(summary.p50))
+        put("p75", round3(summary.p75))
+        put("max", round3(summary.max))
+        put("belowCutoff", summary.belowCutoff)
     }
 
     private fun framesJson(diag: ChunkDiag): JSONArray {
@@ -480,8 +623,27 @@ class PerfReport {
             "queue_wait",
         )
 
-        /** Backstops so a runaway session cannot grow the file without bound. */
+        /**
+         * Backstops so a long session cannot grow the file without bound. All three are
+         * reported in `truncation` when they bite — see [truncationJson].
+         *
+         * Sized against the real shape of a session rather than round numbers: a chunk emits
+         * ~3 events and 2 load samples, and samples ~64 frames. A two-hour import is roughly
+         * 950 chunks, so [MAX_EVENTS] covers it outright, [MAX_LOAD_SAMPLES] thins to one
+         * point in four, and [MAX_FRAME_DIAGS] keeps full per-frame detail for the first
+         * ~470 chunks — about 40 minutes, which is longer than every clip measured so far.
+         */
         private const val MAX_EVENTS = 4000
         private const val MAX_LOAD_SAMPLES = 600
+
+        /**
+         * Sampled frames whose per-frame verdict is written out in full.
+         *
+         * One `FrameDiag` is ~180 bytes of pretty-printed JSON built through an in-memory
+         * `JSONObject` tree, so this is the knob that decides whether `perf_report.json`
+         * renders at all on a long run: 30,000 is ~5 MB of frames, 60,000 would be ~11 MB
+         * plus several times that in tree overhead, at drain time.
+         */
+        private const val MAX_FRAME_DIAGS = 30_000
     }
 }

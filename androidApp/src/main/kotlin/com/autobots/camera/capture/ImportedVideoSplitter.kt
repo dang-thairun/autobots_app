@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.File
 import java.nio.ByteBuffer
@@ -104,6 +105,13 @@ class ImportedVideoSplitter(
         var videoWidth = 0
         var videoHeight = 0
 
+        // Declared out here, not inside the try, so the finally below can reach them. A
+        // MediaMuxer holds native memory and a file descriptor; losing the reference on the
+        // way out of an exception leaks both. See the finally for why that path is routine
+        // rather than exotic.
+        var muxer: MediaMuxer? = null
+        var segmentFile: File? = null
+
         try {
             extractor.setDataSource(context, source, null)
 
@@ -132,9 +140,7 @@ class ImportedVideoSplitter(
             val info = MediaCodec.BufferInfo()
 
             var index = startIndex
-            var muxer: MediaMuxer? = null
             var muxTrack = -1
-            var segmentFile: File? = null
             var segmentBytes = 0L
             var segmentStartUs = 0L
             var lastPtsUs = 0L
@@ -213,6 +219,13 @@ class ImportedVideoSplitter(
 
             closeSegment(lastPtsUs)
             onProgress(100)
+        } catch (t: CancellationException) {
+            // Cancellation is not a split failure and must not be reported as one. It also
+            // must not be swallowed: `catch (Throwable)` below would turn a cancelled import
+            // into a normal error result and leave the coroutine looking alive to its parent.
+            // This is the common exit, not a rare one — awaitQueueSpace parks for ~95% of a
+            // split (TC-06: 293.8 s blocked of 313.8 s), so almost any cancel lands in a delay.
+            throw t
         } catch (t: Throwable) {
             Log.e(TAG, "Import split failed", t)
             return ImportSplitResult(
@@ -227,6 +240,19 @@ class ImportedVideoSplitter(
             )
         } finally {
             runCatching { extractor.release() }
+            // Only reachable when the loop left early — the normal path closes the last
+            // segment itself and nulls this out. stop() throws if the muxer never received
+            // a sample, so it gets its own runCatching and release() runs either way.
+            muxer?.let { open ->
+                Log.w(TAG, "Releasing muxer left open by an early exit (${segmentFile?.name})")
+                runCatching { open.stop() }
+                runCatching { open.release() }
+            }
+            muxer = null
+            // The partial segment was never handed to onChunkReady, so nobody can read it —
+            // and at ~52 MB a piece it is worth not leaving behind in the cache.
+            segmentFile?.let { partial -> runCatching { partial.delete() } }
+            segmentFile = null
         }
 
         Log.i(

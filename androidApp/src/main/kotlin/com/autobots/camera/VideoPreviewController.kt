@@ -47,6 +47,14 @@ class VideoPreviewController(
     private var shutdown = false
     private var onExposureReadout: ((CameraExposureReadout) -> Unit)? = null
     private val lastExposurePublishMs = AtomicLong(0L)
+
+    /**
+     * Replaced on the main thread by `bindInternal`, but `add()`-ed from the camera's own
+     * callback thread. The instance is internally safe (`ExposureStats.add` is
+     * `@Synchronized`); what needs publishing is the *reference*, so a rebind cannot leave the
+     * callback thread accumulating into the previous session's stats.
+     */
+    @Volatile
     private var exposureStats = ExposureStats()
 
     /**

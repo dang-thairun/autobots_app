@@ -55,13 +55,27 @@ class WriteQueue(
         }
     }
 
-    /** @return false if queue full (file not accepted). */
+    /**
+     * @return false if queue full (file not accepted).
+     *
+     * The counter goes up **before** the file is offered, and comes back down if the offer is
+     * refused. Incrementing afterwards would leave a window where the worker has already
+     * taken the file — and could have finished and decremented — while this call has not yet
+     * counted it, so [pendingCount] could read 0 or below with work still to publish.
+     *
+     * Today's only drain caller happens to be shielded from that: `CapturePipelineCoordinator`
+     * enqueues a chunk's photos while its own `workerBusy` flag is set and clears the flag
+     * afterwards, and that flag is an `AtomicBoolean`, so anyone who sees it false also sees
+     * every increment. Relying on it would mean every future caller has to know. Counting
+     * first costs one rollback branch and makes [pendingCount] true on its own terms.
+     */
     fun enqueue(file: File): Boolean {
+        pending.incrementAndGet()
         val result = channel.trySend(file)
         return if (result.isSuccess) {
-            pending.incrementAndGet()
             true
         } else {
+            pending.decrementAndGet()
             Log.w(TAG, "Queue full — dropped ${file.name}")
             onDropped(file)
             false

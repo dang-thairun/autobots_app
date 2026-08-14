@@ -43,13 +43,33 @@ class VideoChunkRecorder(
     private val paused = AtomicBoolean(false)
     private val rotating = AtomicBoolean(false)
     private val chunkCounter = AtomicInteger(0)
+    /**
+     * Written when a chunk starts or finalizes — on the main thread via CameraX callbacks, and
+     * on [scope] when a paused recorder resumes itself — and read by `sizeMonitorJob` on
+     * [Dispatchers.Default].
+     *
+     * The monitor is launched *after* these are set, which publishes them for the chunk it was
+     * started for; the gap is across chunk boundaries, where a stale read shows a wrong elapsed
+     * time or calls `stop()` on an already-finalized `Recording` (CameraX treats that as a
+     * no-op). Small, but there is no reason for the reader to be guessing.
+     */
+    @Volatile
     private var activeRecording: Recording? = null
+
+    @Volatile
     private var currentFile: File? = null
+
+    @Volatile
     private var currentChunkIndex: Int = 0
+
+    @Volatile
+    private var chunkStartElapsedMs: Long = 0L
+
+    @Volatile
+    private var chunkStartWallMs: Long = 0L
+
     private var sizeMonitorJob: Job? = null
     private var resumeWatchJob: Job? = null
-    private var chunkStartElapsedMs: Long = 0L
-    private var chunkStartWallMs: Long = 0L
     private var stopFinalizeCallback: (() -> Unit)? = null
 
     /** Coverage-gap instrumentation: frames recorded by nobody between chunks. */

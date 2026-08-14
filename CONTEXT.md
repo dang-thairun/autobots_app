@@ -177,5 +177,6 @@ _Avoid_: relying only on default full-frame AE at shutter time, arm-without-mete
 ## Related
 
 - Doc index: [docs/DOCS.md](docs/DOCS.md)
+- **ศัพท์เทคนิค/การวัดผล (ไทย)**: [docs/GLOSSARY_TH.md](docs/GLOSSARY_TH.md) — DVFS, TC-XX, realtimeRatio, YUV, backpressure · เล่มนี้เก็บเฉพาะศัพท์เชิงธุรกิจ
 - Plan B pipeline: [docs/PIPELINE_FLOW.md](docs/PIPELINE_FLOW.md)
 - Product requirements: [docs/PRD.md](docs/PRD.md)

@@ -29,7 +29,8 @@ Edge-AI sports camera on tripod-mounted Android.
 | [REPORT_GUIDELINE.md](./REPORT_GUIDELINE.md) | How to write a version summary report · ไทย: [REPORT_GUIDELINE_TH.md](./REPORT_GUIDELINE_TH.md) |
 | [../reports/](../reports/) | Version reports — test inputs, results, score (`reports/vX.Y.Z/report.md`) |
 | [ROADMAP.md](./ROADMAP.md) | Unscheduled ideas past B4 |
-| [../CONTEXT.md](../CONTEXT.md) | Ubiquitous language |
+| [../CONTEXT.md](../CONTEXT.md) | Ubiquitous language — ศัพท์เชิงธุรกิจ (Passage, Kept Frame) |
+| [GLOSSARY_TH.md](./GLOSSARY_TH.md) | **ศัพท์เทคนิค/การวัดผลอธิบายภาษาไทย** — DVFS, TC-XX, realtimeRatio, YUV, backpressure, `@Volatile` · เริ่มที่นี่ถ้าอ่านรายงานแล้วสะดุดศัพท์ |
 
 Doc maintenance: [CONVENTIONS.md](./CONVENTIONS.md) §7 · drift check: `./scripts/check_docs_drift.sh`
 

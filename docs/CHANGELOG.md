@@ -30,6 +30,24 @@ invariant ทั้งสามยังตรงเป๊ะที่ 302 / 579
 
 **ราคาของการทับซ้อน:** ทุก stage ช้าลงต่อเฟรม 17–78% จากการแย่ง CPU/memory bandwidth (`rotate` +78% · `mlkit_face` +29% · `yuv_jpeg_argb` +17%) แต่ wall ยังลง 32% — overlap ชนะ contention ขาดลอย เพดานทฤษฎี 1.09× จึงไปไม่ถึง
 
+### ⭐ TC-12 · หลังเลื่อน full-res decode — ข้ามเส้น realtime
+
+| | TC-10 (NPU ก่อนแก้) | **TC-12** | |
+|--|--|--|--|
+| wall clock | 383.3 s | **270.8 s** | **−29.3%** |
+| `realtimeRatio` | 1.430 | **1.010** | **−29.4%** |
+| `kept` | 134 | **134** | เท่ากันเป๊ะ |
+| `worker_idle` | 211–220 ms/เฟรม | **107.7** | ครึ่งเดียว |
+
+งานเสร็จใน **271.9 s สำหรับคลิป 273.7 s** — เร็วกว่าความยาวคลิปเป็นครั้งแรก · invariant ตรงเป๊ะ (`jpeg_argb_full` n = 541 = 293 candidates + 248 tooSoft + 0 roiInvalid) · `decodeFailures` 0 · `roiInvalid` 0 · reject ขยับ 4 เฟรมจาก DCT-vs-bilinear ซึ่งอยู่ในกรอบที่ทำนายไว้
+
+- 🔴 **เหตุผลที่เขียนไว้ตอนแก้ผิด** — ARGB decode ไม่ได้ถูกตัดทิ้ง 75% มันลดแค่ 4% (49.0 → 46.9 ms/เฟรม) แล้ว**ย้ายฝั่ง**ไปเธรดที่ `worker_idle` วัดว่าว่าง 92% · `inSampleSize = 2` ให้ pixel น้อยลง 4 เท่าแต่เร็วขึ้นแค่ 36% เพราะ entropy decoding ของ JPEG ไม่ย่อตาม **บทเรียน: ย้ายงานไปเธรดที่ว่างได้ผล ย่อ input ให้ JPEG decoder ไม่ได้ผลตามสัดส่วน**
+- 🎯 **คอขวดตัวถัดไปชี้ชัดแล้ว: `yuv420ToNv21` = 61.6% ของ wall เดี่ยวๆ** (73.2 ms/เฟรม · ใหญ่กว่า `nv21_jpeg` 2.25 เท่า) เป็น nested loop อ่าน `ByteBuffer.get()` ทีละ byte ~2M ครั้ง/เฟรม · แก้ด้วย bulk `get()` ต่อแถว ไม่ต้องแตะ NDK/MediaCodec · ลดครึ่งเดียว → ratio ~0.60
+- ✅ **DVFS drift ยืนยันแล้วที่ +25%** ด้วยสามตัววัดอิสระ (`cpuProbeMs` +25.3% · `cpuMaxFreqKhz` 2,918,400 → 1,651,200 · ms/เฟรมของ chunk ที่ `kept=0` +21%) ขณะที่ `thermal` รายงาน `OK` ตลอด 36 chunk — ตรงกับ 23% ที่ TC-06 เจอ · **ratio 1.01 จึงวัดบนเครื่องที่ช้าลงระหว่างทาง คุมได้น่าจะ ~0.90**
+- 🐛 **`DvfsProbe` ไม่มี warm-up** — probe ของ chunk 1 โดน JIT compile ปน (6.217 vs steady 3.0 ms) ทำให้ `totals.cpuProbe.driftPercent` ที่รายงาน (−39.6%) อ่านไม่ได้ · ต้องข้าม chunk 1 เองไปก่อน
+- ⚠️ **ก้อนใหม่ที่โผล่หลังงานย้ายฝั่ง** — `rotate` 4K กลายเป็น 14.4% ของ wall (ใหญ่กว่า `jpeg_argb_full` เอง) · เฟรมที่ตก `tooSoft` จ่าย full decode + rotate ฟรี 31.2 s · `save_jpeg` เข้ารหัสทิ้ง 159 จาก 293 ไฟล์ (14.8 s)
+- **`FRAME_QUEUE_CAPACITY` 2 → 6 เป็นตัวแปรเฉื่อย** — `queue_wait` รวมทั้ง session 0.62 s เพราะ producer ยังช้ากว่า consumer เกือบสองเท่า คิวว่างเกือบตลอด
+
 ### เทียบ backend แบบ end-to-end — TC-08/09/10 · คลิปเดียวกัน เปลี่ยนแค่ chip เดียว
 
 | | ML Kit FAST | LiteRT GPU | LiteRT NPU |
@@ -68,6 +86,11 @@ v0.1.3 จบที่ `realtimeRatio` 2.196× และสรุปว่าท
 | **Instrumentation** | `DvfsProbe` — งาน integer ขนาดคงที่ จับเวลาก่อนทุก chunk → `chunks[].cpuProbeMs` + `totals.cpuProbe.driftPercent` · `deviceLoad[].cpuMaxFreqKhz` จาก sysfs | TC-06 เจอ per-frame cost ลอย 23%/session ขณะที่ `thermal` รายงาน OK ตลอด — drift ใหญ่พอจะกลืนสิ่งที่กำลังวัด (ระยะห่าง 4% ของ TC-08 vs TC-10 อยู่ข้างในนั้น) · เลือกงาน integer แทนอ่านไฟล์ freq เพราะไม่ต้องพึ่ง permission และจับทุกอย่างที่ทำให้ core ช้าลง ไม่ใช่แค่ frequency |
 | **Instrumentation** | `SCHEMA_VERSION` 3 → **4** — `yuv_jpeg_argb` หายไป แทนด้วย `yuv_nv21` + `nv21_jpeg` (producer) และ `jpeg_argb_detect` + `jpeg_argb_full` (consumer) | ARGB decode ย้ายเธรดแล้ว stage เดิมจึงไม่มีความหมายเดิมอีก · รายงาน schema 3 เทียบ share ต่อ stage กับ schema 4 ตรงๆ ไม่ได้ ตัวที่ใกล้ที่สุดคือผลรวมของ 4 stage ใหม่ |
 | **Detector** | ถอด `enableTracking()` ออกจาก `OfflineFaceDetector` | ไม่มีอะไรในโปรเจกต์เคยอ่าน `Face.trackingId` เลย แต่มันจ่าย `roiInvalid` ทั้งหมด (tracker ทำนายกล่องล้ำขอบเฟรม) + ทำให้ผลไม่ deterministic (v0.1.3 ต้องเขียนเตือนเองว่าอย่าเชื่อ delta เล็กๆ) และพอ `DETECT_WORKERS = 2` detector แต่ละตัวเห็นเฟรมเว้นเฟรม `roiInvalid` เลยขึ้น 16 → 29 · ปิดแล้วผลขึ้นกับเฟรมของ chunk นั้นอย่างเดียว ซึ่งเป็นเงื่อนไขที่การทดลองหลังจากนี้ต้องการ |
+| **Correctness** | 🐛 **ลบ chunk `.mp4` หลัง Worker 2 อ่านเสร็จ** (`releaseChunkFile()`) | ไม่มีที่ไหนในโค้ดลบมันเลย และ `videoQueue` cap 8 คุมแค่จำนวนที่*รอคิว* ไม่ใช่จำนวนที่*มีอยู่* — cache จึงสะสมสำเนา remux ของทั้งคลิป: 1.93 GB ที่ 4.5 นาที (ไม่มีใครสังเกต) → **~25 GB ที่ 1 ชม. · ~51 GB ที่ 2 ชม.** บวกไฟล์ต้นฉบับ · `hasStorageForRecording()` เช็คครั้งเดียวตอนเริ่ม จึงไม่มีอะไรหยุดมันกลางคัน · ปลอดภัยเพราะสิ่งเดียวที่อยู่ต่อคือ**ชื่อไฟล์**ใน `session_log.txt` |
+| **Instrumentation** | `perf_report.json` รับ session ยาวได้ — `MAX_FRAME_DIAGS = 30,000` · `deviceLoad` หารสองแทนตัดท้าย · บล็อก `truncation` ใหม่ | `frames[]` 60,000 เฟรม = ~11 MB string ผ่าน `JSONObject` tree ตอน drain บนเครื่องที่เพิ่งถูกอัดสองชั่วโมง · `MAX_LOAD_SAMPLES = 600` ทำให้ **DVFS logging ที่เพิ่งใส่ไปตาบอดหลังผ่าน 1/3 ของ session** พอดีตอนเครื่องร้อนจริง — เปลี่ยนเป็นทิ้ง index คี่แล้วเพิ่ม stride อนุกรมจึงกินทั้ง session เสมอ (จำลอง 2 ชม.: 476 จุด ครอบคลุม 0→3,800 ระยะห่าง 8) · sharpness percentile ย้ายไปคำนวณก่อนตัดจึงรอด · **ทั้งสาม cap เดิมล้มเหลวแบบเงียบ** ซึ่งทำให้รายงานที่ขาดข้อมูล 2/3 ดูเหมือนสมบูรณ์ |
+| **Correctness** | 🐛 `ImportedVideoSplitter` ปล่อย `MediaMuxer` ใน `finally` เสมอ + ลบ segment ที่ค้างครึ่งทาง · `CancellationException` ถูก rethrow ทั้งใน `split()` และ `importVideo()` แทนที่จะถูก `catch (Throwable)` กลืน | `var muxer` เคยประกาศอยู่ใน `try` จึงอยู่นอก scope ของ `finally` — ออกจากฟังก์ชันด้วย exception เมื่อไหร่ก็รั่วทั้ง native memory และ fd · และมันไม่ใช่เคสหายาก: `awaitQueueSpace` จอดอยู่ **95% ของเวลา split** (293.8 s จาก 313.8 s) ดังนั้นการกดยกเลิก import แทบทุกครั้งจะตกลงไปใน `delay()` แล้วโยน `CancellationException` เข้า `catch (Throwable)` พอดี — รั่วทุกครั้ง แถม cancellation หายไปเงียบๆ |
+| **Correctness** | `@Volatile` บนสถานะที่ข้ามเธรดใน `CapturePipelineCoordinator` (`recording` · `importing` · `awaitingRecorderFinalize` · `closed` · ตัวนับ · `sessionMeta`) · `VideoChunkRecorder` · `VideoPreviewController.exposureStats` | สี่ตัวแรกคือสิ่งที่ `isBusy()` อ่าน และ `drainWatchdog` อ่านมันจากคนละ dispatcher กับที่เขียน — ไม่มี happens-before edge แปลว่า watchdog ไม่การันตีว่าจะเห็น `importing` เป็น `false` และ watchdog ที่ไม่เห็น pipeline ว่าง = session ที่ไม่เขียนทั้ง `session_log.txt` และ `perf_report.json` ซึ่งตรงกับอาการ **NA-05** · ที่เหลือเป็น visibility ของ UI · เลือก `@Volatile` ไม่ใช่ `Atomic` เพราะตัวนับมีผู้เขียนรายเดียว (worker coroutine) จึงไม่มี update ให้หาย มีแต่ค่าให้ publish |
+| **Correctness** | `WriteQueue.enqueue()` นับ pending **ก่อน** `trySend` แล้ว rollback เมื่อคิวเต็ม · `currentSessionStatus()` รับ snapshot ของ `chunkHistory` แทนอ่าน list สด | ตัวแรกยังไม่เคยพังจริง เพราะ `workerBusy` (AtomicBoolean) ครอบ enqueue ทั้งชุดอยู่ — แต่นั่นคือ invariant ที่ไม่ได้เขียนไว้ที่ `WriteQueue` เลย และ `PhotoDeliveryService` ก็เรียกจากอีกเส้นทาง · ตัวหลังทำให้ status กับตัวเลขที่แสดงคู่กันมาจาก**ภาพเดียวกัน** (เดิม `buildSessionRecord` รับ snapshot แต่ `currentSessionStatus` แอบอ่าน list สดนอก `historyLock`) |
 | **Build** | `<uses-native-library>` สำหรับ `libcdsprpc.so` / `libadsprpc.so` · `tools/restore-qairt.sh` | ตัวแรกคือ**ต้นเหตุตัวจริง**ที่ทำให้ NPU ใช้ไม่ได้ ทุกอย่างดู "สำเร็จ" แล้วไปพังลึกสองชั้นเป็น `Failed to apply delegate` · ตัวหลังกู้ไลบรารี QNN 97 MB + SDK headers ที่ gitignore ไว้และหายไปแล้วหนึ่งครั้งตอน `git reset` |
 
 ### ยังไม่ได้แก้ (ตั้งใจ)

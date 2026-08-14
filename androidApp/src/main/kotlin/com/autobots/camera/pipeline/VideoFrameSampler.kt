@@ -1,7 +1,6 @@
 package com.autobots.camera.pipeline
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.PixelFormat
@@ -31,8 +30,14 @@ import java.io.File
  *  - **surface** (preferred) — the decoder renders straight into an [ImageReader] in
  *    RGBA_8888, so the YUV→RGB conversion runs on the display pipeline instead of the CPU.
  *    Frames between samples are dropped with `releaseOutputBuffer(false)` and cost nothing.
- *  - **yuv** (fallback) — the pre-0.1.3 path: YUV_420_888 → NV21 → JPEG → Bitmap. Kept
- *    because the surface path depends on device support for RGBA ImageReader output.
+ *  - **yuv** (fallback) — the pre-0.1.3 path: YUV_420_888 → NV21 → JPEG. Kept because the
+ *    surface path depends on device support for RGBA ImageReader output.
+ *
+ * The YUV path stops at the **JPEG**. Decoding those bytes to ARGB used to happen here too,
+ * for every sampled frame, and was the single largest cost in the pipeline; it now happens
+ * on a detect worker, at detect resolution, and at full resolution only for frames that earn
+ * it. See [SampledFrame]. The two halves are timed separately (`yuv_nv21`, `nv21_jpeg`) so
+ * what is left on this thread can be attributed rather than guessed at.
  *
  * Frames are emitted **unrotated**, with the container rotation passed alongside. Rotating
  * a 4K frame costs ~52 ms, and only the handful of frames that survive detection need it.
@@ -44,6 +49,18 @@ import java.io.File
 object VideoFrameSampler {
     private const val TAG = "VideoFrameSampler"
     private const val TIMEOUT_US = 10_000L
+
+    /**
+     * Quality of the intermediate JPEG the YUV path produces.
+     *
+     * Left at 92, where 0.1.4 had it as an unnamed implementation detail on the way to a
+     * bitmap. It is named now because those bytes became the thing that crosses the thread
+     * boundary and gets decoded twice — so this, not the 95 used for delivery, is what
+     * actually bounds the quality of a saved photo. That was equally true before (the chain
+     * was already YUV → 92 → ARGB → 95) and is left alone deliberately: changing it would
+     * move image quality in the same release that moves timings.
+     */
+    private const val JPEG_QUALITY = 92
 
     /**
      * Surface decode is **off**.
@@ -102,13 +119,14 @@ object VideoFrameSampler {
     }
 
     /**
-     * @param onFrame receives the decoded frame **unrotated** plus the container rotation.
+     * @param onFrame receives the sampled frame **unrotated** and, on the YUV path, still
+     *   compressed — the callback decides what resolution it needs. See [SampledFrame].
      */
     fun sampleFrames(
         file: File,
         intervalMs: Long,
         perf: StageStats? = null,
-        onFrame: suspend (timestampUs: Long, bitmap: Bitmap, rotationDegrees: Int) -> Unit,
+        onFrame: suspend (frame: SampledFrame) -> Unit,
     ): SampleStats {
         val trySurface = SURFACE_DECODE_ENABLED && !surfaceUnsupported
         if (!trySurface) {
@@ -134,7 +152,7 @@ object VideoFrameSampler {
         intervalMs: Long,
         perf: StageStats?,
         useSurface: Boolean,
-        onFrame: suspend (timestampUs: Long, bitmap: Bitmap, rotationDegrees: Int) -> Unit,
+        onFrame: suspend (frame: SampledFrame) -> Unit,
     ): SampleStats {
         val stats = SampleStats()
         val extractor = MediaExtractor()
@@ -246,7 +264,7 @@ object VideoFrameSampler {
         stats: SampleStats,
         perf: StageStats?,
         rotationDegrees: Int,
-        onFrame: suspend (timestampUs: Long, bitmap: Bitmap, rotationDegrees: Int) -> Unit,
+        onFrame: suspend (frame: SampledFrame) -> Unit,
     ) {
         val bufferInfo = MediaCodec.BufferInfo()
         var inputDone = false
@@ -292,33 +310,38 @@ object VideoFrameSampler {
                     val ptsUs = bufferInfo.presentationTimeUs
                     val wanted = ptsUs - lastEmitUs >= intervalMs * 1_000L && bufferInfo.size > 0
 
-                    val bitmap = if (reader != null) {
+                    val frame = if (reader != null) {
                         // Surface path: skipped frames are never converted at all.
                         decoder.releaseOutputBuffer(outputIndex, wanted)
                         if (wanted) {
                             surfaceAttempts++
                             CamPerf.timed(perf, "surface_rgba") { readSurfaceBitmap(reader, stats) }
+                                ?.let { SampledFrame.ofBitmap(ptsUs, rotationDegrees, it) }
                         } else {
                             null
                         }
                     } else {
                         val image = decoder.getOutputImage(outputIndex)
-                        val decoded = if (wanted && image != null) {
-                            CamPerf.timed(perf, "yuv_jpeg_argb") { imageToBitmap(image, stats) }
+                        // Note there is no ARGB decode here any more — the bytes go to the
+                        // worker as they are. See the class doc and [SampledFrame].
+                        val encoded = if (wanted && image != null) {
+                            imageToJpeg(image, stats, perf)
                         } else {
                             null
                         }
                         image?.close()
                         decoder.releaseOutputBuffer(outputIndex, false)
-                        decoded
+                        encoded?.let {
+                            SampledFrame.ofJpeg(ptsUs, rotationDegrees, it.width, it.height, it.bytes)
+                        }
                     }
 
-                    if (bitmap != null) {
+                    if (frame != null) {
                         // Handing the frame to Worker 2. Since 0.1.4 the callback only
                         // enqueues, so this measures backpressure — how long the decoder
                         // waited for a detect worker to free a slot — not detection itself.
                         CamPerf.timed(perf, "queue_wait") {
-                            runBlocking { onFrame(ptsUs, bitmap, rotationDegrees) }
+                            runBlocking { onFrame(frame) }
                         }
                         lastEmitUs = ptsUs
                         stats.emitted++
@@ -426,7 +449,19 @@ object VideoFrameSampler {
         }
     }
 
-    private fun imageToBitmap(image: Image, stats: SampleStats): Bitmap? {
+    /** A frame the decoder produced, compressed and ready to hand to a worker. */
+    private class EncodedFrame(val bytes: ByteArray, val width: Int, val height: Int)
+
+    /**
+     * YUV_420_888 → NV21 → JPEG, and stop there.
+     *
+     * The two halves are timed apart because they behave differently and only one of them
+     * has anywhere left to go: `yuv_nv21` is a per-pixel loop in Kotlin over the chroma
+     * planes, `nv21_jpeg` is platform code. Together they are what remains of the old
+     * `yuv_jpeg_argb` on this thread once the ARGB decode moved to the workers, so the next
+     * run can say which of the two is now the producer's real cost.
+     */
+    private fun imageToJpeg(image: Image, stats: SampleStats, perf: StageStats?): EncodedFrame? {
         if (image.format != ImageFormat.YUV_420_888) {
             stats.unsupportedFormat++
             if (stats.unsupportedFormat <= 3) {
@@ -434,26 +469,21 @@ object VideoFrameSampler {
             }
             return null
         }
-        val nv21 = yuv420ToNv21(image) ?: run {
+        val nv21 = CamPerf.timed(perf, "yuv_nv21") { yuv420ToNv21(image) } ?: run {
             stats.decodeFailures++
             return null
         }
         val yuv = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
         val out = ByteArrayOutputStream()
         return try {
-            yuv.compressToJpeg(Rect(0, 0, image.width, image.height), 92, out)
-            val bytes = out.toByteArray()
-            val options = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+            CamPerf.timed(perf, "nv21_jpeg") {
+                yuv.compressToJpeg(Rect(0, 0, image.width, image.height), JPEG_QUALITY, out)
             }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            EncodedFrame(out.toByteArray(), image.width, image.height)
         } catch (t: Throwable) {
             if (stats.decodeFailures < 3) {
-                Log.w(TAG, "imageToBitmap failed ${image.width}x${image.height}", t)
+                Log.w(TAG, "imageToJpeg failed ${image.width}x${image.height}", t)
             }
-            stats.decodeFailures++
-            null
-        } ?: run {
             stats.decodeFailures++
             null
         }

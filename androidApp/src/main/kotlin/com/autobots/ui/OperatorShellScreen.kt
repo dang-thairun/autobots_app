@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -44,6 +45,12 @@ import com.autobots.camera.pipeline.CapturePipelineCoordinator
 
 private val CardBg = Color.Gray.copy(alpha = 0.25f)
 private val CardShape = RoundedCornerShape(12.dp)
+
+/**
+ * Tall enough for the worst routine layout — title, a two-line status, the bar and the
+ * summary — so the card holds its size as the status line grows and shrinks.
+ */
+private val ProcessingCardMinHeight = 118.dp
 
 private object OverlayPages {
     const val Controls = 0
@@ -235,6 +242,10 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // Floor rather than a hard height: the status line grows to two lines while the
+            // splitter waits on the queue, and the import-failed message can take three. A
+            // floor keeps the card from resizing on every state flip without clipping those.
+            .heightIn(min = ProcessingCardMinHeight)
             .clip(CardShape)
             .background(CardBg)
             .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -270,10 +281,12 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
         }
 
         LinearProgressIndicator(
+            // One bar for the whole job. Split progress is deliberately not shown here: it is
+            // throttled by the video queue and sits still for ~11 s at a time, which reads as
+            // a hang. processingPercent advances every sampled frame instead.
             progress = {
                 when {
-                    state.isImporting -> state.importPercent / 100f
-                    state.isProcessing -> state.processingPercent / 100f
+                    state.isImporting || state.isProcessing -> state.processingPercent / 100f
                     else -> 0f
                 }
             },
@@ -286,7 +299,6 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
         Text(
             text = when {
                 !active -> "Idle · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
-                state.isImporting -> "${state.extractionTarget.keptNoun} found ${state.facesKept}"
                 else -> "${state.processingPercent}% overall · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
             },
             color = Color(0xFF78909C),
@@ -533,7 +545,7 @@ private fun CompactStatusCard(
                     color = Color(0xFF90A4AE),
                     style = MaterialTheme.typography.labelSmall,
                 )
-                DetectorBackend.entries.chunked(2).forEach { row ->
+                DetectorBackend.entries.filter { it.selectableInUi }.chunked(2).forEach { row ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -542,7 +554,11 @@ private fun CompactStatusCard(
                             FilterChip(
                                 selected = state.detectorBackend == candidate,
                                 onClick = { onDetectorBackend(candidate) },
-                                enabled = !state.isCapturing,
+                                // Greyed out rather than hidden: knowing the NPU exists but is
+                                // unavailable here is the useful signal — the reason is spelled
+                                // out below the row.
+                                enabled = !state.isCapturing &&
+                                    !state.detectorUnavailable.containsKey(candidate),
                                 modifier = Modifier.weight(1f),
                                 label = {
                                     Text(candidate.label, style = MaterialTheme.typography.labelSmall)
@@ -552,6 +568,15 @@ private fun CompactStatusCard(
                         if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
+                state.detectorUnavailable
+                    .filterKeys { it.selectableInUi }
+                    .forEach { (backend, reason) ->
+                        Text(
+                            text = "${backend.label}: $reason",
+                            color = Color(0xFFB0704A),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

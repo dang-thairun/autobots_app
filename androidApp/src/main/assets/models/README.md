@@ -55,26 +55,48 @@ recall on distant runners. **That is the actual case for the NPU** — not raw m
 
 ## Two things that will bite
 
-**Pick the right QNN export.** A QNN context binary is compiled for one Snapdragon family. The
-test device is `SM8635` (Snapdragon 8s Gen 3, `ro.board.platform = pineapple`); a binary built
-for a different chip will not load. Confirm with:
+**The `.tflite` must stay uncompressed in the APK.** LiteRT memory-maps the model straight out
+of the APK, which fails if aapt has deflated it. Handled by `androidResources { noCompress }`
+in `androidApp/build.gradle.kts` — do not remove it. The failure mode is an interpreter that
+will not load, with no useful message.
 
-```
-adb shell getprop ro.soc.model     # expect SM8635
-```
+**No chip-specific artifact is needed.** One `.tflite` serves CPU, GPU and NPU: the QNN
+delegate compiles it for whatever HTP the device has, at load time. What that costs, and how
+to trade it for 75 MB, is in [../../jniLibs/README.md](../../jniLibs/README.md).
 
-**The `.tflite` must stay uncompressed in the APK.** LiteRT memory-maps the model out of the
-APK, which fails if aapt has deflated it. Handled by `androidResources { noCompress += ... }`
-in `androidApp/build.gradle.kts` — do not remove it.
+## Measured on device — SM8635, synthetic 640×1138 input, 3 tiles
 
-## Why the GPU column matters more than it looks
+| backend | warm ms |
+|---------|---------|
+| ML Kit FAST (baseline) | 87 |
+| ML Kit ACCURATE | 117 |
+| `face_det_lite` CPU | 61 |
+| `face_det_lite` GPU | 70 (noisy: 42–79 across runs) |
+| **`face_det_lite` NPU** | **25** |
 
-`libOpenCL.so` and `libOpenCL_adreno.so` are already on the device, so the **GPU delegate costs
-nothing extra to ship**. The QNN path needs its backend `.so` bundled into an APK that is
-already 137 MB and where `installDebug` is unreliable. If GPU turns out to be fast enough, the
-NPU path buys nothing but size — which is exactly what the bench is there to decide.
+Two things worth noting before reading too much into these. **LiteRT on CPU already beats ML
+Kit FAST** while running three inferences per frame. And **the GPU delegate is not reliably
+better than CPU** — a fully-quantised uint8 graph is not what an OpenCL delegate is good at —
+which makes the NPU more important to this decision, not less.
+
+Timings are a smoke test on a synthetic gradient: they answer "does it run, roughly how fast",
+never "does it detect". They also include the Kotlin grayscale conversion, so the model itself
+is faster than these numbers suggest. Real answers come from `detector_compare.json`.
+## Reading `detector_compare.json`
+
+Produced by the **Compare all** detector mode: every backend runs over the same frames while
+ML Kit FAST alone decides what the session keeps. Two questions it answers that per-backend
+runs cannot, because those compare different frames rather than different detectors:
+
+| field | question |
+|-------|----------|
+| `iouVsMlKitFast` | **Is the box decode right?** Near 1 means both detectors drew the same rectangle. Low, on frames where both fired, means the decode is wrong — not that recall differs. |
+| `summary[].framesWithDetection` | **Does anything see the runners ML Kit misses?** `no_subject` was 64% of sampled frames in 0.1.4 and the footage says people were there. |
+
+`realtimeRatio` is meaningless in that mode — the chunk does several times the detection work.
+Throughput comes from single-backend runs.
 
 ## Related
 
-- Bench rationale and the decision it feeds: [RELEASE_0_1_4.md](../../../../../docs/RELEASE_0_1_4.md)
+- Bench rationale: [RELEASE_0_1_4.md](../../../../docs/RELEASE_0_1_4.md) · Native libs: [../../jniLibs/README.md](../../jniLibs/README.md)
 - Device capability survey: same document, NPU section

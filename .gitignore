@@ -24,5 +24,7 @@ androidApp/src/main/assets/models/*.dlc
 # See androidApp/src/main/jniLibs/README.md
 androidApp/src/main/jniLibs/**/*.so
 
-# Qualcomm QAIRT SDK — vendor download, not redistributable. See androidApp/src/main/jniLibs/README.md
-/tools/
+# Qualcomm QAIRT SDK — vendor download, not redistributable, ~550 MB.
+# Only the SDK itself; tools/restore-qairt.sh must stay in git, since it is what puts the
+# SDK back after a reset. See androidApp/src/main/jniLibs/README.md
+/tools/qairt/

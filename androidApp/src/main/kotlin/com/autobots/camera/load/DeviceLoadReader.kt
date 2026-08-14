@@ -37,8 +37,37 @@ class DeviceLoadReader(
             usedRamMb = usedMb,
             availRamMb = availMb,
             totalRamMb = totalMb,
+            cpuMaxFreqKhz = readCpuMaxFreqKhz(),
         )
     }
+
+    /**
+     * Fastest core's current frequency, straight from sysfs.
+     *
+     * There is no platform API for this, and the sysfs path is not guaranteed: it is absent
+     * on some kernels and unreadable to apps on others. Both cases return 0 rather than
+     * throwing — this is a diagnostic, and a missing diagnostic must not affect a capture.
+     *
+     * The core count is discovered once and capped, because the files are read on every
+     * thermal callback and a machine with many cores would otherwise turn a UI update into
+     * a directory walk.
+     */
+    private fun readCpuMaxFreqKhz(): Int {
+        var best = 0
+        for (cpu in 0 until cpuProbeCount) {
+            val value = runCatching {
+                java.io.File("/sys/devices/system/cpu/cpu$cpu/cpufreq/scaling_cur_freq")
+                    .readText()
+                    .trim()
+                    .toIntOrNull()
+            }.getOrNull() ?: continue
+            if (value > best) best = value
+        }
+        return best
+    }
+
+    private val cpuProbeCount: Int =
+        Runtime.getRuntime().availableProcessors().coerceIn(1, MAX_CPUS_PROBED)
 
     fun start(onChange: (DeviceLoadSnapshot) -> Unit) {
         listenerRef.set(onChange)
@@ -105,5 +134,8 @@ class DeviceLoadReader(
     companion object {
         private const val TAG = "DeviceLoad"
         private const val BYTES_PER_MB = 1024L * 1024L
+
+        /** Enough to cover every cluster on a phone without walking a server's worth of cores. */
+        private const val MAX_CPUS_PROBED = 16
     }
 }

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.autobots.camera.ChunkRecordingProgress
 import com.autobots.camera.PipelineSessionRecord
 import com.autobots.camera.DetectorBackend
+import com.autobots.camera.detection.DetectorAvailability
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
 import com.autobots.camera.SessionSource
@@ -17,6 +18,7 @@ import com.autobots.camera.formatChunkBytes
 import com.autobots.camera.load.DeviceLoadReader
 import com.autobots.camera.load.DeviceLoadSnapshot
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +32,8 @@ data class OperatorUiState(
     val streamResolution: StreamResolution = StreamResolution.Fhd,
     val extractionTarget: ExtractionTarget = ExtractionTarget.Face,
     val detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
+    /** Backend → why it cannot run here, or null when it can. See [DetectorAvailability]. */
+    val detectorUnavailable: Map<DetectorBackend, String> = emptyMap(),
     val videoChunksRecorded: Int = 0,
     val videoQueueDepth: Int = 0,
     val facesKept: Int = 0,
@@ -56,6 +60,8 @@ data class OperatorUiState(
     val imageQueuePending: Int = 0,
     val isImporting: Boolean = false,
     val importPercent: Int = 0,
+    /** Projected chunk total while importing; 0 when unknown. */
+    val expectedChunks: Int = 0,
     val importName: String? = null,
     val importError: String? = null,
     val lastRealtimeRatio: Float = 0f,
@@ -109,7 +115,16 @@ data class OperatorUiState(
         get() {
             if (!isImporting) return ""
             val name = importName ?: "video"
-            return "Importing $name · splitting $importPercent%"
+            // Splitting spends ~95% of its time blocked on the video queue by design, so the
+            // percentage is reported as a chunk count with an explicit wait state rather than
+            // a number that looks frozen.
+            val total = if (expectedChunks > 0) "~$expectedChunks" else "?"
+            return buildString {
+                append("Importing $name · split $videoChunksRecorded/$total chunks")
+                if (videoQueueDepth >= CapturePipelineCoordinator.VIDEO_QUEUE_CAPACITY) {
+                    append("\nwaiting for extractor")
+                }
+            }
         }
 
     /** Can Worker 2 keep up, and how long until a photo lands? Live capture only. */
@@ -155,6 +170,22 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         private set
 
     init {
+        // Off the main thread: probing the GPU delegate touches the driver.
+        viewModelScope.launch(Dispatchers.Default) {
+            val unavailable = DetectorAvailability.checkAll(getApplication())
+                .mapNotNull { (backend, reason) -> reason?.let { backend to it } }
+                .toMap()
+            _state.update { state ->
+                // Never leave the picker pointing at something that cannot run.
+                val fallback = if (state.detectorBackend in unavailable) {
+                    DetectorBackend.DEFAULT
+                } else {
+                    state.detectorBackend
+                }
+                state.copy(detectorUnavailable = unavailable, detectorBackend = fallback)
+            }
+        }
+
         deviceLoadReader.start(::applyDeviceLoad)
         viewModelScope.launch {
             while (isActive) {
@@ -223,6 +254,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 pipelinePaused = false,
                 recordingProgress = ChunkRecordingProgress(),
                 isProcessing = false,
+                expectedChunks = 0,
                 processingPercent = 0,
                 currentChunkPercent = 0,
                 chunksProcessed = 0,
@@ -269,11 +301,14 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 isImporting = true,
                 importName = displayName,
                 importPercent = 0,
+                expectedChunks = 0,
                 videoChunksRecorded = 0,
                 videoQueueDepth = 0,
                 facesKept = 0,
                 facesSkipped = 0,
                 chunksProcessed = 0,
+                processingPercent = 0,
+                currentChunkPercent = 0,
                 imageQueuePending = 0,
                 lastRealtimeRatio = 0f,
                 avgPhotoLatencyMs = 0,
@@ -367,6 +402,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     /** Bench control: pick the detector, import the same clip, compare `perf_report.json`. */
     fun setDetectorBackend(backend: DetectorBackend) {
         if (_state.value.isCapturing) return
+        if (_state.value.detectorUnavailable.containsKey(backend)) return
         // Applied when the coordinator is built for the next session; the chip is disabled
         // while capturing, so there is never a live pipeline to retarget.
         _state.update { it.copy(detectorBackend = backend) }
@@ -390,12 +426,20 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 storageFreeMb = stats.storageFreeMb,
                 pipelinePaused = stats.pipelinePaused,
                 isProcessing = stats.isProcessing,
-                processingPercent = stats.overallProcessingPercent,
+                // The denominator is a projection while splitting and can still grow by a
+                // chunk or two, which would otherwise walk the bar backwards. Progress within
+                // a job only ever moves forward; the reset paths put it back to 0.
+                processingPercent = if (stats.isImporting || stats.isProcessing) {
+                    maxOf(it.processingPercent, stats.overallProcessingPercent)
+                } else {
+                    stats.overallProcessingPercent
+                },
                 currentChunkPercent = stats.currentChunkPercent,
                 processingChunkName = stats.processingChunkName,
                 imageQueuePending = stats.imageQueuePending,
                 isImporting = stats.isImporting,
                 importPercent = stats.importPercent,
+                expectedChunks = stats.expectedChunks,
                 importName = stats.importName ?: it.importName,
                 lastRealtimeRatio = stats.lastRealtimeRatio,
                 avgPhotoLatencyMs = stats.avgPhotoLatencyMs,

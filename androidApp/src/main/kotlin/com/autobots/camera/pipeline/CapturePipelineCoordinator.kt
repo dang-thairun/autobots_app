@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.autobots.camera.DetectorBackend
+import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.ChunkProcessStatus
 import com.autobots.camera.ChunkRecord
@@ -115,6 +116,14 @@ class CapturePipelineCoordinator(
     private var importing = false
     private var importPercent = 0
     private var importName: String? = null
+
+    /**
+     * Projected chunk total for an import, so the UI can show one smooth bar while the
+     * splitter is blocked on queue backpressure. Projected from the splitter's timeline
+     * percentage at each segment boundary, then pinned to the real count when the split ends.
+     * Monotonic on purpose: the bar must never walk backwards.
+     */
+    private var expectedChunks = 0
     private val chunkIndexSeq = AtomicInteger(0)
     /** Guards against writing the session log more than once per session. */
     private val drainNotified = AtomicBoolean(false)
@@ -252,6 +261,7 @@ class CapturePipelineCoordinator(
         val splitStartMs = System.currentTimeMillis()
         importing = true
         importPercent = 0
+        expectedChunks = 0
         importName = displayName
         publishStats()
 
@@ -321,6 +331,9 @@ class CapturePipelineCoordinator(
             importing = false
             importPercent = 0
             importName = null
+            // Split is done, so the projection is replaced by the real count and the bar's
+            // denominator stops moving for the rest of the extract.
+            expectedChunks = chunksRecorded
             publishStats()
             maybeNotifyDrainComplete()
         }
@@ -354,6 +367,17 @@ class CapturePipelineCoordinator(
         awaitingRecorderFinalize = false
         chunksRecorded++
         videoPending.incrementAndGet()
+        if (importing) {
+            // Segment boundaries are the only points where both counters are consistent:
+            // the splitter has just finished writing this chunk, so importPercent is the
+            // fraction of the source timeline these chunksRecorded cover.
+            val projected = if (importPercent in 1..99) {
+                (chunksRecorded * 100 + importPercent - 1) / importPercent
+            } else {
+                chunksRecorded
+            }
+            expectedChunks = maxOf(expectedChunks, projected, chunksRecorded)
+        }
         chunkStartWallMs[meta.index] = meta.recordedAtEpochMs
         chunkQueuedWallMs[meta.index] = System.currentTimeMillis()
         chunkRecordDurationMs[meta.index] = meta.recordDurationMs
@@ -580,6 +604,12 @@ class CapturePipelineCoordinator(
         }
         writeSessionFile(session, LocalDeliveryWriter.SESSION_LOG_FILE, text)
 
+        // Written before the perf report so a compare-mode session still leaves its
+        // observations behind even if perf collection is off.
+        frameProcessor.comparisonReport()?.let {
+            writeSessionFile(session, DetectorComparison.FILE_NAME, it)
+        }
+
         val report = buildPerfReport(session) ?: return
         writeSessionFile(session, PerfReport.FILE_NAME, report)
     }
@@ -661,6 +691,8 @@ class CapturePipelineCoordinator(
             SessionSource.LiveCapture -> SessionAlbumNaming.liveFolder(startedAt)
         }
         deliveryWriter.albumSubfolder = albumFolder
+        // Live capture has no knowable total; the bar falls back to chunksRecorded.
+        expectedChunks = 0
         drainNotified.set(false)
         startDrainWatchdog()
         perfReport.markStart(startedAt)
@@ -794,6 +826,7 @@ class CapturePipelineCoordinator(
                 isImporting = importing,
                 importPercent = importPercent,
                 importName = importName,
+                expectedChunks = expectedChunks,
                 lastRealtimeRatio = lastRealtimeRatio,
                 avgPhotoLatencyMs = synchronized(this@CapturePipelineCoordinator) {
                     if (photoLatencyCount == 0) 0L else photoLatencySumMs / photoLatencyCount

@@ -41,10 +41,34 @@ object DetectorProbe {
     fun run(context: Context): List<Result> {
         val bitmap = syntheticFrame()
         return try {
-            DetectorBackend.entries.map { probe(context, it, bitmap) }
-                .also { results -> CamPerf.log { table(results) } }
+            DetectorBackend.entries
+                .filter { it != DetectorBackend.CompareAll }
+                .map { probe(context, it, bitmap) }
+                .also { results ->
+                    CamPerf.log { table(results) }
+                    CamPerf.log { compareModeCheck(context, bitmap) }
+                }
         } finally {
             bitmap.recycle()
+        }
+    }
+
+    /**
+     * Compare mode holds every backend open at once, which nothing else does — a GPU delegate
+     * and a QNN HTP context live in the same process, and either could refuse. Cheaper to find
+     * out here than four minutes into an import.
+     */
+    private fun compareModeCheck(context: Context, frame: Bitmap): String {
+        val comparison = DetectorComparison.create(context, DetectorBackend.MlKitFast)
+        return try {
+            runBlocking { comparison.record(chunkIndex = 0, ptsUs = 0L, detectBitmap = frame) }
+            val rendered = comparison.render()
+            "compare mode OK — all backends coexist, report renders (${rendered.length} chars)"
+        } catch (t: Throwable) {
+            Log.e(TAG, "compare mode failed", t)
+            "compare mode FAILED — ${t.message ?: t::class.java.simpleName}"
+        } finally {
+            runCatching { comparison.close() }
         }
     }
 

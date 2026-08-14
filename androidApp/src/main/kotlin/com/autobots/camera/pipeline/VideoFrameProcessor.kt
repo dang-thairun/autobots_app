@@ -8,12 +8,14 @@ import android.util.Log
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.StreamResolution
+import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.detection.OfflineFaceDetector
 import com.autobots.camera.detection.SubjectFaceDetector
 import com.autobots.camera.detection.OfflinePoseDetector
 import com.autobots.camera.detection.PoseDetectionResult
 import com.autobots.camera.perf.CamPerf
+import com.autobots.camera.perf.DvfsProbe
 import com.autobots.camera.perf.PerfReport
 import com.autobots.camera.perf.StageStats
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +71,18 @@ data class VideoProcessResult(
  *
  * `queue_wait` and `worker_idle` in `perf_report.json` say which side is the limit:
  * `queue_wait` high → consumers are behind, raise [DETECT_WORKERS]. `worker_idle` high →
- * the decoder is the limit, and only `yuv_jpeg_argb` work can help.
+ * the decoder is the limit, and only producer-side work can help.
+ *
+ * **0.1.4 answered that question and then acted on it.** Across TC-08/09/10 `worker_idle`
+ * ran at 211–220 ms per frame while the producer's `yuv_jpeg_argb` was 89–92% of wall: the
+ * consumers were idle almost the whole session, and swapping ML Kit for the NPU (−34% on
+ * `detect`) bought back only 4% of wall because it made an already-idle side idler.
+ *
+ * The fix is not to speed the producer up but to **move work off it**. Frames now cross the
+ * channel compressed ([SampledFrame]); the ARGB decode happens on a worker, at detect
+ * resolution first, and at full resolution only for the ~25% of frames that pass the size
+ * gate. `jpeg_argb_detect` and `jpeg_argb_full` are the consumer-side cost of that, and
+ * `yuv_nv21` + `nv21_jpeg` are what is left on the producer.
  */
 class VideoFrameProcessor(
     private val outputDir: File,
@@ -78,6 +91,9 @@ class VideoFrameProcessor(
     /** One detector pair per detect worker — see the class doc on why they are not shared. */
     private var detectors: List<DetectorSet> = emptyList()
     private var detectorsBackend: DetectorBackend? = null
+
+    /** Non-null only in [DetectorBackend.CompareAll]; see [DetectorComparison]. */
+    private var comparison: DetectorComparison? = null
 
     private var profile = ProcessProfile.forResolution(StreamResolution.Fhd)
     private var target = ExtractionTarget.Face
@@ -115,6 +131,10 @@ class VideoFrameProcessor(
         backend = detectorBackend
         ensureDetectors(detectorBackend)
 
+        // Before the pipeline starts, so the reading is of an idle-ish core rather than of
+        // this chunk's own contention — the point is to compare chunks, not to profile one.
+        val cpuProbeNs = DvfsProbe.measureNs()
+
         val started = System.currentTimeMillis()
         perf = CamPerf.stageStats()
         sharpnessSamples.clear()
@@ -130,11 +150,11 @@ class VideoFrameProcessor(
         val estimatedFrames = estimateFrameCount(file, sampleIntervalMs)
         var scannedFrames = 0
 
-        // Bounded so the decoder cannot run ahead of detection and pile up 4K bitmaps.
-        // onUndeliveredElement covers cancellation: anything still in flight gets recycled.
-        val frames = Channel<DecodedFrame>(
+        // Bounded so the decoder cannot run ahead of detection without limit.
+        // onUndeliveredElement covers cancellation: anything still in flight gets released.
+        val frames = Channel<SampledFrame>(
             capacity = FRAME_QUEUE_CAPACITY,
-            onUndeliveredElement = { runCatching { it.bitmap.recycle() } },
+            onUndeliveredElement = { it.release() },
         )
 
         val sampleStats = coroutineScope {
@@ -147,10 +167,10 @@ class VideoFrameProcessor(
             // than occupying one of Default's cores that the workers need.
             val stats = try {
                 withContext(Dispatchers.IO) {
-                    VideoFrameSampler.sampleFrames(file, sampleIntervalMs, perf) { ts, bitmap, rotation ->
+                    VideoFrameSampler.sampleFrames(file, sampleIntervalMs, perf) { frame ->
                         scannedFrames++
                         onProgress(((scannedFrames * 100) / estimatedFrames).coerceIn(0, 99))
-                        frames.send(DecodedFrame(ts, bitmap, rotation))
+                        frames.send(frame)
                     }
                 }
             } finally {
@@ -202,6 +222,7 @@ class VideoFrameProcessor(
                     detectWorkers = detectors.size,
                     frameQueueCapacity = FRAME_QUEUE_CAPACITY,
                     downscaleMode = if (MULTISTEP_DOWNSCALE) "halving" else "single",
+                    cpuProbeNs = cpuProbeNs,
                     detector = detectorDiagnostics(),
                     stages = perf?.snapshot().orEmpty(),
                     frames = synchronized(frameLog) { ArrayList(frameLog) },
@@ -222,16 +243,38 @@ class VideoFrameProcessor(
      * Detect workers each need their own ML Kit clients, and loading those models is not
      * cheap — build them once and keep them until the accuracy mode actually changes.
      */
+    /**
+     * Comparison mode runs on a **single** worker. Each worker owns its detectors, so N
+     * workers would mean N of every backend — several QNN contexts and GPU delegates at once,
+     * for a mode whose wall time is not being measured anyway.
+     */
+    private fun workerCountFor(backend: DetectorBackend): Int =
+        if (backend == DetectorBackend.CompareAll) 1 else DETECT_WORKERS
+
     private fun ensureDetectors(backend: DetectorBackend) {
-        if (detectorsBackend == backend && detectors.size == DETECT_WORKERS) return
+        val workers = workerCountFor(backend)
+        if (detectorsBackend == backend && detectors.size == workers) return
         detectors.forEach { it.close() }
-        detectors = List(DETECT_WORKERS) { DetectorSet(appContext, backend) }
+        comparison?.close()
+
+        if (backend == DetectorBackend.CompareAll) {
+            // ML Kit FAST stays the decision-maker, so kept/rejected counts remain directly
+            // comparable with every earlier release.
+            detectors = List(workers) { DetectorSet(appContext, COMPARE_PRIMARY) }
+            comparison = DetectorComparison.create(appContext, COMPARE_PRIMARY)
+        } else {
+            detectors = List(workers) { DetectorSet(appContext, backend) }
+            comparison = null
+        }
         detectorsBackend = backend
     }
 
+    /** Rendered `detector_compare.json`, or null when the session was not in compare mode. */
+    fun comparisonReport(): String? = comparison?.render()
+
     private suspend fun runDetectWorker(
         set: DetectorSet,
-        frames: ReceiveChannel<DecodedFrame>,
+        frames: ReceiveChannel<SampledFrame>,
         candidates: MutableList<SavedCandidate>,
         rejects: RejectStats,
         skipped: AtomicInteger,
@@ -247,7 +290,6 @@ class VideoFrameProcessor(
                 val candidate = evaluateFrame(set, frame, rejects)
                 if (candidate == null) {
                     skipped.incrementAndGet()
-                    frame.bitmap.recycle()
                     continue
                 }
                 // saveFrame recycles the bitmap, so memory stays flat regardless of yield.
@@ -261,7 +303,10 @@ class VideoFrameProcessor(
                 // One bad frame must not take the worker — and therefore the chunk — down.
                 Log.w(TAG, "Frame ${frame.timestampUs}us failed", t)
                 skipped.incrementAndGet()
-                runCatching { frame.bitmap.recycle() }
+            } finally {
+                // Every bitmap this frame handed out is owned by the code above, which has
+                // recycled it by now; this only releases what the frame itself still holds.
+                frame.release()
             }
         }
     }
@@ -313,7 +358,7 @@ class VideoFrameProcessor(
 
     private suspend fun evaluateFrame(
         set: DetectorSet,
-        frame: DecodedFrame,
+        frame: SampledFrame,
         rejects: RejectStats,
     ): FrameCandidate? {
         return when (target) {
@@ -324,13 +369,13 @@ class VideoFrameProcessor(
 
     private suspend fun evaluateFaceFrame(
         set: DetectorSet,
-        frame: DecodedFrame,
+        frame: SampledFrame,
         rejects: RejectStats,
     ): FrameCandidate? {
-        val raw = frame.bitmap
         val timestampUs = frame.timestampUs
-        val detectBmp = CamPerf.timed(perf, "scale_for_detect") {
-            uprightDetectBitmap(raw, frame.rotationDegrees)
+        val detectBmp = uprightDetectBitmap(frame) ?: run {
+            logFrame(timestampUs, "decode_failed")
+            return null
         }
         val faces = try {
             CamPerf.timed(perf, "detect") { set.face.detect(detectBmp) }
@@ -339,10 +384,13 @@ class VideoFrameProcessor(
             emptyList()
         }
         // Size is judged in detect space, so a rejected frame never pays for a full-res rotate.
+        // Observation only, and it has to happen while the detect bitmap is still alive.
+        comparison?.record(currentChunkIndex, timestampUs, detectBmp)
+
         val largest = faces.maxByOrNull { it.height() }
         val detectWidth = detectBmp.width
         val detectHeight = detectBmp.height
-        if (detectBmp !== raw) detectBmp.recycle()
+        detectBmp.recycle()
 
         if (largest == null) {
             rejects.noSubject.incrementAndGet()
@@ -350,13 +398,17 @@ class VideoFrameProcessor(
             return null
         }
         val subjectRatio = largest.height().toFloat() / detectHeight
-        if (subjectRatio < MIN_FACE_HEIGHT_RATIO) {
+        if (subjectRatio < profile.minFaceHeightRatio) {
             rejects.tooSmall.incrementAndGet()
             logFrame(timestampUs, "too_small", subjectRatio = subjectRatio)
             return null
         }
 
-        val upright = uprightFullFrame(raw, frame.rotationDegrees)
+        // Only here, past the size gate, does the frame earn a full-resolution decode.
+        val upright = uprightFullFrame(frame) ?: run {
+            logFrame(timestampUs, "decode_failed", subjectRatio = subjectRatio)
+            return null
+        }
         val roi = mapRect(largest, upright, detectWidth, detectHeight)
         if (!isUsableRoi(roi)) {
             rejects.roiInvalid.incrementAndGet()
@@ -378,13 +430,13 @@ class VideoFrameProcessor(
 
     private suspend fun evaluatePoseFrame(
         set: DetectorSet,
-        frame: DecodedFrame,
+        frame: SampledFrame,
         rejects: RejectStats,
     ): FrameCandidate? {
-        val raw = frame.bitmap
         val timestampUs = frame.timestampUs
-        val detectBmp = CamPerf.timed(perf, "scale_for_detect") {
-            uprightDetectBitmap(raw, frame.rotationDegrees)
+        val detectBmp = uprightDetectBitmap(frame) ?: run {
+            logFrame(timestampUs, "decode_failed")
+            return null
         }
         val detection = try {
             CamPerf.timed(perf, "detect_pose") { set.pose.detect(detectBmp) }
@@ -394,7 +446,7 @@ class VideoFrameProcessor(
         }
         val detectWidth = detectBmp.width
         val detectHeight = detectBmp.height
-        if (detectBmp !== raw) detectBmp.recycle()
+        detectBmp.recycle()
 
         if (detection == null) {
             rejects.noSubject.incrementAndGet()
@@ -408,7 +460,10 @@ class VideoFrameProcessor(
             return null
         }
 
-        val upright = uprightFullFrame(raw, frame.rotationDegrees)
+        val upright = uprightFullFrame(frame) ?: run {
+            logFrame(timestampUs, "decode_failed", subjectRatio = subjectRatio)
+            return null
+        }
         val roi = mapRect(detection.torsoBounds, upright, detectWidth, detectHeight)
         if (!isUsableRoi(roi)) {
             rejects.roiInvalid.incrementAndGet()
@@ -434,29 +489,73 @@ class VideoFrameProcessor(
      * Scaling happens **before** rotation so the rotate runs on a 640px frame rather than a
      * 4K one (~52 ms → ~5 ms at UHD). The result is the same size as the pre-0.1.3
      * rotate-then-scale order, so detection sees an image of identical dimensions.
+     *
+     * Since the deferred-decode change the first reduction is done by the JPEG decoder via
+     * [sampleSizeFor] rather than by a bilinear halving pass, and the caller owns every
+     * bitmap involved — there is no shared full-resolution frame to protect any more, so the
+     * defensive copy the rotation path used to need is gone with it.
+     *
+     * @return null when the frame could not be decoded at all.
      */
-    private fun uprightDetectBitmap(raw: Bitmap, rotationDegrees: Int): Bitmap {
-        val swapsAxes = rotationDegrees == 90 || rotationDegrees == 270
-        val uprightWidth = if (swapsAxes) raw.height else raw.width
+    private fun uprightDetectBitmap(frame: SampledFrame): Bitmap? {
+        val swapsAxes = frame.rotationDegrees == 90 || frame.rotationDegrees == 270
+        val uprightWidth = if (swapsAxes) frame.height else frame.width
         val target = profile.detectBitmapWidth
 
         val scaled = if (uprightWidth <= target) {
-            raw
+            // Already at or below detect size — nothing to reduce, so this is the full frame.
+            CamPerf.timed(perf, "jpeg_argb_detect") { frame.decode(1) } ?: return null
         } else {
             val factor = target.toFloat() / uprightWidth
-            downscale(
-                raw,
-                max(1, (raw.width * factor).toInt()),
-                max(1, (raw.height * factor).toInt()),
-            )
+            val targetWidth = max(1, (frame.width * factor).toInt())
+            val targetHeight = max(1, (frame.height * factor).toInt())
+            val sampleSize = sampleSizeFor(frame.width, frame.height, targetWidth, targetHeight)
+            val decoded = CamPerf.timed(perf, "jpeg_argb_detect") {
+                frame.decode(sampleSize)
+            } ?: return null
+            CamPerf.timed(perf, "scale_for_detect") {
+                downscale(decoded, targetWidth, targetHeight).also {
+                    if (it !== decoded) decoded.recycle()
+                }
+            }
         }
-        if (rotationDegrees == 0) return scaled
-        if (scaled === raw) {
-            // rotate() recycles its input, and the caller still owns the raw frame.
-            val copy = raw.copy(raw.config ?: Bitmap.Config.ARGB_8888, false) ?: return raw
-            return VideoFrameSampler.rotate(copy, rotationDegrees)
+        if (frame.rotationDegrees == 0) return scaled
+        return VideoFrameSampler.rotate(scaled, frame.rotationDegrees)
+    }
+
+    /**
+     * The JPEG decoder's share of the reduction to detect size.
+     *
+     * `BitmapFactory.inSampleSize` reduces by a power of two during decode, so those passes
+     * cost nothing beyond the decode that had to happen anyway — where [downscale]'s halving
+     * loop had to materialise a full-resolution ARGB bitmap first and then halve it.
+     *
+     * The factor returned is **exactly the one the halving loop would have applied**: the
+     * largest power of two that still leaves the result at or above the target in both axes.
+     * At UHD portrait (3840×2160 → 1137×640) both give 1920×1080, and the remaining 1.69×
+     * step runs through the same `createScaledBitmap` as before.
+     *
+     * What is *not* identical is the pixels. libjpeg reduces in the DCT domain, which is a
+     * different filter from bilinear halving — comparable quality, not the same output. So
+     * detect verdicts can shift by a frame or two on this change alone, and a run that wants
+     * to attribute a `kept` delta has to hold this constant. `downscaleMode` in
+     * `perf_report.json` records which path produced a given report.
+     *
+     * Returns 1 when [MULTISTEP_DOWNSCALE] is off, so TC-05 still measures what it was
+     * written to measure: one bilinear step from the full-resolution frame.
+     */
+    private fun sampleSizeFor(
+        srcWidth: Int,
+        srcHeight: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+    ): Int {
+        if (!MULTISTEP_DOWNSCALE) return 1
+        var sample = 1
+        while (srcWidth / (sample * 2) >= targetWidth && srcHeight / (sample * 2) >= targetHeight) {
+            sample *= 2
         }
-        return VideoFrameSampler.rotate(scaled, rotationDegrees)
+        return sample
     }
 
     /**
@@ -495,10 +594,19 @@ class VideoFrameProcessor(
         return out
     }
 
-    /** Upright full-resolution frame — only frames that passed the size gate pay for this. */
-    private fun uprightFullFrame(raw: Bitmap, rotationDegrees: Int): Bitmap {
-        if (rotationDegrees == 0) return raw
-        return CamPerf.timed(perf, "rotate") { VideoFrameSampler.rotate(raw, rotationDegrees) }
+    /**
+     * Upright full-resolution frame — only frames that passed the size gate pay for this.
+     *
+     * `jpeg_argb_full` is the cost the deferred decode is trying to avoid: measured on
+     * run4mins it should fire on ~25% of sampled frames rather than 100%, and on a detect
+     * worker rather than on the decoder thread.
+     */
+    private fun uprightFullFrame(frame: SampledFrame): Bitmap? {
+        val full = CamPerf.timed(perf, "jpeg_argb_full") { frame.decode(1) } ?: return null
+        if (frame.rotationDegrees == 0) return full
+        return CamPerf.timed(perf, "rotate") {
+            VideoFrameSampler.rotate(full, frame.rotationDegrees)
+        }
     }
 
     /**
@@ -567,6 +675,8 @@ class VideoFrameProcessor(
     fun close() {
         detectors.forEach { it.close() }
         detectors = emptyList()
+        comparison?.close()
+        comparison = null
         detectorsBackend = null
     }
 
@@ -611,13 +721,6 @@ class VideoFrameProcessor(
             runCatching { retriever.release() }
         }
     }
-
-    /** A decoded frame in flight between the sampler thread and a detect worker. */
-    private data class DecodedFrame(
-        val timestampUs: Long,
-        val bitmap: Bitmap,
-        val rotationDegrees: Int,
-    )
 
     /**
      * ML Kit clients for one detect worker. Both are lazy: a Face session never pays to load
@@ -680,6 +783,8 @@ class VideoFrameProcessor(
     private data class ProcessProfile(
         val detectBitmapWidth: Int,
         val minSharpness: Double,
+        /** Smallest face, as a fraction of the detect bitmap's height, worth keeping. */
+        val minFaceHeightRatio: Float,
     ) {
         companion object {
             fun forResolution(resolution: StreamResolution): ProcessProfile {
@@ -687,10 +792,12 @@ class VideoFrameProcessor(
                     StreamResolution.Fhd -> ProcessProfile(
                         detectBitmapWidth = 640,
                         minSharpness = MIN_SHARPNESS,
+                        minFaceHeightRatio = MIN_FACE_HEIGHT_RATIO_FHD,
                     )
                     StreamResolution.Uhd -> ProcessProfile(
                         detectBitmapWidth = 640,
                         minSharpness = MIN_SHARPNESS_UHD,
+                        minFaceHeightRatio = MIN_FACE_HEIGHT_RATIO_UHD,
                     )
                 }
             }
@@ -711,15 +818,27 @@ class VideoFrameProcessor(
          */
         private const val DETECT_WORKERS = 2
 
+        /** Whose verdict the pipeline follows in [DetectorBackend.CompareAll]. */
+        private val COMPARE_PRIMARY = DetectorBackend.MlKitFast
+
         /**
          * Frames buffered between the decoder and the workers.
          *
-         * Each one is a full-resolution ARGB_8888 bitmap — ~33 MB at UHD — so this is the
-         * knob that decides the pipeline's memory ceiling, not a throughput knob. Two is
-         * enough to keep the workers fed across a slow frame without holding a queue of 4K
-         * buffers the decoder also needs.
+         * Was 2, and had to be: each slot held a full-resolution ARGB_8888 bitmap — ~33 MB at
+         * UHD — which made this the pipeline's memory ceiling rather than a throughput knob.
+         *
+         * Since frames cross the channel as JPEG ([SampledFrame]) a slot costs ~2 MB, and the
+         * reason to keep it at 2 is gone. It has to grow, too: the workers now do the ARGB
+         * decodes, and the full-resolution one fires on the ~25% of frames that pass the size
+         * gate — bursty work. With two slots the decoder stalls behind a burst instead of
+         * running ahead through it. Six slots is ~12 MB and covers a run of consecutive
+         * keepers, which is exactly what a subject walking past the lens produces.
+         *
+         * This is the second variable in one change; `frameQueueCapacity` is recorded per
+         * chunk in `perf_report.json` so a run can be attributed, and setting it back to 2
+         * isolates the deferred decode on its own.
          */
-        private const val FRAME_QUEUE_CAPACITY = 2
+        private const val FRAME_QUEUE_CAPACITY = 6
 
         /** Halve-then-scale for the detect bitmap. See [downscale]. */
         private const val MULTISTEP_DOWNSCALE = true
@@ -744,7 +863,28 @@ class VideoFrameProcessor(
          * Must stay above [OfflineFaceDetector]'s own `setMinFaceSize`, or ML Kit filters
          * the face out before this check ever sees it.
          */
-        private const val MIN_FACE_HEIGHT_RATIO = 0.035f
+        /**
+         * Smallest face worth a photo, as a fraction of the **detect bitmap's** height — so the
+         * same number means different pixel counts in the delivered JPEG depending on the source,
+         * which is why it is per-resolution like [MIN_SHARPNESS].
+         *
+         * 0.1.4 measured the whole distribution (`detector_compare.json`, 812 frames with a face
+         * at UHD) and found 0.035 sitting on the **steepest slope of it**: 49 frames per 0.001,
+         * against 28–35 anywhere else. A threshold there is maximally sensitive to how a given
+         * model draws its box, and that is not a hypothetical — ML Kit ACCURATE draws boxes 7.1%
+         * taller than FAST, which at that slope is worth ~120 frames and was misread as ACCURATE
+         * "seeing more". Only 5 of its extra frames were faces FAST genuinely missed.
+         *
+         * UHD moves to 0.030: off the cliff (36 frames per 0.001), and the swing from swapping
+         * detectors drops from ~30% of passing frames to ~12%. Costs nothing in quality that
+         * matters — 0.030 x 1137 px detect x (2160/640) is still a **115 px face** in the saved
+         * 4K frame. It takes frames past the size gate from 404 to 623 (+54%).
+         *
+         * FHD is left at 0.035 because it was **not measured**. The same ratio there is only ~58 px
+         * in a 1080p frame, so the UHD number cannot simply be copied across.
+         */
+            private const val MIN_FACE_HEIGHT_RATIO_UHD = 0.030f
+        private const val MIN_FACE_HEIGHT_RATIO_FHD = 0.035f
         private const val MIN_TORSO_HEIGHT_RATIO = 0.25f
         const val MIN_SHARPNESS = 80.0
         const val MIN_SHARPNESS_UHD = 65.0

@@ -23,7 +23,7 @@ class PerfReport {
     /** One sampled frame and why it lived or died. */
     data class FrameDiag(
         val ptsUs: Long,
-        /** candidate · no_subject · too_small · too_soft */
+        /** candidate · no_subject · too_small · too_soft · roi_invalid · decode_failed */
         val outcome: String,
         val sharpness: Double?,
         val subjectRatio: Float?,
@@ -50,6 +50,11 @@ class PerfReport {
         val frameQueueCapacity: Int,
         /** "halving" or "single" — how the detect bitmap was downscaled. */
         val downscaleMode: String,
+        /**
+         * Fixed-workload CPU probe taken just before this chunk started. See [DvfsProbe] —
+         * compare it *across* chunks, never in absolute terms.
+         */
+        val cpuProbeNs: Long,
         /**
          * What the detector reports about itself: requested backend, the backend actually in
          * use after any fallback, and tile count. Recorded so a session that quietly fell back
@@ -87,6 +92,8 @@ class PerfReport {
         val thermalLevel: Int,
         val usedRamMb: Long,
         val availRamMb: Long,
+        /** 0 when the platform would not report it — see [DeviceLoadSnapshot.cpuMaxFreqKhz]. */
+        val cpuMaxFreqKhz: Int,
     )
 
     private val chunks = Collections.synchronizedList(mutableListOf<ChunkEntry>())
@@ -148,6 +155,7 @@ class PerfReport {
                 thermalLevel = snapshot.thermalLevel,
                 usedRamMb = snapshot.usedRamMb,
                 availRamMb = snapshot.availRamMb,
+                cpuMaxFreqKhz = snapshot.cpuMaxFreqKhz,
             ),
         )
     }
@@ -208,7 +216,38 @@ class PerfReport {
                 "realtimeRatio",
                 if (recorded > 0) round3(processed.toDouble() / recorded) else JSONObject.NULL,
             )
+            put("cpuProbe", cpuProbeJson(diags))
             put("stages", mergedStagesJson(diags))
+        }
+    }
+
+    /**
+     * The session's DVFS drift, as one number to check before reading anything else.
+     *
+     * `driftPercent` is the last chunk's probe against the first: positive means the CPU got
+     * slower over the session, so later chunks were measured on a slower machine. Anything
+     * near the ~23% TC-06 saw means per-chunk trends in this report are not attributable to
+     * the pipeline, and a comparison against another session is only safe if that session
+     * drifted the same way.
+     */
+    private fun cpuProbeJson(diags: List<ChunkDiag>): JSONObject {
+        val probes = diags.map { it.cpuProbeNs }.filter { it > 0L }
+        return JSONObject().apply {
+            put("n", probes.size)
+            if (probes.isEmpty()) return@apply
+            put("firstMs", round3(probes.first() / 1e6))
+            put("lastMs", round3(probes.last() / 1e6))
+            put("minMs", round3((probes.min()) / 1e6))
+            put("maxMs", round3((probes.max()) / 1e6))
+            put(
+                "driftPercent",
+                round3((probes.last() - probes.first()) * 100.0 / probes.first()),
+            )
+            put(
+                "note",
+                "fixed CPU workload timed before each chunk. Compare across chunks only; " +
+                    "driftPercent well above 0 means later chunks ran on a slower CPU.",
+            )
         }
     }
 
@@ -291,6 +330,7 @@ class PerfReport {
                         put("detectWorkers", diag.detectWorkers)
                         put("frameQueueCapacity", diag.frameQueueCapacity)
                         put("downscaleMode", diag.downscaleMode)
+                        put("cpuProbeMs", round3(diag.cpuProbeNs / 1e6))
                         put(
                             "detector",
                             JSONObject().apply { diag.detector.forEach { (k, v) -> put(k, v) } },
@@ -391,6 +431,7 @@ class PerfReport {
                     put("thermalLevel", sample.thermalLevel)
                     put("usedRamMb", sample.usedRamMb)
                     put("availRamMb", sample.availRamMb)
+                    if (sample.cpuMaxFreqKhz > 0) put("cpuMaxFreqKhz", sample.cpuMaxFreqKhz)
                 },
             )
         }
@@ -412,13 +453,32 @@ class PerfReport {
          * `mlkit_pose` → `detect_pose`): one stage name across every backend, which is what
          * makes two runs directly comparable. Chunks gained `detector`, and the session gained
          * `detectorBackend`.
+         *
+         * 4 — the ARGB decode moved off the decoder thread, so **`yuv_jpeg_argb` no longer
+         * exists**. The producer now reports `yuv_nv21` + `nv21_jpeg`, and the two decodes it
+         * used to cover appear on the consumer side as `jpeg_argb_detect` (every frame, at
+         * detect resolution) and `jpeg_argb_full` (only frames past the size gate). A schema-3
+         * `yuv_jpeg_argb` share is not comparable with any single schema-4 stage; the nearest
+         * equivalent is the sum of all four. Chunks also gained `cpuProbeMs` and totals gained
+         * `cpuProbe`, so DVFS drift is visible instead of inferred.
          */
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
         const val FILE_NAME = "perf_report.json"
 
-        /** Stages timed on the decoder thread; everything else runs on a detect worker. */
-        private val PRODUCER_STAGES =
-            setOf("decode", "yuv_jpeg_argb", "surface_rgba", "queue_wait")
+        /**
+         * Stages timed on the decoder thread; everything else runs on a detect worker.
+         *
+         * `yuv_jpeg_argb` is kept here so a schema-3 report re-rendered by this build still
+         * attributes its stages to the right thread.
+         */
+        private val PRODUCER_STAGES = setOf(
+            "decode",
+            "yuv_nv21",
+            "nv21_jpeg",
+            "yuv_jpeg_argb",
+            "surface_rgba",
+            "queue_wait",
+        )
 
         /** Backstops so a runaway session cannot grow the file without bound. */
         private const val MAX_EVENTS = 4000

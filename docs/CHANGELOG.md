@@ -30,6 +30,21 @@ invariant ทั้งสามยังตรงเป๊ะที่ 302 / 579
 
 **ราคาของการทับซ้อน:** ทุก stage ช้าลงต่อเฟรม 17–78% จากการแย่ง CPU/memory bandwidth (`rotate` +78% · `mlkit_face` +29% · `yuv_jpeg_argb` +17%) แต่ wall ยังลง 32% — overlap ชนะ contention ขาดลอย เพดานทฤษฎี 1.09× จึงไปไม่ถึง
 
+### เทียบ backend แบบ end-to-end — TC-08/09/10 · คลิปเดียวกัน เปลี่ยนแค่ chip เดียว
+
+| | ML Kit FAST | LiteRT GPU | LiteRT NPU |
+|--|--|--|--|
+| wall clock | **376.6 s** | 398.9 s | 383.3 s |
+| `realtimeRatio` | ~1.40 | 1.489 | **1.430** |
+| `kept` | 124 | **135** | 134 |
+| `detect` avg | — | 60.3 ms | **39.8 ms** |
+
+**NPU เร็วกว่า GPU 34% ที่ inference แต่ wall ลดแค่ 4%** — ประหยัดเวลา consumer ไป 47 วินาที ได้ wall คืนมา 16 วินาที เพราะ `yuv_jpeg_argb` ยืนที่ **92% ของ wall ทั้งสองรอบ** และ `worker_idle` 211–220 ms/frame บอกว่า detect worker ว่างเกินครึ่งเวลาอยู่แล้ว → **การเพิ่ม `DETECT_WORKERS` หรือทำ chunk ขนานไม่ช่วยอะไร** (ปิดคำถามนั้น)
+
+- 🐛 **GPU delegate warm-up 2.5 วินาที** — `detect` max 2,464.7 ms ที่เฟรมแรก เทียบ NPU 313.3 ms ทำให้ chunk 1 ช้ากว่า 3 วินาทีจากการ warm-up ล้วนๆ
+- **GPU กับ NPU คือโมเดลเดียวกันจริง** — reject ทุกช่องต่างกันไม่ถึง 0.2% (`noSubject` 1558 vs 1561) ยืนยันว่า JNI shim ป้อนพิกเซลชุดเดียวกัน · ส่วน ML Kit ได้หน้าน้อยกว่า LiteRT 8% จากเฟรมชุดเดียวกัน
+- ⚠️ **สามรอบรันติดกันไม่ได้พักเครื่อง** — DVFS drift 23%/session ที่ TC-06 เจอไว้ยังไม่ถูกควบคุม ระยะห่าง 4% ระหว่าง ML Kit กับ NPU จึงยังสรุปไม่ได้ ต้องวัดซ้ำแบบสลับลำดับ
+
 ### Why
 
 v0.1.3 จบที่ `realtimeRatio` 2.196× และสรุปว่าทางเดียวที่เหลือคือแก้ `yuv_jpeg_argb` (49.5%) ซึ่งลองแล้วล้มเหลว ข้อสรุปนั้นมองข้ามไปว่า **`yuv_jpeg_argb` ไม่ได้ทำงานพร้อมกับอะไรเลย** — `runBlocking { onFrame(...) }` ในลูป decode ทำให้ Worker 2 ทั้งตัวรันเรียงกับ decoder เวลาของ chunk จึงเป็น *ผลบวก* ของทั้งสองฝั่ง ทั้งที่เครื่องมี 8 คอร์และ thermal OK ตลอด
@@ -44,10 +59,24 @@ v0.1.3 จบที่ `realtimeRatio` 2.196× และสรุปว่าท
 | **Instrumentation** | stage ใหม่ `worker_idle` · `decoder_blocked` → `queue_wait` | คู่นี้บอกตรงๆ ว่าฝั่งไหนคือคอขวด: `queue_wait` สูง → เพิ่ม worker · `worker_idle` สูง → มีแต่งาน `yuv_jpeg_argb` ที่ช่วยได้ |
 | **Instrumentation** | 🐛 `sharePercent` หารด้วย wall clock จริงแทนผลบวกของ stage · stage ติดป้าย `thread` · `SCHEMA_VERSION` 1 → **2** | `NESTED_STAGES` ของ v0.1.3 **ตก `rotate`** ทำให้ตัวหารเฟ้อ ~5% และ `sharePercent` ทุกตัวใน v0.1.3 ต่ำกว่าจริง วิธีเดิมต้องรู้ว่า stage ไหนซ้อนใน stage ไหน ซึ่งพลาดมาสองครั้งแล้วและใช้ไม่ได้อีกหลังแยกเธรด |
 | **Instrumentation** | `splitDurationMs` แยกเป็น `splitActiveMs` / `splitBlockedMs` (NA-03) | v0.1.3 รายงาน 2,912 ms กับ 455,841 ms สำหรับ remux ที่ควรใช้ ~20 s ทั้งคู่ — ค่าเดิมวัดทั้ง pipeline ไม่ใช่ความเร็ว remux |
+| **Detector** | `DetectorBackend` เลือกได้ตอน runtime — ML Kit FAST / ACCURATE · `face_det_lite` (Qualcomm AI Hub, w8a8) บน CPU / GPU / **NPU** ผ่าน JNI shim เหนือ QNN · โมเดลรับ 640×480 grayscale จึงตัดเป็น 3 tile ที่พอดี **ไม่ต้องย่อ** | เทียบ "โมเดลไหนเห็นดีกว่า" กับ "ฮาร์ดแวร์ไหนเร็วกว่า" แยกกันได้ทีละตัวแปร บนพิกเซลชุดเดียวกับที่ ML Kit เห็น |
+| **Detector** | โหมด **`Compare all`** รันทุก backend บนเฟรมเดียวกัน โดย ML Kit FAST ตัดสิน keep/reject คนเดียว → `detector_compare.json` | import ทีละ backend แยกไม่ออกระหว่าง "คนละ detector" กับ "คนละเฟรม" และตอบไม่ได้ว่า bbox decode ที่เขียนเองถูกไหม |
+| **Detector** | UI เหลือ 4 chip (FAST / GPU / NPU / Compare all) · `DetectorAvailability` disable ตัวที่เครื่องใช้ไม่ได้พร้อมบอกเหตุผล | ACCURATE จ่าย 30% ของเวลาเพื่อหน้าใหม่จริง 5 เฟรม · LiteRT CPU **ช้ากว่า ML Kit บนงานจริง** (106.8 vs 94.9 ms) ทั้งที่บนภาพสังเคราะห์เร็วกว่า · ทั้งคู่ยังอยู่ในโค้ดเป็น fallback และใน Compare all |
+| **Yield** | `minFaceHeightRatio` ย้ายเข้า `ProcessProfile` แยกตามความละเอียด · **UHD 0.035 → 0.030** · FHD คงที่ 0.035 | วัดการกระจายขนาดหน้าทั้งชุดแล้วพบ 0.035 อยู่บน**จุดชันที่สุด** (49 เฟรม/0.001 เทียบกับ 28–36 ที่อื่น) — threshold ตรงนั้นไวต่อ "โมเดลวาดกรอบยังไง" ที่สุด และเป็นคำอธิบายของ "ACCURATE recall ดีกว่า" ที่แท้จริง · 0.030 = หน้า 115 px ในภาพ 4K ยังจำได้ · FHD ยังไม่ได้วัด ratio เดียวกันคือ ~58 px เท่านั้น |
+| **UX** | 🐛 progress bar ระหว่าง import เลิกขับด้วย `importPercent` · ใช้ `overallProcessingPercent` กับตัวหาร `expectedChunks` ที่ประมาณจำนวน chunk ทั้งหมดแล้ว pin ค่าจริงเมื่อ split จบ · ข้อความเป็น `split 9/~36 chunks` + `waiting for extractor` | บาร์ค้างที่ **25-26%** ทุกครั้งที่ import คลิปยาว — ไม่ใช่บั๊กของ splitter แต่โชว์ผิดตัวเลข `splitActiveMs` เป็นแค่ 5% ของ `splitDurationMs` ที่เหลือคือจอดรอ `videoQueue` (cap 8) และ `importPercent` ไม่ขยับระหว่างจอด · ตัวเลขใหม่มาจาก extractor จึงขยับ **ทุก ~165 ms** แทนทุก ~10.7 s |
+| **Pipeline** | ⭐ เฟรมข้ามคิวมาแบบ **JPEG** ไม่ใช่ ARGB (`SampledFrame`) · worker เป็นคน decode — `inSampleSize` สำหรับ detect แล้วค่อย decode เต็มขนาดเฉพาะเฟรมที่ผ่านด่านขนาด · `FRAME_QUEUE_CAPACITY` 2 → 6 | TC-08/09/10 พิสูจน์แล้วว่าเร่ง detector ไม่ช่วย (34% ที่ inference = 4% ที่ wall) เพราะ worker ว่างอยู่แล้ว **ทางแก้คือย้ายงานออกจาก producer ไม่ใช่ทำ producer ให้เร็วขึ้น** · full-res ARGB decode ลดจาก 100% ของเฟรมเหลือ ~25% (579/2281) และย้ายไปฝั่งที่ `worker_idle` วัดได้ว่าว่าง 92% · คิวถือ ~2 MB/ช่องแทน ~33 MB จึงลึกขึ้นได้ฟรี **⚠️ ยังไม่ได้วัดบนเครื่องจริง** |
+| **Instrumentation** | `DvfsProbe` — งาน integer ขนาดคงที่ จับเวลาก่อนทุก chunk → `chunks[].cpuProbeMs` + `totals.cpuProbe.driftPercent` · `deviceLoad[].cpuMaxFreqKhz` จาก sysfs | TC-06 เจอ per-frame cost ลอย 23%/session ขณะที่ `thermal` รายงาน OK ตลอด — drift ใหญ่พอจะกลืนสิ่งที่กำลังวัด (ระยะห่าง 4% ของ TC-08 vs TC-10 อยู่ข้างในนั้น) · เลือกงาน integer แทนอ่านไฟล์ freq เพราะไม่ต้องพึ่ง permission และจับทุกอย่างที่ทำให้ core ช้าลง ไม่ใช่แค่ frequency |
+| **Instrumentation** | `SCHEMA_VERSION` 3 → **4** — `yuv_jpeg_argb` หายไป แทนด้วย `yuv_nv21` + `nv21_jpeg` (producer) และ `jpeg_argb_detect` + `jpeg_argb_full` (consumer) | ARGB decode ย้ายเธรดแล้ว stage เดิมจึงไม่มีความหมายเดิมอีก · รายงาน schema 3 เทียบ share ต่อ stage กับ schema 4 ตรงๆ ไม่ได้ ตัวที่ใกล้ที่สุดคือผลรวมของ 4 stage ใหม่ |
+| **Detector** | ถอด `enableTracking()` ออกจาก `OfflineFaceDetector` | ไม่มีอะไรในโปรเจกต์เคยอ่าน `Face.trackingId` เลย แต่มันจ่าย `roiInvalid` ทั้งหมด (tracker ทำนายกล่องล้ำขอบเฟรม) + ทำให้ผลไม่ deterministic (v0.1.3 ต้องเขียนเตือนเองว่าอย่าเชื่อ delta เล็กๆ) และพอ `DETECT_WORKERS = 2` detector แต่ละตัวเห็นเฟรมเว้นเฟรม `roiInvalid` เลยขึ้น 16 → 29 · ปิดแล้วผลขึ้นกับเฟรมของ chunk นั้นอย่างเดียว ซึ่งเป็นเงื่อนไขที่การทดลองหลังจากนี้ต้องการ |
+| **Build** | `<uses-native-library>` สำหรับ `libcdsprpc.so` / `libadsprpc.so` · `tools/restore-qairt.sh` | ตัวแรกคือ**ต้นเหตุตัวจริง**ที่ทำให้ NPU ใช้ไม่ได้ ทุกอย่างดู "สำเร็จ" แล้วไปพังลึกสองชั้นเป็น `Failed to apply delegate` · ตัวหลังกู้ไลบรารี QNN 97 MB + SDK headers ที่ gitignore ไว้และหายไปแล้วหนึ่งครั้งตอน `git reset` |
 
 ### ยังไม่ได้แก้ (ตั้งใจ)
 
-`yuv_jpeg_argb` 49.5% ยังอยู่ (NA-02 · OQ-02) — แต่ตอนนี้เป็น**คอขวดตัวเดียวที่เหลือ** ซึ่งทำให้วัดผลงานชิ้นนั้นง่ายขึ้นมาก · `detectBitmapWidth` 640→960 เก็บไว้เป็นการทดลองตัวแปรเดียวรอบถัดไป · **NPU / LiteRT ยังไม่ใช่รอบนี้** — detection เป็นแค่ 30.9% ของ wall และหลังแยกเธรดแล้วยิ่งได้ผลตอบแทนน้อยลงอีก เหตุผลเต็มอยู่ใน RELEASE_0_1_4.md · live capture ยังไม่ได้ทดสอบตั้งแต่ v0.1.3 (NA-06)
+`HardwareBuffer` / `ImageFormat.PRIVATE` (NA-02 · OQ-02) — **รอผลของการเลื่อน decode ก่อน** ตอนนี้ยังไม่รู้ว่าเหลืออะไรบน producer จริง (`yuv_nv21` เทียบ `nv21_jpeg` เป็นตัวเลขที่ยังไม่เคยเห็น) ทางนี้เคยล้มเหลวมาแล้วครั้งหนึ่ง จึงไม่ควรแตะจนกว่าจะมีเป้าที่ชัด · `detectBitmapWidth` 640→960 เก็บไว้เป็นการทดลองตัวแปรเดียวรอบถัดไป **แยกจากการเปลี่ยน gate** และตอนนี้ต้องรอ baseline ใหม่หลังเลื่อน decode ด้วย · **ยังไม่ตั้ง NPU เป็น default** — pipeline เป็น producer-bound จึงยังไม่ได้อะไรจาก 14 ms ที่เร็วกว่า GPU และ NPU กิน APK 97 MB เฉพาะ Snapdragon
+
+**⚠️ live capture ยังไม่ได้ทดสอบตั้งแต่ v0.1.3 (NA-06)** ทั้งที่ 0.1.4 รื้อ Worker 2 ทั้งก้อน และแก้เส้นทาง progress/stats ที่ live เดินผ่านด้วย — เป็นข้อเดียวในลิสต์นี้ที่ "ยังไม่ทำ" แปลว่า *อาจ ship ของพัง* ไม่ใช่แค่ *ยังช้าอยู่* · ควรรันก่อนงานวัดผลทุกตัว
+
+**🔴 สมมติฐานที่ผลักดันงาน detection ทั้งเฟส ถูกหักล้างด้วยการวัด** — `no_subject` 64% ไม่ใช่ความผิดของ ML Kit: detector 5 ตัวจาก 2 ตระกูลโมเดลเห็นตรงกันว่า **1295 จาก 2281 เฟรม (57%) ไม่มีหน้าให้เจอ** หน้าเล็กเกินไปที่ 640 px ต่างหาก เป็นปัญหาความละเอียดและเรขาคณิต ไม่ใช่โมเดล (ปิด OQ-01) · และ bbox decode ที่อนุมานเองถูกต้อง — `face_det_lite` ตรงกับ ML Kit FAST (median IoU 0.740) มากกว่าที่ ML Kit สองโหมดของตัวเองตรงกัน (0.727)
 
 ---
 

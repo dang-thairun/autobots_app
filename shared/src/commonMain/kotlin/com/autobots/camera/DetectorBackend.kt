@@ -37,7 +37,34 @@ enum class DetectorBackend(val label: String) {
      * unavailable when the QNN libraries are absent from the build rather than failing.
      */
     LiteRtNpu("face_det_lite NPU"),
+
+    /**
+     * Runs every available detector over the same frames, writing `detector_compare.json`.
+     *
+     * [MlKitFast] still decides what the session keeps, so the pipeline's own counts stay
+     * comparable with earlier releases; the rest is observation. Answers the two questions
+     * that per-backend runs cannot — whether `face_det_lite`'s box decode is right, and
+     * whether anything sees the runners ML Kit misses — because both need the detectors
+     * looking at *the same frame*, not the same file.
+     *
+     * `realtimeRatio` is meaningless in this mode: the chunk does several times the work.
+     */
+    CompareAll("Compare all"),
     ;
+
+    /**
+     * Whether the operator can pick this from the detector row.
+     *
+     * `MlKitAccurate` and `LiteRtCpu` stay in the enum but off the picker: both were measured
+     * and neither earns a slot. ACCURATE costs 30% more time for five genuinely new frames —
+     * its apparent recall edge turned out to be a box-size artefact at the size gate. CPU is
+     * *slower than ML Kit* on real frames (107 ms vs 95 ms) once the pipeline is under load.
+     *
+     * They still run in [CompareAll], and ML Kit FAST remains the fallback when a LiteRT
+     * backend cannot start — see `VideoFrameProcessor.DetectorSet`.
+     */
+    val selectableInUi: Boolean
+        get() = this == MlKitFast || this == LiteRtGpu || this == LiteRtNpu || this == CompareAll
 
     /** True for entries that load `face_det_lite`; they differ only by delegate. */
     val usesLiteRt: Boolean
@@ -51,6 +78,7 @@ enum class DetectorBackend(val label: String) {
             LiteRtCpu -> "litert_cpu"
             LiteRtGpu -> "litert_gpu"
             LiteRtNpu -> "litert_npu"
+            CompareAll -> "compare_all"
         }
 
     companion object {

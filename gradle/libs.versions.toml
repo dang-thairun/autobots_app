@@ -8,6 +8,7 @@ androidx-compose-bom = "2024.10.01"
 camerax = "1.4.1"
 mlkit-face = "16.1.7"
 mlkit-pose = "18.0.0-beta5"
+mlkit-barcode = "17.3.0"
 coroutines = "1.9.0"
 tflite = "2.17.0"
 kotlinx-serialization = "1.7.3"
@@ -29,6 +30,7 @@ camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref =
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 camerax-video = { module = "androidx.camera:camera-video", version.ref = "camerax" }
 mlkit-face-detection = { module = "com.google.mlkit:face-detection", version.ref = "mlkit-face" }
+mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkit-barcode" }
 tflite = { module = "org.tensorflow:tensorflow-lite", version.ref = "tflite" }
 tflite-gpu = { module = "org.tensorflow:tensorflow-lite-gpu", version.ref = "tflite" }
 # GpuDelegate.Options extends GpuDelegateFactory.Options, which lives in this artifact only.

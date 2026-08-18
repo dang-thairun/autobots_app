@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import android.util.Log
+import com.autobots.camera.network.VideoHttp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.io.File
@@ -39,6 +40,7 @@ data class VideoProbeResult(
     val height: Int,
     val rotationDegrees: Int,
     val durationMs: Long,
+    val frameRate: Float? = null,
 ) {
     val displayWidth: Int
         get() = if (rotationDegrees == 90 || rotationDegrees == 270) height else width
@@ -58,6 +60,10 @@ data class VideoProbeResult(
  *    can upright the frames before detection.
  *
  * Audio is dropped: frame extraction never looks at it.
+ *
+ * HTTP/HTTPS sources are streamed (no full-file download first). Android's HTTP
+ * extractor issues byte-range reads as it seeks and remuxes, so the pipeline can
+ * start extracting the first chunk while later samples are still arriving.
  */
 class ImportedVideoSplitter(
     private val context: Context,
@@ -66,26 +72,7 @@ class ImportedVideoSplitter(
     /** Accumulated backpressure wait for the current [split]; see [ImportSplitResult.blockedMs]. */
     private var blockedMs = 0L
 
-    fun probe(source: Uri): VideoProbeResult? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, source)
-            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                ?.toIntOrNull() ?: return null
-            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                ?.toIntOrNull() ?: return null
-            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                ?.toIntOrNull() ?: 0
-            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 0L
-            VideoProbeResult(width, height, rotation, durationMs)
-        } catch (t: Throwable) {
-            Log.w(TAG, "Video probe failed", t)
-            null
-        } finally {
-            runCatching { retriever.release() }
-        }
-    }
+    fun probe(source: Uri): VideoProbeResult? = Companion.probe(context, source)
 
     suspend fun split(
         source: Uri,
@@ -94,6 +81,8 @@ class ImportedVideoSplitter(
         canAcceptChunk: () -> Boolean,
         onChunkReady: (ChunkCaptureMeta) -> Unit,
         onProgress: (Int) -> Unit,
+        startTimeUs: Long = 0L,
+        endTimeUs: Long = Long.MAX_VALUE,
     ): ImportSplitResult {
         videoDir.mkdirs()
         blockedMs = 0L
@@ -104,6 +93,8 @@ class ImportedVideoSplitter(
         val rotation = readRotationDegrees(source)
         var videoWidth = 0
         var videoHeight = 0
+        var clipStartUs = 0L
+        var clipEndUs = Long.MAX_VALUE
 
         // Declared out here, not inside the try, so the finally below can reach them. A
         // MediaMuxer holds native memory and a file descriptor; losing the reference on the
@@ -113,7 +104,7 @@ class ImportedVideoSplitter(
         var segmentFile: File? = null
 
         try {
-            extractor.setDataSource(context, source, null)
+            VideoHttp.bind(extractor, context, source)
 
             var trackIndex = -1
             for (i in 0 until extractor.trackCount) {
@@ -136,6 +127,23 @@ class ImportedVideoSplitter(
             videoWidth = runCatching { format.getInteger(MediaFormat.KEY_WIDTH) }.getOrDefault(0)
             videoHeight = runCatching { format.getInteger(MediaFormat.KEY_HEIGHT) }.getOrDefault(0)
             durationUs = runCatching { format.getLong(MediaFormat.KEY_DURATION) }.getOrDefault(0L)
+            clipStartUs = startTimeUs.coerceAtLeast(0L)
+            clipEndUs = when {
+                endTimeUs == Long.MAX_VALUE || endTimeUs <= 0L ->
+                    if (durationUs > 0L) durationUs else Long.MAX_VALUE
+                durationUs > 0L -> endTimeUs.coerceAtMost(durationUs)
+                else -> endTimeUs
+            }
+            if (clipEndUs != Long.MAX_VALUE && clipStartUs >= clipEndUs) {
+                return ImportSplitResult(
+                    0, 0L, 0L, rotation, videoWidth, videoHeight,
+                    "Start must be before end",
+                    blockedMs = blockedMs,
+                )
+            }
+            if (clipStartUs > 0L) {
+                extractor.seekTo(clipStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            }
             val buffer = ByteBuffer.allocate(sampleBufferSize(format))
             val info = MediaCodec.BufferInfo()
 
@@ -144,7 +152,6 @@ class ImportedVideoSplitter(
             var segmentBytes = 0L
             var segmentStartUs = 0L
             var lastPtsUs = 0L
-            var firstPtsUs = -1L
 
             fun openSegment(ptsUs: Long) {
                 val file = File(videoDir, "import_${index.toString().padStart(3, '0')}.mp4")
@@ -190,7 +197,7 @@ class ImportedVideoSplitter(
 
                 val ptsUs = extractor.sampleTime
                 val isSync = extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0
-                if (firstPtsUs < 0) firstPtsUs = ptsUs
+                if (clipEndUs != Long.MAX_VALUE && ptsUs > clipEndUs) break
 
                 if (muxer == null) {
                     openSegment(ptsUs)
@@ -211,8 +218,13 @@ class ImportedVideoSplitter(
                 segmentBytes += size
                 lastPtsUs = ptsUs
 
-                if (durationUs > 0L) {
-                    onProgress((((ptsUs - firstPtsUs) * 100L) / durationUs).toInt().coerceIn(0, 99))
+                val spanUs = when {
+                    clipEndUs != Long.MAX_VALUE && clipEndUs > clipStartUs -> clipEndUs - clipStartUs
+                    durationUs > clipStartUs -> durationUs - clipStartUs
+                    else -> 0L
+                }
+                if (spanUs > 0L) {
+                    onProgress((((ptsUs - clipStartUs) * 100L) / spanUs).toInt().coerceIn(0, 99))
                 }
                 extractor.advance()
             }
@@ -255,16 +267,23 @@ class ImportedVideoSplitter(
             segmentFile = null
         }
 
+        val resultDurationMs = when {
+            clipEndUs != Long.MAX_VALUE && clipEndUs > clipStartUs ->
+                (clipEndUs - clipStartUs) / 1000L
+            else -> durationUs / 1000L
+        }
+
         Log.i(
             TAG,
             "Imported $segments segment(s), ${totalBytes / 1024}KB, " +
-                "source ${videoWidth}x${videoHeight} ${durationUs / 1000}ms, rotation ${rotation}°, " +
-                "backpressure ${blockedMs}ms",
+                "source ${videoWidth}x${videoHeight} ${durationUs / 1000}ms, " +
+                "clip ${clipStartUs / 1000}-${if (clipEndUs == Long.MAX_VALUE) "end" else "${clipEndUs / 1000}"}ms, " +
+                "rotation ${rotation}°, backpressure ${blockedMs}ms",
         )
         return ImportSplitResult(
             segments,
             totalBytes,
-            durationUs / 1000L,
+            resultDurationMs,
             rotation,
             videoWidth,
             videoHeight,
@@ -297,7 +316,7 @@ class ImportedVideoSplitter(
     private fun readRotationDegrees(source: Uri): Int {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, source)
+            VideoHttp.bind(retriever, context, source)
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                 ?.toIntOrNull()
                 ?: 0
@@ -312,5 +331,57 @@ class ImportedVideoSplitter(
         private const val TAG = "ImportedVideoSplitter"
         private const val QUEUE_POLL_MS = 250L
         private const val MIN_BUFFER_BYTES = 1 shl 20
+
+        fun probe(context: Context, source: Uri): VideoProbeResult? {
+            val retriever = MediaMetadataRetriever()
+            return try {
+                VideoHttp.bind(retriever, context, source)
+                val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    ?.toIntOrNull() ?: return null
+                val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    ?.toIntOrNull() ?: return null
+                val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull() ?: 0
+                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                val captureFps = retriever
+                    .extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                    ?.toFloatOrNull()
+                    ?.takeIf { it > 0f }
+                VideoProbeResult(
+                    width = width,
+                    height = height,
+                    rotationDegrees = rotation,
+                    durationMs = durationMs,
+                    frameRate = captureFps ?: readFrameRate(context, source),
+                )
+            } catch (t: Throwable) {
+                Log.w(TAG, "Video probe failed", t)
+                null
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+
+        private fun readFrameRate(context: Context, source: Uri): Float? {
+            val extractor = MediaExtractor()
+            return try {
+                VideoHttp.bind(extractor, context, source)
+                val track = (0 until extractor.trackCount).firstOrNull { index ->
+                    extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)
+                        ?.startsWith("video/") == true
+                } ?: return null
+                val format = extractor.getTrackFormat(track)
+                if (!format.containsKey(MediaFormat.KEY_FRAME_RATE)) return null
+                runCatching { format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat() }.getOrNull()
+                    ?.takeIf { it > 0f }
+                    ?: runCatching { format.getFloat(MediaFormat.KEY_FRAME_RATE) }.getOrNull()
+                        ?.takeIf { it > 0f }
+            } catch (_: Throwable) {
+                null
+            } finally {
+                runCatching { extractor.release() }
+            }
+        }
     }
 }

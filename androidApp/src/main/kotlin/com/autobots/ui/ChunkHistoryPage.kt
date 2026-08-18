@@ -14,10 +14,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +40,7 @@ private val HistoryCardShape = RoundedCornerShape(10.dp)
 fun ChunkHistoryPage(
     sessions: List<PipelineSessionRecord>,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     val expandedSessions = remember { mutableStateMapOf<String, Boolean>() }
     val expandedChunks = remember { mutableStateMapOf<Int, Boolean>() }
@@ -51,12 +50,28 @@ fun ChunkHistoryPage(
             .fillMaxSize()
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
-        Text(
-            text = "Session history",
-            color = Color.White,
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(bottom = 6.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (onBack != null) Modifier.clickable(onClick = onBack) else Modifier,
+                )
+                .padding(bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onBack != null) {
+                Text(
+                    text = "←  ",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
+            Text(
+                text = "Session history",
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+            )
+        }
 
         if (sessions.isEmpty()) {
             Column(
@@ -150,11 +165,15 @@ private fun SessionRecordCard(
                 append(session.sourceLabel)
                 append(" · ")
                 append(session.resolutionLine)
-                append(" · ")
-                append(session.extractionTarget.label)
                 append(" · started $startedLabel")
             },
             color = Color(0xFFB0BEC5),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+        )
+        Text(
+            text = session.detectorLine,
+            color = Color(0xFF80CBC4),
             style = MaterialTheme.typography.labelSmall,
             maxLines = 2,
         )

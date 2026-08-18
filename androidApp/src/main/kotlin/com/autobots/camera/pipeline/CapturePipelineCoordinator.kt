@@ -16,6 +16,8 @@ import com.autobots.camera.capture.ChunkCaptureMeta
 import com.autobots.camera.capture.ImportSplitResult
 import com.autobots.camera.capture.ImportedVideoSplitter
 import com.autobots.camera.delivery.LocalDeliveryWriter
+import com.autobots.camera.network.RemoteVideoFetcher
+import com.autobots.camera.network.VideoHttp
 import com.autobots.camera.delivery.SessionAlbumNaming
 import com.autobots.camera.delivery.WriteQueue
 import com.autobots.camera.toLogText
@@ -347,11 +349,18 @@ class CapturePipelineCoordinator(
     }
 
     /**
-     * Feed a video already on the device into the same chunk → extract → deliver path.
+     * Feed a video already on the device — or a direct HTTP(S) file URL — into the
+     * same chunk → extract → deliver path. Remote sources are streamed: the first
+     * remuxed chunk can enter Worker 2 while later samples are still arriving.
      * Splitting reuses the live queue's backpressure, so a long import cannot outrun
      * Worker 2 or blow up memory.
      */
-    suspend fun importVideo(source: Uri, displayName: String?): ImportSplitResult {
+    suspend fun importVideo(
+        source: Uri,
+        displayName: String?,
+        rangeStartMs: Long? = null,
+        rangeEndMs: Long? = null,
+    ): ImportSplitResult {
         if (closed) {
             return ImportSplitResult(0, 0L, 0L, error = "Pipeline already closed")
         }
@@ -388,8 +397,8 @@ class CapturePipelineCoordinator(
                     Log.w(TAG, "Import probe failed; using UI resolution ${resolution.label}")
                 }
 
-                splitter.split(
-                    source = source,
+                suspend fun runSplit(src: Uri) = splitter.split(
+                    source = src,
                     targetSegmentBytes = resolution.chunkTargetBytes,
                     startIndex = chunkIndexSeq.get() + 1,
                     canAcceptChunk = ::canAcceptVideoChunk,
@@ -398,7 +407,40 @@ class CapturePipelineCoordinator(
                         importPercent = percent
                         publishStats()
                     },
+                    startTimeUs = (rangeStartMs ?: 0L).coerceAtLeast(0L) * 1000L,
+                    endTimeUs = rangeEndMs
+                        ?.takeIf { it > 0L }
+                        ?.let { it * 1000L }
+                        ?: Long.MAX_VALUE,
                 )
+
+                val streamed = runSplit(source)
+                if (!shouldDownloadFallback(source, streamed)) {
+                    streamed
+                } else {
+                    Log.w(
+                        TAG,
+                        "HTTP stream split failed (${streamed.error}); downloading then retrying",
+                    )
+                    val safeName = File(displayName ?: "video.mp4").name.ifBlank { "video.mp4" }
+                    val dest = File(appContext.cacheDir, "network_import/$safeName")
+                    try {
+                        RemoteVideoFetcher.download(source.toString(), dest) { percent ->
+                            importPercent = percent
+                            publishStats()
+                        }
+                        runSplit(Uri.fromFile(dest))
+                    } catch (t: CancellationException) {
+                        throw t
+                    } catch (t: Throwable) {
+                        dest.delete()
+                        ImportSplitResult(
+                            0, 0L, 0L,
+                            error = t.message ?: "Download failed",
+                            blockedMs = streamed.blockedMs,
+                        )
+                    }
+                }
             }.also { result ->
                 sessionMeta?.splitDurationMs = System.currentTimeMillis() - splitStartMs
                 sessionMeta?.splitBlockedMs = result.blockedMs
@@ -442,6 +484,16 @@ class CapturePipelineCoordinator(
             publishStats()
             maybeNotifyDrainComplete()
         }
+    }
+
+    /**
+     * Stream failed before any chunk was produced. Range validation errors will not
+     * be fixed by downloading the file, so those stay as-is.
+     */
+    private fun shouldDownloadFallback(source: Uri, result: ImportSplitResult): Boolean {
+        if (!VideoHttp.isRemote(source) || result.segments > 0) return false
+        val error = result.error ?: return true
+        return !error.contains("Start must be before", ignoreCase = true)
     }
 
     fun onRecordingStarted() {
@@ -883,6 +935,7 @@ class CapturePipelineCoordinator(
             sourceRotationDegrees = meta.sourceRotationDegrees,
             resolution = resolution,
             extractionTarget = extractionTarget,
+            detectorBackend = detectorBackend,
             status = status,
             splitDurationMs = meta.splitDurationMs,
             splitBlockedMs = meta.splitBlockedMs,

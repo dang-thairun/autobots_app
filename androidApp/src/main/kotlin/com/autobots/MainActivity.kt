@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
                 val videoPicker = rememberLauncherForActivityResult(
                     ActivityResultContracts.OpenDocument(),
                 ) { uri ->
-                    if (uri != null) operatorViewModel.importVideo(uri)
+                    if (uri != null) operatorViewModel.prepareImport(uri)
                 }
 
                 LaunchedEffect(cameraPermission.granted) {
@@ -96,6 +96,10 @@ class MainActivity : ComponentActivity() {
                         operatorViewModel.clearImportError()
                         videoPicker.launch(arrayOf("video/*"))
                     },
+                    onCheckNetworkUrl = operatorViewModel::checkNetworkUrl,
+                    onClearNetworkUrlError = operatorViewModel::clearNetworkUrlError,
+                    onConfirmImport = operatorViewModel::confirmPendingImport,
+                    onCancelImport = operatorViewModel::cancelPendingImport,
                 )
             }
         }

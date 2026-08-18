@@ -81,7 +81,32 @@ enum class DetectorBackend(val label: String) {
             CompareAll -> "compare_all"
         }
 
+    /** Short hardware tag for status cards (`ML Kit` / `GPU` / `NPU`). */
+    val hardwareLabel: String
+        get() = when (this) {
+            MlKitFast, MlKitAccurate -> "ML Kit"
+            LiteRtCpu -> "CPU"
+            LiteRtGpu -> "GPU"
+            LiteRtNpu -> "NPU"
+            CompareAll -> "Compare all"
+        }
+
+    /** The model file or SDK detector this backend actually loads for Face. */
+    val modelName: String
+        get() = when (this) {
+            MlKitFast -> "Face Detection FAST"
+            MlKitAccurate -> "Face Detection ACCURATE"
+            LiteRtCpu, LiteRtGpu, LiteRtNpu -> "face_det_lite.tflite"
+            CompareAll -> "all backends"
+        }
+
     companion object {
-        val DEFAULT = MlKitFast
+        val DEFAULT = LiteRtNpu
+
+        /** NPU first, then GPU, then ML Kit — skip anything this device cannot start. */
+        fun firstAvailable(unavailable: Map<DetectorBackend, *>): DetectorBackend =
+            listOf(LiteRtNpu, LiteRtGpu, MlKitFast)
+                .firstOrNull { it !in unavailable }
+                ?: MlKitFast
     }
 }

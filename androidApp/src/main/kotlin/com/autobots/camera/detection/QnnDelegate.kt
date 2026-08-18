@@ -115,19 +115,35 @@ class QnnDelegate private constructor(
          *
          * Re-extracted whenever the APK is newer than what was unpacked, so an upgrade cannot
          * leave a stale skel behind.
+         *
+         * Each file is written to a `.tmp` sibling and renamed into place, because the mtime
+         * *is* the freshness record: a copy interrupted halfway — storage exhaustion, the
+         * process being killed partway through the ~96 MB — would otherwise leave a truncated
+         * file stamped with the current time, which the check below reads as up to date and
+         * skips forever. The only symptom is err 4000 again, and the only cure is clearing app
+         * data. Renaming within the same directory keeps that state unreachable.
          */
         private fun ensureDspLibraries(context: Context): File {
             val target = File(context.filesDir, "qnn/dsp").apply { mkdirs() }
-            val apkTime = runCatching {
-                context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
-            }.getOrDefault(0L)
+            // Querying our own package cannot realistically fail, and there is no sane
+            // fallback if it does: 0 would stamp whatever is on disk as permanently current
+            // and defeat the upgrade check, while any "now"-ish value re-extracts 96 MB on
+            // every launch. Let it throw — unavailableReason() reports it as unavailable.
+            val apkTime = context.packageManager
+                .getPackageInfo(context.packageName, 0).lastUpdateTime
             for (name in context.assets.list(DSP_ASSET_DIR).orEmpty()) {
                 val out = File(target, name)
                 if (out.exists() && out.lastModified() >= apkTime) continue
-                context.assets.open("$DSP_ASSET_DIR/$name").use { input ->
-                    out.outputStream().use { input.copyTo(it) }
+                val tmp = File(target, "$name.tmp")
+                try {
+                    context.assets.open("$DSP_ASSET_DIR/$name").use { input ->
+                        tmp.outputStream().use { input.copyTo(it) }
+                    }
+                    tmp.setLastModified(apkTime)
+                    check(tmp.renameTo(out)) { "cannot rename $tmp to $out" }
+                } finally {
+                    tmp.delete()
                 }
-                out.setLastModified(apkTime)
             }
             return target
         }

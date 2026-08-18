@@ -29,6 +29,7 @@ data class PipelineSessionRecord(
     val sourceRotationDegrees: Int = 0,
     val resolution: StreamResolution,
     val extractionTarget: ExtractionTarget,
+    val detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
     val status: SessionStatus,
     val splitDurationMs: Long = 0,
     /**
@@ -79,6 +80,17 @@ data class PipelineSessionRecord(
 
     val resolutionLine: String
         get() = videoDimensionsLabel?.let { "${resolution.label} · $it" } ?: resolution.label
+
+    /**
+     * What detected frames this session. Pose always runs ML Kit pose-detection;
+     * Face uses [detectorBackend] (ML Kit / GPU / NPU) and that backend's model.
+     */
+    val detectorLine: String
+        get() = when (extractionTarget) {
+            ExtractionTarget.Pose -> "Pose · ML Kit · pose-detection"
+            ExtractionTarget.Face ->
+                "Face · ${detectorBackend.hardwareLabel} · ${detectorBackend.modelName}"
+        }
 
     val headlineSummary: String
         get() = buildString {
@@ -144,7 +156,7 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
     appendLine("Status: $statusLabel")
     appendLine("Started: ${formatLogTimestamp(startedAtEpochMs)}")
     appendLine("Resolution: ${resolutionLine}")
-    appendLine("Target: ${extractionTarget.label}")
+    appendLine("Detector: ${detectorLine}")
     appendLine("Gallery folder: $galleryPath")
     appendLine()
     sourceDurationMs?.takeIf { it > 0 }?.let {

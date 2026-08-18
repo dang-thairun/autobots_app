@@ -1,6 +1,7 @@
 package com.autobots.ui
 
 import android.os.PowerManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,10 +22,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,8 +58,15 @@ private val ProcessingCardMinHeight = 118.dp
 private object OverlayPages {
     const val Controls = 0
     const val CleanPreview = 1
-    const val ChunkHistory = 2
-    const val Count = 3
+    const val Count = 2
+}
+
+private enum class OperatorDestination {
+    Home,
+    LiveCapture,
+    SessionHistory,
+    ImportPreview,
+    NetworkUrl,
 }
 
 @Composable
@@ -70,20 +80,221 @@ fun OperatorShellScreen(
     onExtractionTarget: (ExtractionTarget) -> Unit,
     onDetectorBackend: (DetectorBackend) -> Unit,
     onRecordingProgress: (Int, Long, Long) -> Unit,
-    onPhotoDelivered: (String) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onPhotoDelivered: (String) -> Unit,
     onExposureReadout: (String) -> Unit,
     onOpenGallery: () -> Unit,
     onImportVideo: () -> Unit,
+    onCheckNetworkUrl: (String) -> Unit,
+    onClearNetworkUrlError: () -> Unit,
+    onConfirmImport: (ExtractionTarget, DetectorBackend, Long?, Long?) -> Unit,
+    onCancelImport: () -> Unit,
 ) {
-    val previewActive = state.isCapturing && cameraPermissionGranted
-    var settingsExpanded by remember { mutableStateOf(false) }
-    val pagerState = rememberPagerState(pageCount = { OverlayPages.Count })
+    var destination by remember { mutableStateOf(OperatorDestination.Home) }
+
+    val goHome = {
+        if (destination == OperatorDestination.LiveCapture && state.isCapturing) {
+            onToggleCapture()
+        }
+        if (destination == OperatorDestination.ImportPreview) {
+            onCancelImport()
+        }
+        destination = OperatorDestination.Home
+    }
+
+    LaunchedEffect(state.showImportPreview) {
+        if (state.showImportPreview) {
+            destination = OperatorDestination.ImportPreview
+        } else if (destination == OperatorDestination.ImportPreview) {
+            destination = OperatorDestination.Home
+        }
+    }
+
+    BackHandler(enabled = destination != OperatorDestination.Home) {
+        goHome()
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF121212)),
     ) {
+        when (destination) {
+            OperatorDestination.Home -> OperatorHomePage(
+                state = state,
+                onLiveCapture = { destination = OperatorDestination.LiveCapture },
+                onBrowseVideo = onImportVideo,
+                onNetworkUrl = {
+                    onClearNetworkUrlError()
+                    destination = OperatorDestination.NetworkUrl
+                },
+                onSessionHistory = { destination = OperatorDestination.SessionHistory },
+                onOpenGallery = onOpenGallery,
+            )
+            OperatorDestination.LiveCapture -> OperatorLiveCapturePage(
+                state = state,
+                cameraPermissionGranted = cameraPermissionGranted,
+                pipelineCoordinator = pipelineCoordinator,
+                onBack = goHome,
+                onToggleCapture = onToggleCapture,
+                onRequestCameraPermission = onRequestCameraPermission,
+                onStreamResolution = onStreamResolution,
+                onExtractionTarget = onExtractionTarget,
+                onDetectorBackend = onDetectorBackend,
+                onRecordingProgress = onRecordingProgress,
+                onExposureReadout = onExposureReadout,
+            )
+            OperatorDestination.SessionHistory -> ChunkHistoryPage(
+                sessions = state.sessionHistory,
+                onBack = goHome,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding(),
+            )
+            OperatorDestination.ImportPreview -> ImportPreviewPage(
+                state = state,
+                onBack = goHome,
+                onExtract = { target, backend, startMs, endMs ->
+                    onConfirmImport(target, backend, startMs, endMs)
+                    destination = OperatorDestination.Home
+                },
+                onCancel = goHome,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding(),
+            )
+            OperatorDestination.NetworkUrl -> NetworkUrlPage(
+                state = state,
+                onBack = goHome,
+                onCheck = onCheckNetworkUrl,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun OperatorHomePage(
+    state: OperatorUiState,
+    onLiveCapture: () -> Unit,
+    onBrowseVideo: () -> Unit,
+    onNetworkUrl: () -> Unit,
+    onSessionHistory: () -> Unit,
+    onOpenGallery: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AppIdentityCard(state = state)
+        ProcessingStatusCard(
+            state = state,
+            idleLine = "No video to process",
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        val pipelineBusy = state.isImporting || state.isProcessing || state.isDownloading
+        HomeMenuButton(
+            label = "Live capture",
+            enabled = !pipelineBusy,
+            onClick = onLiveCapture,
+        )
+        HomeMenuButton(
+            label = if (state.isImporting) "Browse Video…" else "Browse Video",
+            enabled = state.canImportVideo,
+            onClick = onBrowseVideo,
+        )
+        HomeMenuButton(
+            label = "Network URL",
+            enabled = state.canImportVideo,
+            onClick = onNetworkUrl,
+        )
+        HomeMenuButton(
+            label = "Session History",
+            onClick = onSessionHistory,
+        )
+        HomeMenuButton(
+            label = if (state.keptPhotoCount > 0) {
+                "Gallery (${state.keptPhotoCount})"
+            } else {
+                "Gallery"
+            },
+            enabled = !pipelineBusy,
+            onClick = onOpenGallery,
+        )
+    }
+}
+
+@Composable
+private fun AppIdentityCard(
+    state: OperatorUiState,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(CardBg)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = AutobotsApp.banner,
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+            text = "IP ${state.serverIp}",
+            color = Color(0xFF69F0AE),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun HomeMenuButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            disabledContainerColor = Color.White.copy(alpha = 0.14f),
+            disabledContentColor = Color.White.copy(alpha = 0.55f),
+        ),
+    ) {
+        Text(text = label, maxLines = 1)
+    }
+}
+
+@Composable
+private fun OperatorLiveCapturePage(
+    state: OperatorUiState,
+    cameraPermissionGranted: Boolean,
+    pipelineCoordinator: CapturePipelineCoordinator?,
+    onBack: () -> Unit,
+    onToggleCapture: () -> Unit,
+    onRequestCameraPermission: () -> Unit,
+    onStreamResolution: (StreamResolution) -> Unit,
+    onExtractionTarget: (ExtractionTarget) -> Unit,
+    onDetectorBackend: (DetectorBackend) -> Unit,
+    onRecordingProgress: (Int, Long, Long) -> Unit,
+    onExposureReadout: (String) -> Unit,
+) {
+    val previewActive = state.isCapturing && cameraPermissionGranted
+    var settingsExpanded by remember { mutableStateOf(false) }
+    val pagerState = rememberPagerState(pageCount = { OverlayPages.Count })
+
+    Box(modifier = Modifier.fillMaxSize()) {
         CameraPreviewPane(
             active = previewActive,
             streamResolution = state.streamResolution,
@@ -113,20 +324,15 @@ fun OperatorShellScreen(
                         state = state,
                         cameraPermissionGranted = cameraPermissionGranted,
                         pipelineExpanded = settingsExpanded,
+                        onBack = onBack,
                         onPipelineToggle = { settingsExpanded = !settingsExpanded },
                         onToggleCapture = onToggleCapture,
                         onRequestCameraPermission = onRequestCameraPermission,
                         onStreamResolution = onStreamResolution,
                         onExtractionTarget = onExtractionTarget,
                         onDetectorBackend = onDetectorBackend,
-                        onOpenGallery = onOpenGallery,
-                        onImportVideo = onImportVideo,
                     )
                     OverlayPages.CleanPreview -> Box(modifier = Modifier.fillMaxSize())
-                    OverlayPages.ChunkHistory -> ChunkHistoryPage(
-                        sessions = state.sessionHistory,
-                        modifier = Modifier.fillMaxSize(),
-                    )
                     else -> Box(modifier = Modifier.fillMaxSize())
                 }
             }
@@ -147,16 +353,23 @@ private fun OperatorControlsPage(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
     pipelineExpanded: Boolean,
+    onBack: () -> Unit,
     onPipelineToggle: () -> Unit,
     onToggleCapture: () -> Unit,
     onRequestCameraPermission: () -> Unit,
     onStreamResolution: (StreamResolution) -> Unit,
     onExtractionTarget: (ExtractionTarget) -> Unit,
     onDetectorBackend: (DetectorBackend) -> Unit,
-    onOpenGallery: () -> Unit,
-    onImportVideo: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = "← Home",
+            color = Color(0xFFB0BEC5),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .clickable(onClick = onBack)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
         CompactStatusCard(
             state = state,
             cameraPermissionGranted = cameraPermissionGranted,
@@ -180,65 +393,41 @@ private fun OperatorControlsPage(
         ) {
             ProcessingStatusCard(state = state)
 
-            Row(
+            Button(
+                onClick = {
+                    when {
+                        state.isCapturing -> onToggleCapture()
+                        state.canStartCapture && cameraPermissionGranted -> onToggleCapture()
+                        !cameraPermissionGranted -> onRequestCameraPermission()
+                    }
+                },
+                enabled = state.isCapturing || state.canStartCapture || !cameraPermissionGranted,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(
-                    onClick = {
-                        when {
-                            state.isCapturing -> onToggleCapture()
-                            state.canStartCapture && cameraPermissionGranted -> onToggleCapture()
-                            !cameraPermissionGranted -> onRequestCameraPermission()
-                        }
+                Text(
+                    text = when {
+                        state.isCapturing -> "Stop"
+                        state.isProcessing -> "Processing…"
+                        cameraPermissionGranted -> "Start"
+                        else -> "Allow & Start"
                     },
-                    enabled = state.isCapturing || state.canStartCapture || !cameraPermissionGranted,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = when {
-                            state.isCapturing -> "Stop"
-                            state.isProcessing -> "Processing…"
-                            cameraPermissionGranted -> "Start"
-                            else -> "Allow & Start"
-                        },
-                        maxLines = 1,
-                    )
-                }
-
-                Button(
-                    onClick = onImportVideo,
-                    enabled = state.canImportVideo,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = if (state.isImporting) "Importing…" else "Import",
-                        maxLines = 1,
-                    )
-                }
-
-                Button(
-                    onClick = onOpenGallery,
-                    enabled = state.keptPhotoCount > 0 || state.lastGalleryUri != null,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = if (state.keptPhotoCount > 0) {
-                            "Gallery (${state.keptPhotoCount})"
-                        } else {
-                            "Gallery"
-                        },
-                        maxLines = 1,
-                    )
-                }
+                    maxLines = 1,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ProcessingStatusCard(state: OperatorUiState) {
-    val active = state.isProcessing || state.isImporting
+private fun ProcessingStatusCard(
+    state: OperatorUiState,
+    idleLine: String = "No processing",
+) {
+    val active = state.isProcessing || state.isImporting || state.isDownloading
+    val title = buildString {
+        append("${state.extractionTarget.label} extraction")
+        state.extractionResolutionLabel?.let { append(" · $it") }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -252,16 +441,18 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "${state.extractionTarget.label} extraction",
+            text = title,
             color = Color.White,
             style = MaterialTheme.typography.labelMedium,
         )
         Text(
             text = when {
                 state.importError != null -> "Import failed: ${state.importError}"
+                state.isDownloading ->
+                    "Downloading ${state.importName ?: "video"} · ${state.downloadPercent}%"
                 state.isImporting -> state.importLine
                 state.isProcessing -> state.processingLine
-                else -> "No processing"
+                else -> idleLine
             },
             color = when {
                 state.importError != null -> Color(0xFFEF9A9A)
@@ -286,6 +477,7 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
             // a hang. processingPercent advances every sampled frame instead.
             progress = {
                 when {
+                    state.isDownloading -> state.downloadPercent / 100f
                     state.isImporting || state.isProcessing -> state.processingPercent / 100f
                     else -> 0f
                 }
@@ -298,6 +490,8 @@ private fun ProcessingStatusCard(state: OperatorUiState) {
         )
         Text(
             text = when {
+                state.isDownloading ->
+                    "${state.downloadPercent}% download · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
                 !active -> "Idle · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
                 else -> "${state.processingPercent}% overall · ${state.extractionTarget.keptNoun} found ${state.facesKept}"
             },
@@ -689,6 +883,10 @@ private fun OperatorShellPreview() {
             onExposureReadout = {},
             onOpenGallery = {},
             onImportVideo = {},
+            onCheckNetworkUrl = {},
+            onClearNetworkUrlError = {},
+            onConfirmImport = { _, _, _, _ -> },
+            onCancelImport = {},
         )
     }
 }

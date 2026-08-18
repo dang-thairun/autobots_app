@@ -16,7 +16,8 @@
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Autobots">
+        android:theme="@style/Theme.Autobots"
+        android:usesCleartextTraffic="true">
         <!-- Portrait only — avoids mid-session rotation tearing down capture. -->
 
         <!-- FastRPC, the transport the QNN HTP backend uses to reach the Hexagon NPU.

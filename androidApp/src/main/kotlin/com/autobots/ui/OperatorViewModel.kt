@@ -1,9 +1,11 @@
 package com.autobots.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobots.camera.ChunkRecordingProgress
@@ -14,9 +16,13 @@ import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.PipelineStats
 import com.autobots.camera.SessionSource
 import com.autobots.camera.StreamResolution
+import com.autobots.camera.capture.ImportedVideoSplitter
+import com.autobots.camera.compactResolutionLabel
 import com.autobots.camera.formatChunkBytes
+import com.autobots.camera.formatDurationMs
 import com.autobots.camera.load.DeviceLoadReader
 import com.autobots.camera.load.DeviceLoadSnapshot
+import com.autobots.camera.network.RemoteVideoFetcher
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -26,6 +32,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.io.File
 
 data class OperatorUiState(
     val isCapturing: Boolean = false,
@@ -67,6 +76,12 @@ data class OperatorUiState(
     val lastRealtimeRatio: Float = 0f,
     val avgPhotoLatencyMs: Long = 0,
     val sessionHistory: List<PipelineSessionRecord> = emptyList(),
+    val isPreparingImport: Boolean = false,
+    val pendingImport: PendingVideoImport? = null,
+    val isCheckingNetworkUrl: Boolean = false,
+    val networkUrlError: String? = null,
+    val isDownloading: Boolean = false,
+    val downloadPercent: Int = 0,
 ) {
     val deviceLoadLine: String
         get() = if (totalRamMb > 0) {
@@ -105,11 +120,16 @@ data class OperatorUiState(
         }
 
     val canStartCapture: Boolean
-        get() = !isCapturing && !isProcessing && !isImporting
+        get() = !isCapturing && !isProcessing && !isImporting && !isDownloading
 
     /** Importing needs the pipeline free, but not the camera. */
     val canImportVideo: Boolean
-        get() = !isCapturing && !isProcessing && !isImporting
+        get() = !isCapturing && !isProcessing && !isImporting &&
+            !isPreparingImport && pendingImport == null &&
+            !isCheckingNetworkUrl && !isDownloading
+
+    val showImportPreview: Boolean
+        get() = isPreparingImport || pendingImport != null
 
     val importLine: String
         get() {
@@ -143,6 +163,110 @@ data class OperatorUiState(
 
     val isThroughputTooSlow: Boolean
         get() = lastRealtimeRatio >= 1f
+
+    /**
+     * Compact size for the processing card title (`FHD` / `4K` / `720p`).
+     * Only while a job is running — idle has no file, so nothing to show.
+     * Import waits for the probe; live capture can use the selected profile immediately.
+     */
+    val extractionResolutionLabel: String?
+        get() {
+            val jobActive = isCapturing || isProcessing || isImporting || isDownloading
+            if (!jobActive) return null
+            val session = sessionHistory.firstOrNull()
+            compactResolutionLabel(
+                session?.sourceVideoWidth,
+                session?.sourceVideoHeight,
+                session?.sourceRotationDegrees ?: 0,
+            )?.let { return it }
+            if (isCapturing || session?.source == SessionSource.LiveCapture) {
+                return streamResolution.compactLabel
+            }
+            return null
+        }
+}
+
+data class PendingVideoImport(
+    val uri: Uri,
+    val displayName: String,
+    val sizeBytes: Long,
+    val width: Int,
+    val height: Int,
+    val rotationDegrees: Int,
+    val durationMs: Long,
+    val frameRate: Float?,
+    val remoteUrl: String? = null,
+) {
+    val displayWidth: Int
+        get() = if (rotationDegrees == 90 || rotationDegrees == 270) height else width
+
+    val displayHeight: Int
+        get() = if (rotationDegrees == 90 || rotationDegrees == 270) width else height
+
+    val resolutionLine: String
+        get() {
+            val compact = compactResolutionLabel(width, height, rotationDegrees)
+            val pixels = "${displayWidth}×${displayHeight}"
+            return if (compact != null) "$compact · $pixels" else pixels
+        }
+
+    val durationLabel: String
+        get() = if (durationMs > 0) formatDurationMs(durationMs) else "—"
+
+    val fpsLabel: String
+        get() {
+            val fps = frameRate ?: return "— fps"
+            return if (fps % 1f == 0f) "${fps.toInt()} fps" else "%.2f fps".format(fps)
+        }
+
+    val sizeLabel: String
+        get() = if (sizeBytes > 0) formatChunkBytes(sizeBytes) else "—"
+}
+
+/** Backends the import preview lets the operator pick — matches the Home mockup. */
+internal val ImportPreviewBackends: List<DetectorBackend> = listOf(
+    DetectorBackend.MlKitFast,
+    DetectorBackend.LiteRtGpu,
+    DetectorBackend.LiteRtNpu,
+)
+
+internal fun importPreviewBackendLabel(backend: DetectorBackend): String = backend.hardwareLabel
+
+/**
+ * Rough wall-clock for one import. Sample interval is fixed; per-frame cost is a field
+ * guess so the operator can compare backends before committing. Not a benchmark.
+ */
+internal fun estimateImportWallMs(
+    durationMs: Long,
+    width: Int,
+    height: Int,
+    rotationDegrees: Int,
+    target: ExtractionTarget,
+    backend: DetectorBackend,
+): Long {
+    if (durationMs <= 0) return 0L
+    val frames = (durationMs / StreamResolution.FRAME_SAMPLE_INTERVAL_MS).coerceAtLeast(1L)
+    val detectMs = when (backend) {
+        DetectorBackend.LiteRtGpu -> 75L
+        DetectorBackend.LiteRtNpu -> 50L
+        else -> 110L
+    }
+    val poseMul = if (target == ExtractionTarget.Pose) 1.3 else 1.0
+    val rotated = rotationDegrees == 90 || rotationDegrees == 270
+    val longEdge = maxOf(
+        if (rotated) height else width,
+        if (rotated) width else height,
+    )
+    val resMul = if (longEdge >= 2160) 1.4 else 1.0
+    return (frames * detectMs * poseMul * resMul).toLong()
+}
+
+internal fun formatImportEstimate(ms: Long): String {
+    if (ms <= 0L) return "—"
+    val seconds = (ms / 1000L).coerceAtLeast(1L)
+    if (seconds < 45L) return "~ ${seconds}s"
+    val minutes = ((ms + 30_000L) / 60_000L).coerceAtLeast(1L)
+    return "~ $minutes min"
 }
 
 /** ≥1000 MB → "X.X GB", else "NNN MB". */
@@ -170,15 +294,17 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         private set
 
     init {
-        // Off the main thread: probing the GPU delegate touches the driver.
-        viewModelScope.launch(Dispatchers.Default) {
+        // Off the main thread: probing the GPU delegate touches the driver, and the QNN probe
+        // unpacks ~96 MB of DSP libraries out of the APK on first run. IO rather than Default
+        // because that unpacking is blocking disk work, not computation.
+        viewModelScope.launch(Dispatchers.IO) {
             val unavailable = DetectorAvailability.checkAll(getApplication())
                 .mapNotNull { (backend, reason) -> reason?.let { backend to it } }
                 .toMap()
             _state.update { state ->
                 // Never leave the picker pointing at something that cannot run.
                 val fallback = if (state.detectorBackend in unavailable) {
-                    DetectorBackend.DEFAULT
+                    DetectorBackend.firstAvailable(unavailable)
                 } else {
                     state.detectorBackend
                 }
@@ -269,11 +395,185 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
+     * Probe a picked video and park it on the import preview. Extraction starts only
+     * after [confirmPendingImport].
+     */
+    fun prepareImport(uri: Uri) {
+        if (!_state.value.canImportVideo) return
+        takePersistableRead(uri)
+        _state.update {
+            it.copy(isPreparingImport = true, importError = null, pendingImport = null)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val displayName = resolveDisplayName(uri) ?: "video"
+            val sizeBytes = resolveSizeBytes(uri)
+            val probe = ImportedVideoSplitter.probe(app, uri)
+            if (probe == null) {
+                _state.update {
+                    it.copy(
+                        isPreparingImport = false,
+                        pendingImport = null,
+                        importError = "Cannot read video",
+                    )
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    isPreparingImport = false,
+                    pendingImport = PendingVideoImport(
+                        uri = uri,
+                        displayName = displayName,
+                        sizeBytes = sizeBytes,
+                        width = probe.width,
+                        height = probe.height,
+                        rotationDegrees = probe.rotationDegrees,
+                        durationMs = probe.durationMs,
+                        frameRate = probe.frameRate,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun cancelPendingImport() {
+        _state.update { it.copy(isPreparingImport = false, pendingImport = null) }
+    }
+
+    fun clearNetworkUrlError() {
+        _state.update { it.copy(networkUrlError = null) }
+    }
+
+    fun checkNetworkUrl(raw: String) {
+        if (!_state.value.canImportVideo) return
+        val url = RemoteVideoFetcher.normalize(raw)
+        val invalid = RemoteVideoFetcher.validate(url)
+        if (invalid != null) {
+            _state.update { it.copy(networkUrlError = invalid, isCheckingNetworkUrl = false) }
+            return
+        }
+        _state.update {
+            it.copy(isCheckingNetworkUrl = true, networkUrlError = null, importError = null)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val head = runCatching { RemoteVideoFetcher.head(url) }.getOrNull()
+                RemoteVideoFetcher.rejectIfNotVideo(head?.contentType)?.let {
+                    throw IllegalStateException(it)
+                }
+                val displayName = head?.fileName
+                    ?: File(url.toUri().lastPathSegment ?: "video.mp4").name
+                var probe = try {
+                    withTimeout(12_000) {
+                        RemoteVideoFetcher.probe(getApplication(), url)
+                    }
+                } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                    null
+                }
+                var localFile: File? = null
+                if (probe == null) {
+                    // R2 and similar CDNs often 200 HEAD but refuse MediaHTTPConnection.
+                    // Download once, probe the file, then Extract can skip a second GET.
+                    val safeName = File(displayName).name.ifBlank { "video.mp4" }
+                    val dest = File(
+                        getApplication<Application>().cacheDir,
+                        "network_import/$safeName",
+                    )
+                    _state.update {
+                        it.copy(
+                            isDownloading = true,
+                            downloadPercent = 0,
+                            importName = safeName,
+                        )
+                    }
+                    RemoteVideoFetcher.download(url, dest) { percent ->
+                        _state.update { it.copy(downloadPercent = percent) }
+                    }
+                    localFile = dest
+                    probe = RemoteVideoFetcher.probeFile(getApplication(), dest)
+                        ?: throw IllegalStateException("Downloaded file is not a readable video")
+                }
+                val ready = probe ?: throw IllegalStateException("Cannot read video from URL")
+                val sizeBytes = head?.sizeBytes?.takeIf { it > 0 }
+                    ?: localFile?.length()
+                    ?: 0L
+                _state.update {
+                    it.copy(
+                        isCheckingNetworkUrl = false,
+                        isDownloading = false,
+                        downloadPercent = if (localFile != null) 100 else it.downloadPercent,
+                        networkUrlError = null,
+                        pendingImport = PendingVideoImport(
+                            uri = localFile?.let { file -> Uri.fromFile(file) } ?: url.toUri(),
+                            displayName = displayName,
+                            sizeBytes = sizeBytes,
+                            width = ready.width,
+                            height = ready.height,
+                            rotationDegrees = ready.rotationDegrees,
+                            durationMs = ready.durationMs,
+                            frameRate = ready.frameRate,
+                            remoteUrl = if (localFile == null) url else null,
+                        ),
+                    )
+                }
+            } catch (t: kotlinx.coroutines.TimeoutCancellationException) {
+                _state.update {
+                    it.copy(
+                        isCheckingNetworkUrl = false,
+                        isDownloading = false,
+                        pendingImport = null,
+                        networkUrlError = "Timed out reading video",
+                    )
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                _state.update {
+                    it.copy(
+                        isCheckingNetworkUrl = false,
+                        isDownloading = false,
+                        pendingImport = null,
+                        networkUrlError = t.message ?: "Cannot read video from URL",
+                    )
+                }
+            }
+        }
+    }
+
+    fun confirmPendingImport(
+        target: ExtractionTarget,
+        backend: DetectorBackend,
+        rangeStartMs: Long? = null,
+        rangeEndMs: Long? = null,
+    ) {
+        val pending = _state.value.pendingImport ?: return
+        if (_state.value.detectorUnavailable.containsKey(backend)) return
+        _state.update {
+            it.copy(
+                pendingImport = null,
+                isPreparingImport = false,
+                extractionTarget = target,
+                detectorBackend = backend,
+            )
+        }
+        // Remote URLs stream into the splitter; the coordinator downloads only if
+        // MediaExtractor cannot read the HTTP source. Check-time downloads (R2) already
+        // leave [PendingVideoImport.remoteUrl] null and [uri] pointing at the cache file.
+        importVideo(pending.uri, pending.displayName, rangeStartMs, rangeEndMs)
+    }
+
+    /**
      * Runs a device video through the same pipeline as a live Passage. No camera is
      * bound — [OperatorUiState.isCapturing] stays false so the preview stays idle.
      */
-    fun importVideo(uri: Uri) {
-        if (!_state.value.canImportVideo) return
+    fun importVideo(
+        uri: Uri,
+        displayName: String? = resolveDisplayName(uri),
+        rangeStartMs: Long? = null,
+        rangeEndMs: Long? = null,
+    ) {
+        val busy = _state.value.let { it.isCapturing || it.isProcessing || it.isImporting }
+        if (busy) return
 
         pipeline?.close()
         val coordinator = CapturePipelineCoordinator.create(
@@ -293,7 +593,6 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         }
 
         pipeline = coordinator
-        val displayName = resolveDisplayName(uri)
         _state.update {
             it.copy(
                 storageBlocked = false,
@@ -317,7 +616,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         }
 
         viewModelScope.launch {
-            val result = coordinator.importVideo(uri, displayName)
+            val result = coordinator.importVideo(uri, displayName, rangeStartMs, rangeEndMs)
             if (result.error != null || result.segments == 0) {
                 _state.update {
                     it.copy(importError = result.error ?: "No video segments produced")
@@ -337,6 +636,28 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             }
     }.getOrNull() ?: uri.lastPathSegment
+
+    private fun resolveSizeBytes(uri: Uri): Long = runCatching {
+        getApplication<Application>().contentResolver
+            .query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (index >= 0) cursor.getLong(index) else 0L
+                } else {
+                    0L
+                }
+            }
+    }.getOrNull() ?: 0L
+
+    private fun takePersistableRead(uri: Uri) {
+        runCatching {
+            getApplication<Application>().contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+    }
 
     fun stopCapture() {
         pipeline?.stopRecording()

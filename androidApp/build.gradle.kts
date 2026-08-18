@@ -100,6 +100,7 @@ dependencies {
     implementation(libs.camerax.video)
     implementation(libs.mlkit.face.detection)
     implementation(libs.mlkit.pose.detection)
+    implementation(libs.mlkit.barcode.scanning)
     implementation(libs.tflite)
     implementation(libs.tflite.gpu)
     implementation(libs.tflite.gpu.api)

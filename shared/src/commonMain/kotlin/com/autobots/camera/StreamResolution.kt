@@ -9,6 +9,13 @@ enum class StreamResolution(val label: String, val width: Int, val height: Int) 
     Uhd("4K", 3840, 2160),
     ;
 
+    /** Short status-card form: FHD / 4K. Chips keep [label] (`1080p` / `4K`). */
+    val compactLabel: String
+        get() = when (this) {
+            Fhd -> "FHD"
+            Uhd -> "4K"
+        }
+
     val chunkTargetBytes: Long
         get() = CHUNK_TARGET_BYTES
 
@@ -29,5 +36,25 @@ enum class StreamResolution(val label: String, val width: Int, val height: Int) 
             // 2160p and above → UHD profile (lower sharpness threshold).
             return if (longEdge >= 2160) Uhd else Fhd
         }
+    }
+}
+
+/**
+ * Short resolution tag for status cards.
+ * 1080-high → `FHD`, 2160-high → `4K`, anything else → `{shortSide}p`.
+ */
+fun compactResolutionLabel(
+    width: Int?,
+    height: Int?,
+    rotationDegrees: Int = 0,
+): String? {
+    if (width == null || height == null || width <= 0 || height <= 0) return null
+    val rotated = rotationDegrees == 90 || rotationDegrees == 270
+    val displayW = if (rotated) height else width
+    val displayH = if (rotated) width else height
+    return when (val shortSide = minOf(displayW, displayH)) {
+        1080 -> "FHD"
+        2160 -> "4K"
+        else -> "${shortSide}p"
     }
 }

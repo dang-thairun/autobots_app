@@ -53,6 +53,7 @@ import com.autobots.camera.upload.UploadAuthUiState
 import com.autobots.camera.upload.UploadConfig
 import com.autobots.camera.upload.UploadSession
 import com.autobots.camera.upload.UploadSettings
+import com.autobots.camera.upload.UploadStatus
 import com.autobots.camera.upload.UploadItem
 import com.autobots.camera.upload.UploadQueueCounts
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
@@ -106,6 +107,8 @@ fun OperatorShellScreen(
     onRetryFailedUploads: () -> Unit,
     uploadPaused: Boolean,
     uploadPauseReason: String?,
+    uploadFilter: UploadStatus?,
+    onSetUploadFilter: (UploadStatus?) -> Unit,
     uploadDestinationLabel: String,
     onSetUploadPaused: (Boolean) -> Unit,
     uploadConfig: UploadConfig,
@@ -252,6 +255,8 @@ fun OperatorShellScreen(
                 onRetryFailed = onRetryFailedUploads,
                 onSetPaused = onSetUploadPaused,
                 onOpenSettings = { destination = OperatorDestination.UploadSettings },
+                filter = uploadFilter,
+                onFilter = onSetUploadFilter,
                 modifier = Modifier
                     .fillMaxSize()
                     .safeDrawingPadding(),
@@ -1139,6 +1144,8 @@ private fun OperatorShellPreview() {
             onRetryFailedUploads = {},
             uploadPaused = false,
             uploadPauseReason = null,
+            uploadFilter = null,
+            onSetUploadFilter = {},
             uploadDestinationLabel = "local test sink",
             onSetUploadPaused = {},
             uploadConfig = UploadConfig(),

@@ -36,6 +36,7 @@ import com.autobots.camera.upload.UploadItem
 import com.autobots.camera.upload.UploadQueueCounts
 import com.autobots.camera.upload.UploadRepository
 import com.autobots.camera.upload.UploadScheduler
+import com.autobots.camera.upload.UploadStatus
 import com.autobots.camera.upload.UploadSession
 import com.autobots.camera.upload.UploadSettings
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -297,6 +299,7 @@ internal fun formatRam(mb: Long): String {
     }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class OperatorViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(OperatorUiState())
     val state: StateFlow<OperatorUiState> = _state.asStateFlow()
@@ -318,8 +321,25 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         .catch { emit(UploadQueueCounts()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UploadQueueCounts())
 
-    /** One bounded page for the queue screen. Only collected while that screen is open. */
-    val uploadItems: StateFlow<List<UploadItem>> = uploadQueue.observePage()
+    /** Which status the queue screen is showing, or null for everything. */
+    private val _uploadFilter = MutableStateFlow<UploadStatus?>(null)
+    val uploadFilter: StateFlow<UploadStatus?> = _uploadFilter.asStateFlow()
+
+    fun setUploadFilter(status: UploadStatus?) {
+        _uploadFilter.value = status
+    }
+
+    /**
+     * One bounded page for the queue screen. Only collected while that screen is open.
+     *
+     * The filter is applied by the query, not to the loaded page: the chips above the list
+     * count the whole table, so filtering in Kotlin let the screen promise "Abandoned 2" and
+     * then show nothing once the queue outgrew a page.
+     */
+    val uploadItems: StateFlow<List<UploadItem>> = _uploadFilter
+        .flatMapLatest { status ->
+            if (status == null) uploadQueue.observePage() else uploadQueue.observePageOf(status)
+        }
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
@@ -500,6 +520,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         // unpacks ~96 MB of DSP libraries out of the APK on first run. IO rather than Default
         // because that unpacking is blocking disk work, not computation.
         viewModelScope.launch(Dispatchers.IO) {
+            sweepImportCache()
             val unavailable = DetectorAvailability.checkAll(getApplication())
                 .mapNotNull { (backend, reason) -> reason?.let { backend to it } }
                 .toMap()
@@ -726,7 +747,43 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun cancelPendingImport() {
+        // A cancelled network import leaves its downloaded copy behind otherwise, and those
+        // are whole videos — gigabytes, not kilobytes.
+        _state.value.pendingImport?.uri?.let(::deleteIfImportCache)
         _state.update { it.copy(isPreparingImport = false, pendingImport = null) }
+    }
+
+    /** Delete a file only if it is ours: a scratch copy under `cacheDir/network_import`. */
+    private fun deleteIfImportCache(uri: Uri) {
+        if (uri.scheme != "file") return
+        val path = uri.path ?: return
+        val root = File(getApplication<Application>().cacheDir, NETWORK_IMPORT_DIR).absolutePath
+        if (!path.startsWith("$root/")) return
+        runCatching { File(path).delete() }
+    }
+
+    /**
+     * Throw away scratch downloads left by an earlier run.
+     *
+     * `cacheDir/network_import` holds whole videos that were downloaded because the CDN
+     * refused `MediaHTTPConnection`. Each one is kept on purpose until its import finishes —
+     * but a crash, a force-stop or a cancelled extraction leaves it behind, and Android only
+     * reclaims cache under storage pressure, which is far too late on a device that also has
+     * to hold a session's worth of 4K chunks.
+     *
+     * Safe to do at process start: a pending import does not survive process death, so
+     * anything still in here belongs to nobody.
+     */
+    private fun sweepImportCache() {
+        val dir = File(getApplication<Application>().cacheDir, NETWORK_IMPORT_DIR)
+        val stale = dir.listFiles().orEmpty()
+        if (stale.isEmpty()) return
+        var freed = 0L
+        stale.forEach { file ->
+            freed += file.length()
+            file.delete()
+        }
+        Log.i("OperatorViewModel", "Cleared ${stale.size} stale import file(s), ${freed / 1_048_576} MB")
     }
 
     fun clearNetworkUrlError() {
@@ -766,7 +823,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                     val safeName = File(displayName).name.ifBlank { "video.mp4" }
                     val dest = File(
                         getApplication<Application>().cacheDir,
-                        "network_import/$safeName",
+                        "$NETWORK_IMPORT_DIR/$safeName",
                     )
                     _state.update {
                         it.copy(
@@ -1077,5 +1134,8 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
          * that navigating Home → Upload → Home does not tear down and rebuild the Room query.
          */
         private const val STOP_TIMEOUT_MS = 5_000L
+
+        /** Scratch copies of videos downloaded because a CDN refused `MediaHTTPConnection`. */
+        private const val NETWORK_IMPORT_DIR = "network_import"
     }
 }

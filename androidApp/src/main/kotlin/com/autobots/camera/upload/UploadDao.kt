@@ -35,6 +35,24 @@ interface UploadDao {
     )
     fun observePage(limit: Int, offset: Int): Flow<List<UploadItem>>
 
+    /**
+     * One page of a single status.
+     *
+     * The screen used to filter the loaded page in Kotlin, which quietly disagreed with the
+     * chips above it: those counts come from the whole table, so a queue longer than one page
+     * could offer "Abandoned 2" and then show an empty list, because both rows were older
+     * than the page. Filtering here means the list can always answer for the count.
+     */
+    @Query(
+        """
+        SELECT * FROM upload_queue
+        WHERE status = :status
+        ORDER BY id DESC
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    fun observePageByStatus(status: UploadStatus, limit: Int, offset: Int): Flow<List<UploadItem>>
+
     @Query(
         """
         SELECT * FROM upload_queue

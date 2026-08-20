@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
                 val uploadItems by operatorViewModel.uploadItems.collectAsStateWithLifecycle()
                 val uploadPaused by operatorViewModel.uploadPaused.collectAsStateWithLifecycle()
                 val uploadPauseReason by operatorViewModel.uploadPauseReason.collectAsStateWithLifecycle()
+                val uploadFilter by operatorViewModel.uploadFilter.collectAsStateWithLifecycle()
                 val uploadConfig by operatorViewModel.uploadConfig.collectAsStateWithLifecycle()
                 val uploadAccount by operatorViewModel.uploadAccount.collectAsStateWithLifecycle()
                 val uploadDestination by operatorViewModel.uploadDestinationLabel
@@ -119,6 +120,8 @@ class MainActivity : ComponentActivity() {
                     onRetryFailedUploads = operatorViewModel::retryFailedUploads,
                     uploadPaused = uploadPaused,
                     uploadPauseReason = uploadPauseReason,
+                    uploadFilter = uploadFilter,
+                    onSetUploadFilter = operatorViewModel::setUploadFilter,
                     uploadDestinationLabel = uploadDestination,
                     onSetUploadPaused = operatorViewModel::setUploadPaused,
                     uploadConfig = uploadConfig,

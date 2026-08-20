@@ -445,7 +445,16 @@ class CapturePipelineCoordinator(
                             importPercent = percent
                             publishStats()
                         }
-                        runSplit(Uri.fromFile(dest))
+                        // Deleted whatever the split makes of it: the chunks it produces are
+                        // the output, and this copy is scratch. Leaving it behind meant a
+                        // gigabyte per network import sitting in the cache until Android
+                        // decided to reclaim it — which it only does under pressure, long
+                        // after the disk has become the operator's problem.
+                        try {
+                            runSplit(Uri.fromFile(dest))
+                        } finally {
+                            dest.delete()
+                        }
                     } catch (t: CancellationException) {
                         throw t
                     } catch (t: Throwable) {

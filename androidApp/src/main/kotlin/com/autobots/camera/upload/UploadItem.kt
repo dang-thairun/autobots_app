@@ -124,6 +124,16 @@ data class UploadQueueCounts(
 
     val total: Int get() = outstanding + success + abandoned
 
+    /** How many rows are in one state, for a screen that shows one state at a time. */
+    fun of(status: UploadStatus): Int = when (status) {
+        UploadStatus.Pending -> pending
+        UploadStatus.Uploading -> uploading
+        UploadStatus.Uploaded -> uploaded
+        UploadStatus.Success -> success
+        UploadStatus.Failed -> failed
+        UploadStatus.Abandoned -> abandoned
+    }
+
     /** Badge text for the Home menu row; null when there is nothing to say. */
     val badgeLabel: String?
         get() = when {

@@ -58,12 +58,10 @@ fun UploadQueuePage(
     onRetryFailed: () -> Unit,
     onSetPaused: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    filter: UploadStatus?,
+    onFilter: (UploadStatus?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var filter by remember { mutableStateOf<UploadStatus?>(null) }
-    val visible = remember(items, filter) {
-        filter?.let { wanted -> items.filter { it.status == wanted } } ?: items
-    }
 
     Column(
         modifier = modifier.padding(horizontal = 10.dp, vertical = 8.dp),
@@ -99,11 +97,11 @@ fun UploadQueuePage(
             StatusFilters(
                 counts = counts,
                 selected = filter,
-                onSelect = { filter = if (filter == it) null else it },
+                onSelect = { onFilter(if (filter == it) null else it) },
             )
         }
 
-        if (visible.isEmpty()) {
+        if (items.isEmpty()) {
             Text(
                 text = if (counts.total == 0) {
                     "Nothing queued yet. Photos join the queue as they are delivered."
@@ -114,8 +112,18 @@ fun UploadQueuePage(
                 style = MaterialTheme.typography.bodySmall,
             )
         } else {
+            // Says when the list is a window rather than the whole thing. A page that
+            // silently stops at its limit reads as "that is all of them".
+            val shown = filter?.let { counts.of(it) } ?: counts.total
+            if (shown > items.size) {
+                Text(
+                    text = "Showing the newest ${items.size} of $shown",
+                    color = Color.White.copy(alpha = 0.5f),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(visible, key = { it.id }) { item -> QueueRow(item) }
+                items(items, key = { it.id }) { item -> QueueRow(item) }
             }
         }
     }

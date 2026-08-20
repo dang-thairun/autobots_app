@@ -19,6 +19,13 @@ interface UploadRepository {
     /** A bounded page for the queue screen, newest first. */
     fun observePage(limit: Int = DEFAULT_PAGE, offset: Int = 0): Flow<List<UploadItem>>
 
+    /** One page of a single status, filtered by the database rather than by the screen. */
+    fun observePageOf(
+        status: UploadStatus,
+        limit: Int = DEFAULT_PAGE,
+        offset: Int = 0,
+    ): Flow<List<UploadItem>>
+
     fun observeSession(sessionId: String, limit: Int = DEFAULT_PAGE): Flow<List<UploadItem>>
 
     /** How many of one session's photos have reached [UploadStatus.Success]. */
@@ -100,6 +107,9 @@ class RoomUploadRepository(
 
     override fun observePage(limit: Int, offset: Int): Flow<List<UploadItem>> =
         dao.observePage(limit, offset)
+
+    override fun observePageOf(status: UploadStatus, limit: Int, offset: Int): Flow<List<UploadItem>> =
+        dao.observePageByStatus(status, limit, offset)
 
     override fun observeSession(sessionId: String, limit: Int): Flow<List<UploadItem>> =
         dao.observeSession(sessionId, limit)

@@ -13,6 +13,10 @@ coroutines = "1.9.0"
 tflite = "2.17.0"
 kotlinx-serialization = "1.7.3"
 ktor = "2.3.12"
+# KSP ผูกกับ Kotlin แบบ lockstep: ส่วนหน้าต้องตรงกับ `kotlin` ข้างบนเป๊ะ
+ksp = "2.0.21-1.0.28"
+room = "2.6.1"
+work = "2.9.1"
 
 [libraries]
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
@@ -31,6 +35,10 @@ camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax"
 camerax-video = { module = "androidx.camera:camera-video", version.ref = "camerax" }
 mlkit-face-detection = { module = "com.google.mlkit:face-detection", version.ref = "mlkit-face" }
 mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkit-barcode" }
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 tflite = { module = "org.tensorflow:tensorflow-lite", version.ref = "tflite" }
 tflite-gpu = { module = "org.tensorflow:tensorflow-lite-gpu", version.ref = "tflite" }
 # GpuDelegate.Options extends GpuDelegateFactory.Options, which lives in this artifact only.
@@ -58,3 +66,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

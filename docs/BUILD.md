@@ -18,6 +18,53 @@ No Play Store or extra signing setup is needed for **debug** builds.
 
 ---
 
+## 0. Upload backend defaults — `.env` (optional)
+
+The app can be built with a backend already configured. Copy the template and fill in what
+you have:
+
+```bash
+cp .env.example .env
+```
+
+| Key | Meaning |
+|-----|---------|
+| `UPLOAD_GRAPHQL_URL` | `https://api.<host>/graphql` — the `photoUpload` mutation |
+| `UPLOAD_COMPLETE_URL` | `https://upload.<host>/success` — the completion call (different host, form-encoded) |
+| `UPLOAD_PLATFORM` | `x-runx-platform` header value, e.g. `thai` |
+| `UPLOAD_EVENT_ID` | which event the photos belong to — usually left empty, see below |
+| `UPLOAD_TOKEN` | optional; normally empty, see below |
+
+**Any key left empty just means the operator fills it in** on the app's Upload settings
+screen — an empty `.env`, or no `.env` at all, is a perfectly normal build.
+
+**The last two keys are usually empty.** The operator signs in on the Upload settings screen
+with a username and password, and picks the event from a dropdown the backend fills in; that
+is where `UPLOAD_TOKEN` and `UPLOAD_EVENT_ID` normally come from. The token is held **in
+memory only** — it is never written to the device, so signing in is needed once per app
+start. A token set in `.env` skips that for this build and is still not persisted.
+
+The values are read by Gradle at configure time and baked into `BuildConfig`, then applied to
+the app's settings on launch under two different rules:
+
+- **`UPLOAD_GRAPHQL_URL` and `UPLOAD_COMPLETE_URL` win from the build on every launch.** A URL
+  in `.env` decides which backend this APK talks to; a stale value typed on a phone weeks ago
+  should not outrank it. Editing those two fields on a build that sets them therefore lasts
+  only until the next launch.
+- **`UPLOAD_PLATFORM` and `UPLOAD_EVENT_ID` are seeded on first run only**, so a correction the
+  operator makes is never silently reverted. *Clear configuration* puts the build's defaults
+  back on the next launch.
+
+A key left empty in `.env` changes nothing under either rule.
+
+> ⚠️ **`.env` is gitignored and must stay that way** — `UPLOAD_TOKEN` is an admin credential.
+> It is also **readable inside any APK built with it**, so leave the token blank for builds
+> you do not control end to end and let the operator sign in instead (see `docs/PHASES.md` B3e).
+
+Changing `.env` requires a rebuild; it is a build input, not a runtime file.
+
+---
+
 ## 1. Build debug APK
 
 From the repo root:

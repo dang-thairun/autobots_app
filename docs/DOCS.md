@@ -1,7 +1,7 @@
 # AutoBots Sports Camera — Documentation
 
 Edge-AI sports camera on tripod-mounted Android.  
-**Current build (v0.1.2):** video chunk pipeline + offline face/pose extract → [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).
+**Current build (v0.1.5):** video chunk pipeline + offline face/pose extract → [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).
 
 **Start here** → pick one guide below. Naming rules: [CONVENTIONS.md](./CONVENTIONS.md).
 
@@ -15,6 +15,8 @@ Edge-AI sports camera on tripod-mounted Android.
 | [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) | **Pipeline เทคนิค** — workers, thresholds, storage, session log |
 | [SEQUENCE_FLOW.md](./SEQUENCE_FLOW.md) | **Sequence diagram (Mermaid)** — Start/Import → chunk → Worker 2 → Gallery + backpressure |
 | [RELEASE_0_1_3.md](./RELEASE_0_1_3.md) | **v0.1.3** — เหตุผล/ตัวเลขเบื้องหลังการแก้ Worker 2 (perf + yield) |
+| [RELEASE_0_1_4.md](./RELEASE_0_1_4.md) | **v0.1.4** — แยก Worker 2 เป็นสองเธรด (perf: realtimeRatio 2.196 → 1.010) |
+| [RELEASE_0_1_5.md](./RELEASE_0_1_5.md) | **v0.1.5** — Home menu แทน pager · Import Preview + trim · Network URL ingest · default = NPU |
 | [SCREEN.md](./SCREEN.md) | Operator UI layout (3-page pager, session history) |
 | [CONVENTIONS.md](./CONVENTIONS.md) | How to write docs; Phase vs Flow vs Passage step |
 | [PRD.md](./PRD.md) | Product scope — **Plan B (active)** + v0.1 stills baseline |
@@ -28,6 +30,7 @@ Edge-AI sports camera on tripod-mounted Android.
 | [CHANGELOG.md](./CHANGELOG.md) | Release notes (v0.1.2, …) |
 | [REPORT_GUIDELINE.md](./REPORT_GUIDELINE.md) | How to write a version summary report · ไทย: [REPORT_GUIDELINE_TH.md](./REPORT_GUIDELINE_TH.md) |
 | [../reports/](../reports/) | Version reports — test inputs, results, score (`reports/vX.Y.Z/report.md`) |
+| [PHASES.md](./PHASES.md) | **แผน B3 · upload pipeline** — Room queue → WorkManager → presigned R2 · slice B3a–B3g |
 | [ROADMAP.md](./ROADMAP.md) | Unscheduled ideas past B4 |
 | [../CONTEXT.md](../CONTEXT.md) | Ubiquitous language — ศัพท์เชิงธุรกิจ (Passage, Kept Frame) |
 | [GLOSSARY_TH.md](./GLOSSARY_TH.md) | **ศัพท์เทคนิค/การวัดผลอธิบายภาษาไทย** — DVFS, TC-XX, realtimeRatio, YUV, backpressure, `@Volatile` · เริ่มที่นี่ถ้าอ่านรายงานแล้วสะดุดศัพท์ |

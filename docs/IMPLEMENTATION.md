@@ -31,7 +31,7 @@ The **P9 / P10** sections below describe the **v0.1 stills** path (burst + Passa
 | **B2b** | Sharpness on fixed-size face crop (resolution-agnostic threshold) | ⏳ |
 | **B2c** | 4K: optional `detectBitmapWidth` 1280 + ML Kit ACCURATE offline | ⏳ |
 | **B2d** | Skip YUV→JPEG roundtrip in `VideoFrameSampler` for 4K | ⏳ |
-| **B3** | HTTP upload worker (replace or extend local-only `WriteQueue`) | ⏳ |
+| **B3** | HTTP upload worker (extend local-only `WriteQueue`) — แผนละเอียด: **[PHASES.md](./PHASES.md)** | ⏳ |
 | **B4** | Re-wire or retire v0.1 stills path (`LeanBurstCapturer`, live overlay, Passage Gate) | ⏳ |
 
 ---

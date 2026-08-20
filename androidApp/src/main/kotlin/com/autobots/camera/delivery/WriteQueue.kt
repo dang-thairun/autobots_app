@@ -21,6 +21,15 @@ class WriteQueue(
     private val onDropped: (File) -> Unit = {},
     /** Instrumentation hook: the source file that was just published. */
     private val onDeliveredFile: (File) -> Unit = {},
+    /**
+     * Called with the published photo **while the cache file still exists**, so the callee can
+     * still read its size and timestamp. This is the only moment both halves are available:
+     * a step later the file is gone and the MediaStore [Uri] is all that is left of it, which
+     * is exactly why the upload queue stores that Uri rather than a path (docs/PHASES.md §2.1).
+     *
+     * Runs on the queue's own IO coroutine — keep it to handing the pair somewhere else.
+     */
+    private val onPublished: (uri: Uri, file: File) -> Unit = { _, _ -> },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val channel = Channel<File>(capacity = capacity)
@@ -36,6 +45,8 @@ class WriteQueue(
                     val uri = writer.publish(file)
                     if (uri != null) {
                         onDeliveredFile(file)
+                        runCatching { onPublished(uri, file) }
+                            .onFailure { Log.e(TAG, "onPublished failed for ${file.name}", it) }
                         file.delete()
                         delivered = uri
                     } else {

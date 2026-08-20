@@ -1,0 +1,281 @@
+# v0.1.5 — Menu Navigation + Network URL Ingest
+
+> รายงานการเปลี่ยนแปลงจาก **v0.1.4** → **v0.1.5**
+> diff: `36ead5e` → `f62692e` · 18 ไฟล์ · +1,921 / −128
+>
+> **นี่คือ feature release ไม่ใช่ perf release** — ไม่มี TC ใหม่ ไม่มีตัวเลขวัดผล ทุกอย่างใน 0.1.4 ที่ค้างอยู่ยังค้างเหมือนเดิม (ดู [ยังไม่ได้แก้](#ยังไม่ได้แก้ใน-015))
+>
+> **⚠️ default detector เปลี่ยนจาก ML Kit FAST → LiteRT NPU** — รายงานใดที่เทียบกับ v0.1.4 ต้องระบุ backend ให้ชัด ไม่งั้นตัวแปรปนทันที
+>
+> **✅ TC-11 รันแล้ว (18/08/2026) — live capture ผ่าน** 3 session ติดกันบน Xiaomi peridot · 1080p และ 4K · `Status: Done` ทั้งหมด · `session_log.txt` + `perf_report.json` ถูกเขียนครบทุก session (NA-05 ไม่ปรากฏซ้ำ) · `decodeFailures` 0 · `truncation` 0 · ปิด NA-06 ที่ค้างมาตั้งแต่ v0.1.3
+
+---
+
+## สรุปผู้บริหาร
+
+0.1.4 ทำให้ pipeline เร็วพอจะประมวลผลเร็วกว่าความยาวคลิป (`realtimeRatio` 1.010) แต่ทางเข้าของงานยังมีอยู่สองทางเท่านั้น: กดอัดสด หรือเลือกไฟล์ในเครื่อง และการเลือกไฟล์คือ **fire-and-forget** — แตะแล้ว extract ทันที ไม่มีจังหวะให้ดูก่อนว่าคลิปนี้กี่นาที ความละเอียดเท่าไร จะใช้ backend ไหน หรือจะเอาแค่ช่วงไหน
+
+0.1.5 แก้สองเรื่องนี้พร้อมกัน:
+
+| | v0.1.4 | **v0.1.5** |
+|--|--|--|
+| **Navigation** | `HorizontalPager` 3 หน้า · preview ผูกอยู่ตลอด | Home menu → 5 destination + ปุ่ม Back ของระบบ |
+| **เลือกไฟล์แล้ว** | extract ทันที | หน้า **Import Preview** — เห็น metadata, เลือก target/backend, ตัดช่วง, ดูเวลาโดยประมาณ |
+| **ทางเข้าของงาน** | live · ไฟล์ในเครื่อง | + **Network URL** (พิมพ์ / สแกน QR) |
+| **default backend** | ML Kit FAST | **LiteRT NPU** → GPU → ML Kit |
+| **session log** | `Target: Face` | `Detector: Face · NPU · face_det_lite.tflite` |
+
+Network URL **สตรีมเป็นค่าเริ่มต้น** ไม่ได้ดาวน์โหลดทั้งไฟล์ก่อน — `MediaExtractor` ยิง byte-range ตามที่ remux เดินไป chunk แรกจึงเข้า Worker 2 ได้ตั้งแต่ปลายไฟล์ยังมาไม่ถึง ส่วนการดาวน์โหลดถูกลดชั้นเป็น **fallback** สำหรับ CDN ที่ปฏิเสธ `MediaHTTPConnection` (R2 และพวกเดียวกัน)
+
+---
+
+## การเปลี่ยนแปลง
+
+### 1. ⭐ รื้อ navigation — จาก pager เป็น menu
+
+**ไฟล์:** [OperatorShellScreen.kt](../androidApp/src/main/kotlin/com/autobots/ui/OperatorShellScreen.kt) · [MainActivity.kt](../androidApp/src/main/kotlin/com/autobots/MainActivity.kt)
+
+```
+                    ┌──────────────┐
+                    │  Home        │  AppIdentityCard + ProcessingStatusCard
+                    │  (menu)      │  Live capture · Browse Video · Network URL
+                    └──┬───┬───┬───┘  Session History · Gallery
+        ┌──────────────┘   │   └──────────────┬─────────────┐
+   LiveCapture      SessionHistory     ImportPreview    NetworkUrl
+```
+
+`OperatorDestination` เป็น enum 5 ค่าใน `remember` ธรรมดา ไม่ได้ใช้ Navigation component — จำนวนหน้าน้อยและไม่มี deep link จึงยังไม่คุ้มที่จะเพิ่ม dependency
+
+สิ่งที่เปลี่ยนพฤติกรรมจริง ไม่ใช่แค่ layout:
+
+- **preview ไม่ได้ผูกอยู่ตลอดเวลาอีกแล้ว** — `CameraPreviewPane` อยู่ใน `LiveCapture` destination เท่านั้น หน้าอื่นไม่ bind กล้อง
+- **`goHome()` มีผลข้างเคียงตั้งใจ** — ออกจาก `LiveCapture` ระหว่างอัดอยู่ = สั่ง `onToggleCapture()` ให้หยุดเอง และออกจาก `ImportPreview` = `onCancelImport()` ไม่มีสถานะค้างเมื่อกดย้อนกลับ
+- **`BackHandler`** — ปุ่ม Back ของระบบกลับ Home แทนที่จะปิดแอป
+- `OverlayPages.Count` 3 → 2 · `ChunkHistoryPage` รับ `onBack` (null ได้ เพื่อคงการใช้แบบเดิม)
+
+`onPhotoDelivered` ถูก `@Suppress("UNUSED_PARAMETER")` ไว้ — ยังอยู่ใน signature แต่ไม่มีใครเรียกในเส้นทางใหม่
+
+### 2. ⭐ Import Preview — ดูก่อน แล้วค่อย extract
+
+**ไฟล์:** [ImportPreviewPage.kt](../androidApp/src/main/kotlin/com/autobots/ui/ImportPreviewPage.kt) *(ใหม่ 480 บรรทัด)* · [OperatorViewModel.kt](../androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt)
+
+`videoPicker` เรียก **`prepareImport(uri)`** แทน `importVideo(uri)` — probe ก่อน แล้วหยุดรอที่ `PendingVideoImport`:
+
+| ส่วน | รายละเอียด |
+|--|--|
+| **Metadata** | ชื่อ · ขนาด · `resolutionLine` · `durationLabel` · **`fpsLabel`** |
+| **Range** | สลับ *Full length* ↔ *Range* · ช่อง Start/End รับ `mm:ss` และ `h:mm:ss` (`parseTrimTime`) |
+| **Target** | Face / Pose |
+| **Process with** | backend chip — ตัวที่รันไม่ได้ถูก disable **พร้อมเหตุผล** จาก `detectorUnavailable` |
+| **Estimate** | `~ N min` คำนวณสดตามที่เลือก |
+
+การ validate ช่วงเวลาอยู่ที่หน้า UI (`Start is past the clip` · `End is past the clip` · `Start must be before end`) และซ้ำอีกชั้นในตัว splitter
+
+**สูตร estimate** ([OperatorViewModel.kt](../androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt) · `estimateImportWallMs`):
+
+```
+frames = durationMs / FRAME_SAMPLE_INTERVAL_MS        // 120 ms คงที่
+wall   = frames × detectMs × poseMul × resMul
+         detectMs: NPU 50 · GPU 75 · อื่นๆ 110
+         poseMul : Pose 1.3 · Face 1.0
+         resMul  : longEdge ≥ 2160 → 1.4
+```
+
+> 🔴 **ค่าพวกนี้เป็นการเดา ไม่ได้ calibrate จากผลวัดจริง** doc ในโค้ดเขียนกำกับไว้แล้วว่า *"a field guess … not a benchmark"* แต่ต้องย้ำ: TC-12 วัด wall ได้ 270.8 s สำหรับคลิป UHD 273.7 s ขณะที่สูตรนี้ให้ 273700/120 × 50 × 1.4 ≈ **160 s** — ต่ำกว่าของจริงเกือบ 40% ถือเป็น**หนี้ที่ต้องใช้คืนด้วยการ calibrate จาก `perf_report.json`** ไม่ใช่ตัวเลขที่เชื่อได้ตอนนี้
+
+### 3. ⭐ Network URL — สตรีมก่อน ดาวน์โหลดเมื่อจำเป็น
+
+**ไฟล์:** [RemoteVideoFetcher.kt](../androidApp/src/main/kotlin/com/autobots/camera/network/RemoteVideoFetcher.kt) *(ใหม่)* · [VideoHttp.kt](../androidApp/src/main/kotlin/com/autobots/camera/network/VideoHttp.kt) *(ใหม่)* · [NetworkUrlPage.kt](../androidApp/src/main/kotlin/com/autobots/ui/NetworkUrlPage.kt) *(ใหม่)* · [QrScanPreview.kt](../androidApp/src/main/kotlin/com/autobots/ui/QrScanPreview.kt) *(ใหม่)*
+
+รับเฉพาะ **URL ของไฟล์วิดีโอตรงๆ** — หน้าเว็บ (YouTube, ลิงก์แชร์ Drive) อยู่นอกขอบเขตโดยตั้งใจ
+
+**เส้นทางของ Check:**
+
+```
+validate(scheme http/https + host)
+  → head()            405/501 → fallback 1-byte GET เอาเฉพาะ header
+  → rejectIfNotVideo(contentType)
+  → probe()           withTimeout(12s)
+       สำเร็จ → PendingVideoImport(remoteUrl = url)      ← สตรีมทีหลัง
+       ล้มเหลว/timeout → download() → probeFile()         ← R2 fallback
+                          PendingVideoImport(uri = file://…, remoteUrl = null)
+```
+
+**`VideoHttp` คือหัวใจของการสตรีม** — `setDataSource(Context, Uri)` ของ Android ส่ง header ที่ CDN หลายเจ้าปฏิเสธ จึง bind ด้วย header แบบเบราว์เซอร์แทน:
+
+```kotlin
+"User-Agent"      to CHROME_ANDROID_UA
+"Accept"          to "*/*"
+"Accept-Encoding" to "identity"      // ห้าม gzip — byte-range ต้องตรงกับไฟล์จริง
+```
+
+ทั้ง `MediaExtractor` และ `MediaMetadataRetriever` bind ผ่านฟังก์ชันเดียวกัน (`VideoHttp.bind`) และ local URI ยังเดินทางเดิมทุกประการ
+
+**ดาวน์โหลดเป็น fallback สองชั้น** — ชั้นแรกตอน Check (ข้างบน) ชั้นที่สองตอน split จริง ใน [CapturePipelineCoordinator.kt](../androidApp/src/main/kotlin/com/autobots/camera/pipeline/CapturePipelineCoordinator.kt):
+
+```kotlin
+val streamed = runSplit(source)
+if (!shouldDownloadFallback(source, streamed)) streamed
+else { download(...); runSplit(Uri.fromFile(dest)) }
+```
+
+`shouldDownloadFallback` จงใจ**ไม่**ดาวน์โหลดซ้ำเมื่อ error คือ `"Start must be before…"` — นั่นเป็นความผิดของค่าที่ผู้ใช้กรอก ไม่ใช่ของ transport ดาวน์โหลดไฟล์เป็นกิกะไบต์มาแล้วก็ fail เหมือนเดิม
+
+**QR scan** — `QrScanPreview` ใช้ CameraX `ImageAnalysis` + ML Kit barcode (`17.3.0` ใหม่ใน [libs.versions.toml](../gradle/libs.versions.toml)) กรองเฉพาะ `FORMAT_QR_CODE` ขอ permission ผ่าน `rememberCameraPermissionState` เดิม
+
+**`usesCleartextTraffic="true"`** ใน [AndroidManifest.xml](../androidApp/src/main/AndroidManifest.xml) — เปิดทั้งแอป เพื่อรับ URL `http://` ของเซิร์ฟเวอร์ในสนามที่ยังไม่มี TLS
+
+### 4. Splitter — trim ช่วงเวลา + อ่าน fps
+
+**ไฟล์:** [ImportedVideoSplitter.kt](../androidApp/src/main/kotlin/com/autobots/camera/capture/ImportedVideoSplitter.kt)
+
+- **`startTimeUs` / `endTimeUs`** — `seekTo(clipStartUs, SEEK_TO_PREVIOUS_SYNC)` แล้ว `break` เมื่อ `ptsUs > clipEndUs` · เริ่มที่ sync frame ก่อนหน้าเสมอ ดังนั้น**จุดเริ่มจริงอาจมาก่อนที่กรอกไว้ถึงหนึ่ง GOP** ซึ่งถูกต้องแล้วสำหรับ remux ที่ไม่ re-encode
+- **progress คิดจาก span ของ clip** ไม่ใช่ทั้งไฟล์ — `firstPtsUs` ที่เคยเดาจาก sample แรกถูกแทนด้วย `clipStartUs` ที่รู้ค่าแน่นอน · `ImportSplitResult.durationMs` ก็รายงานความยาวของ clip ไม่ใช่ของ source
+- **`probe` ย้ายไป companion** (`probe(context, source)`) — เรียกได้โดยไม่ต้องสร้าง splitter ซึ่งเป็นสิ่งที่ `prepareImport` และ `RemoteVideoFetcher` ต้องการ · เมธอด instance เดิมยังอยู่ ชี้ไปที่ตัวเดียวกัน
+- **`VideoProbeResult.frameRate`** — `METADATA_KEY_CAPTURE_FRAMERATE` ก่อน แล้ว fallback ไป `MediaFormat.KEY_FRAME_RATE` ซึ่งอ่านทั้งแบบ `Int` และ `Float` เพราะ container/เครื่องเก็บไม่เหมือนกัน
+
+> fps ยัง**ไม่ได้**ถูกใช้คำนวณ sample interval — `FRAME_SAMPLE_INTERVAL_MS` ยังคงที่ 120 ms ตอนนี้มันมีไว้แสดงใน Import Preview และ (สำคัญกว่า) ทำให้ค่าที่จำเป็นต่อการปรับ interval ตาม fps มีอยู่ในมือแล้ว
+
+### 5. ⚠️ Detector default: ML Kit FAST → LiteRT NPU
+
+**ไฟล์:** [DetectorBackend.kt](../shared/src/commonMain/kotlin/com/autobots/camera/DetectorBackend.kt) · [PipelineSessionRecord.kt](../shared/src/commonMain/kotlin/com/autobots/camera/PipelineSessionRecord.kt)
+
+```kotlin
+val DEFAULT = LiteRtNpu                              // เดิม MlKitFast
+
+fun firstAvailable(unavailable: Map<DetectorBackend, *>) =
+    listOf(LiteRtNpu, LiteRtGpu, MlKitFast).firstOrNull { it !in unavailable } ?: MlKitFast
+```
+
+เครื่องที่ไม่มี NPU ไล่ลงไป GPU แล้ว ML Kit — ไม่มีทางที่ผู้ใช้จะเจอ backend ที่สตาร์ตไม่ขึ้นเป็นค่าเริ่มต้น
+
+พร้อมกันนั้น **session รู้แล้วว่าตัวเองรันด้วยอะไร** — `PipelineSessionRecord.detectorBackend` ถูกบันทึกจากตัว coordinator และ `session_log.txt` เปลี่ยนบรรทัด `Target: Face` เป็น:
+
+```
+Detector: Face · NPU · face_det_lite.tflite
+```
+
+Pose บังคับเป็น `Pose · ML Kit · pose-detection` เสมอ เพราะ LiteRT path มีแต่ face · `hardwareLabel` / `modelName` เป็นตัวจ่ายข้อความนี้ และหน้า Session History ก็แสดงบรรทัดเดียวกัน
+
+> 🔴 **นี่คือการเปลี่ยนตัวแปรของการทดลอง ไม่ใช่แค่ default ของ UI** — ทุก TC ที่รันหลังจากนี้โดยไม่ระบุ backend จะได้ NPU ซึ่งเทียบกับตัวเลข ML Kit ใน [RELEASE_0_1_4.md](./RELEASE_0_1_4.md) ตรงๆ ไม่ได้ · ข้อดีคือ `detectorLine` ทำให้ session log บอกเองแล้วว่าใช้อะไร จึงตรวจย้อนหลังได้
+
+### 6. QNN — ถอด asset แบบ atomic
+
+**ไฟล์:** [QnnDelegate.kt](../androidApp/src/main/kotlin/com/autobots/camera/detection/QnnDelegate.kt)
+
+`ensureDspLibraries` ใช้ mtime เป็นบันทึกความสดของไฟล์ ซึ่งแปลว่า**การ copy ที่ขาดกลางคันจะกลายเป็นความเสียหายถาวร**: ไฟล์ไม่ครบถูกประทับเวลาปัจจุบัน รอบต่อไป guard อ่านว่า "ใหม่กว่า APK" แล้วข้าม อาการที่ได้คือ `loadRemoteSymbols failed with err 4000` เหมือนเดิมทุกประการ และแก้ได้ทางเดียวคือให้ผู้ใช้ไป clear app data
+
+แก้ด้วยการเขียนลง `.tmp` แล้ว `renameTo` เข้าที่ (ไดเรกทอรีเดียวกัน = atomic) ไฟล์ปลายทางจึงมีแค่สองสถานะ: ไม่มี หรือครบพร้อม mtime ที่ถูกต้อง
+
+`apkTime` fallback `0L` ถูกถอดออกด้วย — มันทำให้ `lastModified() >= 0` จริงตลอด แปลว่า**อัปเกรด APK แล้วไม่มีวัน re-extract** ซึ่งเป็นบั๊กเดียวกันคนละหน้า ตอนนี้ปล่อยให้ throw และ `unavailableReason()` รายงานว่า backend ใช้ไม่ได้ ดังกว่าและตรวจเจอง่ายกว่า
+
+### 7. ย้าย detector probe ไป `Dispatchers.IO`
+
+**ไฟล์:** [OperatorViewModel.kt](../androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt)
+
+`DetectorAvailability.checkAll()` แตก DSP library ~96 MB ออกจาก APK ในรอบแรก ซึ่งเป็น blocking disk I/O ไม่ใช่งาน CPU — ความถูกต้องเชิงความหมาย ไม่ใช่ผลด้าน performance ที่วัดได้ (IO กับ Default ใช้ thread pool เดียวกัน)
+
+---
+
+## ยังไม่ได้แก้ใน 0.1.5
+
+| ข้อ | สถานะ |
+|--|--|
+| ~~**NA-06 / TC-11 · live capture smoke test**~~ | **✅ ปิดแล้ว 18/08/2026** — ดูหัวเอกสาร · ยังเหลือกรณีเดียวที่ยังไม่ยืนยัน: กด Back ระหว่างอัดเพื่อทดสอบว่า `goHome()` สั่งหยุดอัดให้เองจริง |
+| **TC-05 / TC-13** | ยังค้างจาก 0.1.4 · ยังแยกผลของข้อ 1 กับข้อ 4 ไม่ได้ |
+| **`yuv420ToNv21` = 61.6% ของ wall** | คอขวดตัวถัดไปที่ 0.1.4 ชี้ไว้ · 0.1.5 ไม่ได้แตะเลย |
+| **สูตร estimate ไม่ได้ calibrate** | ต่ำกว่า TC-12 เกือบ 40% (ดูข้อ 2) |
+| **`cacheDir/network_import/` ไม่มีใครลบ** | ไฟล์ที่ดาวน์โหลดสำเร็จค้างอยู่จนระบบเคลียร์ cache เอง · คลิปเป็นกิกะไบต์จึงกินที่ได้จริง (`dest.delete()` ทำเฉพาะตอน fail) |
+| **`usesCleartextTraffic` เปิดทั้งแอป** | ควรแคบลงเป็น `network_security_config` เฉพาะ host ที่ใช้จริง เมื่อรู้ว่าสนามใช้อะไร |
+| **fps ยังไม่ขับ sample interval** | ค่าอ่านได้แล้ว แต่ `FRAME_SAMPLE_INTERVAL_MS` ยังคงที่ 120 ms · interval จริงถูกปัดขึ้นเข้ากริดเฟรม (30 fps → 133 ms) |
+| **B3 · HTTP upload** | เอกสารฉบับนี้ครอบคลุมถึงตอนที่ตัดเวอร์ชัน 0.1.5 ซึ่งยังไม่มี upload · งาน upload ถูกทำเพิ่มบน 0.1.5 หลังจากนั้น ดู [ข้อจำกัดการใช้งานจริง](#ขอจำกดการใชงานจรง--upload-ตองเปดแอปคางไว) ข้างล่าง |
+
+---
+
+## การใช้งานจริง — upload ทำงานตอนวางเครื่องทิ้งไว้
+
+> เพิ่มเมื่อ **20/08/2026** หลังงาน upload ถูกทำเพิ่มบน 0.1.5 · รายละเอียดเต็มอยู่ที่ [PHASES.md B3f-0 / B3f-1](./PHASES.md)
+
+วัดจริงบน Xiaomi peridot (HyperOS 3.0) สองรอบ **ก่อน** และ **หลัง** มี foreground service:
+
+| สถานการณ์ | ไม่มี FGS | **มี FGS** |
+|--|--|--|
+| เปิดแอปค้าง · จอดับ · เสียบสายชาร์จ | ✅ 15 ใบครบ | ✅ |
+| เครื่องนิ่งจนเข้า Doze (ถอดสายชาร์จ) | 🔴 **6 จาก 15 ใบ แล้วหยุดสนิท** | ✅ **16 จาก 16 ใบ ใน 4 นาที 30 วินาที** |
+| งานถูกระบบยกเลิกระหว่างนั้น | 3 ครั้ง | **0** |
+| โปรเซสถูกฆ่า | ใช่ (token หายไปด้วย) | ไม่ |
+
+**สรุป: ไม่ต้องเฝ้าจอแล้ว** ปิดจอ วางทิ้ง ถอดสายได้ คิวเดินต่อ
+
+### สองข้อที่ยังต้องทำก่อนออกงานจริง
+
+**1 · ติ๊ก "จำ username/password"**
+
+foreground service กันโปรเซสตายเฉพาะ**ตอนที่คิวกำลังเดิน** ถ้าคิวว่างอยู่แล้วโปรเซสถูกฆ่า token ที่อยู่ใน memory จะหายไปด้วย พอมีรูปใหม่เข้าคิว worker จะตื่นมาในโปรเซสใหม่ที่ไม่รู้จักใครแล้วขึ้น `Not signed in — standing by`
+
+ติ๊กไว้ = worker ขอ token ใหม่เองได้ ไม่ต้องมีคนมากด · ไม่ติ๊ก = ต้องเปิดแอป login ใหม่ทุกครั้งที่โปรเซสตาย
+
+**2 · อนุญาตการแจ้งเตือน** ตอนที่แอปขอ (กดเปิด auto-upload ครั้งแรก) — ปฏิเสธได้ คิวยังเดิน แต่จะไม่เห็นความคืบหน้าบนแถบสถานะ
+
+**3 · (MIUI/HyperOS)** Settings → Apps → AutoBots → Battery saver → **No restrictions** และเปิด **Autostart**
+
+### วิธีทดสอบซ้ำบนเครื่องรุ่นอื่น
+
+ใช้ได้กับทุกยี่ห้อ ไม่ต้องรอ 30 นาทีให้ Doze มาเอง:
+
+```bash
+adb shell svc power stayon false
+adb shell input keyevent 26            # ปิดจอ
+adb shell dumpsys battery unplug       # หลอกว่าถอดสายแล้ว (USB ยังต่ออยู่)
+adb shell dumpsys deviceidle force-idle
+
+adb logcat -d | grep -E "RunxUploadTransport|UploadWorker|was cancelled"
+
+adb shell dumpsys deviceidle unforce   # คืนค่าให้เรียบร้อยทุกครั้ง
+adb shell dumpsys battery reset
+```
+
+**เกณฑ์ผ่าน:** คิวระบายจนหมดขณะอยู่ในโหมด idle · ไม่มี `was cancelled` · ไม่มี `Not signed in — standing by`
+
+> **Doze เป็นของ Android เองตั้งแต่ 6.0 ไม่ใช่ของ Xiaomi** — เปลี่ยนยี่ห้อไม่ได้ทำให้หายไป สิ่งที่ OEM แต่ละเจ้าต่างกันคือความดุในการฆ่าโปรเซส ซึ่งเป็นชั้นที่สอง · foreground service คือทางเดียวที่ Android รับรองว่างานจะได้รันและได้ใช้เน็ตตอนเครื่องนิ่ง
+
+---
+
+## สถานะงาน upload — 20/08/2026
+
+> งาน upload ทั้งหมดถูกทำเพิ่มบน 0.1.5 หลังตัดเวอร์ชันไปแล้ว · แผนเต็มและกติกาที่ล็อกไว้อยู่ที่ [PHASES.md](./PHASES.md)
+
+**ทำงานได้แล้ว:** คิวบนดิสก์ · WorkManager + foreground service · login ด้วย username/password · เลือก event จาก dropdown · presign → PUT → complete ขึ้น Runx จริง · สวิตช์ auto-upload · การ์ดสถานะบนหน้าแรก · การแจ้งเตือนพร้อม %
+
+### 🔴 รอออกสนาม — ทดสอบในออฟฟิศไม่ได้
+
+| | |
+|--|--|
+| **live capture → production** | ที่ยิงขึ้นจริงคือเส้นทาง **import** เท่านั้น · live capture เข้าคิวคนละจุด ([CapturePipelineCoordinator](../androidApp/src/main/kotlin/com/autobots/camera/pipeline/CapturePipelineCoordinator.kt)) พิสูจน์แล้วแต่กับ fake transport |
+| **เน็ตมือถือจริง (4G)** | ทุกอย่างที่วัดมาอยู่บน Wi-Fi หรือ loopback · อัตราการล้มของ PUT บน 4G ยังไม่มีตัวเลข |
+| **FGS บนงานยาว 4 ชั่วโมง** | ที่ผ่านคือ Doze ที่บังคับเอง 4 นาทีครึ่ง · ของจริงคือความร้อน แบต และ Doze ที่มาเองซ้ำๆ ทั้งงาน |
+| **เพดาน `dataSync` 6 ชม./วัน (Android 14+)** | ยังไม่รู้ว่าชนเมื่อไหร่ · ถ่ายสองงานยาวในวันเดียวคือกรณีที่ต้องเฝ้า |
+
+### 🟠 รอเจ้าของ backend
+
+| | ผลถ้ายังไม่ได้ |
+|--|--|
+| **คุมชื่อไฟล์สุดท้ายได้ไหม** | ยิงถามแล้ว `photoUpload` มีแค่ `provider` · `path` · `mimeType` และ `path` เป็นแค่โฟลเดอร์ — server ต่อ UUID เสมอ · **requeue จึงสร้าง object ซ้ำตลอดไป** (รูปไม่หาย แต่มีของกำพร้าบน bucket) |
+| **`/success` รับ `capturedAt` ไหม** | แพลตฟอร์มเห็นแต่เวลาที่อัป ไม่ใช่เวลาที่ถ่าย · สำคัญขึ้นเพราะพิสูจน์แล้วว่าคิวค้างข้ามช่วงเวลาได้จริง |
+
+### 🟡 ทำได้เลย ไม่ต้องรอใคร
+
+- **แถว `Abandoned` ไม่มี UI ให้จัดการ** — ตอนนี้มีแต่ Retry แบบเหมารวม จะดูว่าใบไหนพังเพราะอะไรต้องดึง database ออกมาอ่าน
+- **`usesCleartextTraffic` เปิดทั้งแอป** ทั้งที่ production เป็น HTTPS ล้วนแล้ว
+- **v0.1.6 ยังไม่ตัด** — [ร่าง release doc](./RELEASE_0_1_6.md) เขียนรอไว้แล้ว
+- หนี้เก่าจากตารางข้างบน: `yuv420ToNv21` · สูตร estimate · `cacheDir/network_import/`
+
+---
+
+## ถัดไป
+
+> ย่อหน้านี้เขียนไว้ตอนตัดเวอร์ชัน 0.1.5 ซึ่ง B3 ยังไม่เริ่ม · ตอนนี้ B3a–B3f ทำเสร็จแล้ว ดู [สถานะงาน upload](#สถานะงาน-upload--20082026) ข้างบน
+
+**B3 — upload** คือสิ่งที่ 0.1.5 ปูทางไว้ให้ครึ่งหนึ่งแล้ว: `VideoHttp` กับ `RemoteVideoFetcher` ได้พิสูจน์รูปแบบของ HTTP layer ในโปรเจกต์นี้ไปแล้ว (header แบบเบราว์เซอร์ · แยก validate/head/probe/transfer ออกจากกัน · fallback ที่ตัดสินจากชนิดของ error ไม่ใช่จากการลองซ้ำ) ขาออกน่าจะเดินทางเดียวกันแบบกลับด้าน
+
+ก่อนถึงตรงนั้น ลิสต์ "ยังไม่ได้แก้" ข้างบนมีสองข้อที่ควรปิดก่อน — **TC-11** เพราะเป็นความเสี่ยง ship ของพัง และ **calibrate สูตร estimate** เพราะตอนนี้ UI กำลังบอกตัวเลขที่รู้อยู่แล้วว่าผิดให้ผู้ใช้ตัดสินใจ

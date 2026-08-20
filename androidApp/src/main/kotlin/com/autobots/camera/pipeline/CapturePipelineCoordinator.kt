@@ -20,6 +20,9 @@ import com.autobots.camera.network.RemoteVideoFetcher
 import com.autobots.camera.network.VideoHttp
 import com.autobots.camera.delivery.SessionAlbumNaming
 import com.autobots.camera.delivery.WriteQueue
+import com.autobots.camera.upload.UploadCandidate
+import com.autobots.camera.upload.UploadRepository
+import com.autobots.camera.upload.UploadScheduler
 import com.autobots.camera.toLogText
 import com.autobots.camera.load.DeviceLoadReader
 import com.autobots.camera.perf.CamPerf
@@ -85,6 +88,12 @@ class CapturePipelineCoordinator(
     } else {
         null
     }
+    /**
+     * Where delivered photos are recorded for later upload. Local-only for now — nothing
+     * reads this queue yet (B3a in docs/PHASES.md); the worker arrives in B3c.
+     */
+    private val uploadQueue: UploadRepository = UploadRepository.create(appContext)
+
     private val imageDelivery = WriteQueue(
         writer = deliveryWriter,
         capacity = IMAGE_QUEUE_CAPACITY,
@@ -94,7 +103,14 @@ class CapturePipelineCoordinator(
             maybeNotifyDrainComplete()
         },
         onDeliveredFile = ::recordMomentToGallery,
+        onPublished = ::enqueueForUpload,
     )
+
+    init {
+        // Rows left in Uploading by a process that died mid-transfer belong back in the
+        // queue; nothing else would ever claim them again.
+        scope.launch { runCatching { uploadQueue.resetInterrupted() } }
+    }
 
     /** chunk index → wall-clock instant that chunk started / finished recording. */
     private val chunkStartWallMs = ConcurrentHashMap<Int, Long>()
@@ -839,6 +855,35 @@ class CapturePipelineCoordinator(
         val now = System.currentTimeMillis()
         runCatching { reader.sample() }.getOrNull()?.let { perfReport.addLoad(now, it) }
         perfReport.addEvent(now, type, chunkIndex, videoPending.get(), imageDelivery.pendingCount)
+    }
+
+    /**
+     * Record a published photo for upload.
+     *
+     * The album folder doubles as the session key: it is what the photos actually live under
+     * in DCIM, so a queue row can always be traced back to something the operator can see.
+     * [LocalDeliveryWriter.albumSubfolder] is the same value the photo was just published
+     * with, read on this callback rather than from [sessionMeta] because that field is per
+     * coordinator instance, not per run.
+     *
+     * Size and timestamp are read here because [WriteQueue] deletes the file immediately
+     * after this returns.
+     */
+    private fun enqueueForUpload(uri: Uri, file: File) {
+        val album = deliveryWriter.albumSubfolder
+        if (album.isEmpty()) return
+        val candidate = UploadCandidate(
+            contentUri = uri.toString(),
+            fileName = file.name,
+            sessionId = album,
+            capturedAtMs = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis(),
+            sizeBytes = file.length(),
+        )
+        scope.launch {
+            runCatching { uploadQueue.enqueue(listOf(candidate)) }
+                .onSuccess { UploadScheduler.ensureScheduled(appContext) }
+                .onFailure { Log.e(TAG, "Upload enqueue failed for ${file.name}", it) }
+        }
     }
 
     private fun beginSession(source: SessionSource, displayName: String) {

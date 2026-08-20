@@ -1,8 +1,11 @@
 package com.autobots.ui
 
 import android.app.Application
+import android.content.ContentUris
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -24,11 +27,26 @@ import com.autobots.camera.load.DeviceLoadReader
 import com.autobots.camera.load.DeviceLoadSnapshot
 import com.autobots.camera.network.RemoteVideoFetcher
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
+import com.autobots.camera.upload.uploadDestinationLabel
+import com.autobots.camera.upload.RunxAuthClient
+import com.autobots.camera.upload.UploadAuthUiState
+import com.autobots.camera.upload.UploadCandidate
+import com.autobots.camera.upload.UploadConfig
+import com.autobots.camera.upload.UploadItem
+import com.autobots.camera.upload.UploadQueueCounts
+import com.autobots.camera.upload.UploadRepository
+import com.autobots.camera.upload.UploadScheduler
+import com.autobots.camera.upload.UploadSession
+import com.autobots.camera.upload.UploadSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -285,6 +303,190 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
 
     private var pipeline: CapturePipelineCoordinator? = null
 
+    /**
+     * Read side of the upload queue. Same database the pipeline writes to — [UploadDatabase]
+     * is a singleton, so this instance and the coordinator's see each other's rows.
+     */
+    private val uploadQueue: UploadRepository = UploadRepository.create(application)
+
+    /**
+     * Totals only. The rows themselves are never observed here: nothing deletes from the
+     * queue (docs/PHASES.md §2.5), so the table only grows, and a whole-table Flow would
+     * re-map every row each time a worker touched one.
+     */
+    val uploadCounts: StateFlow<UploadQueueCounts> = uploadQueue.observeCounts()
+        .catch { emit(UploadQueueCounts()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UploadQueueCounts())
+
+    /** One bounded page for the queue screen. Only collected while that screen is open. */
+    val uploadItems: StateFlow<List<UploadItem>> = uploadQueue.observePage()
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    private val uploadSettings = UploadSettings(application)
+
+    val uploadPaused: StateFlow<Boolean> = uploadSettings.paused
+
+    /** Set when the queue paused itself — a rejected token, not an operator decision. */
+    val uploadPauseReason: StateFlow<String?> = uploadSettings.pauseReason
+
+    val uploadConfig: StateFlow<UploadConfig> = uploadSettings.config
+
+    fun saveUploadConfig(config: UploadConfig) {
+        uploadSettings.writeConfig(config)
+        // A newly configured device should not sit idle waiting for the next photo.
+        UploadScheduler.ensureScheduled(getApplication())
+    }
+
+    fun clearUploadConfig() = uploadSettings.clearConfig()
+
+    /**
+     * Apply a scanned provisioning payload. Same entry point the QR scanner uses.
+     * @return false when the payload was not an upload configuration; the current one stands.
+     */
+    fun applyScannedUploadConfig(payload: String): Boolean {
+        val parsed = UploadConfig.parseQr(uploadSettings.readConfig(), payload) ?: return false
+        saveUploadConfig(parsed.config)
+        // A provisioning QR may carry a token. It signs this process in and is not written
+        // anywhere — same rule as a login, and the same one login every launch.
+        parsed.token?.let { UploadSession.signIn(UploadSession.SignedIn(it, "provisioning QR")) }
+        return true
+    }
+
+    // --- sign-in (B3e) -------------------------------------------------------------------
+
+    /** Who is signed in, for this process only. Null after every cold start, by design. */
+    val uploadAccount: StateFlow<UploadSession.SignedIn?> = UploadSession.current
+
+    /** What the sign-in box should be pre-filled with, when the operator asked us to remember. */
+    val rememberedCredentials: StateFlow<UploadSettings.Credentials?> = uploadSettings.remembered
+
+    private val _uploadAuth = MutableStateFlow(UploadAuthUiState())
+    val uploadAuth: StateFlow<UploadAuthUiState> = _uploadAuth.asStateFlow()
+
+    /**
+     * Sign in, then immediately fetch the events that token can see.
+     *
+     * The two are one action from the operator's point of view: nobody signs in for its own
+     * sake, they sign in to pick today's event.
+     */
+    fun signInToUpload(username: String, password: String, remember: Boolean) {
+        if (_uploadAuth.value.busy) return
+        val config = uploadSettings.readConfig()
+        config.signInProblem()?.let { problem ->
+            _uploadAuth.update { it.copy(error = problem) }
+            return
+        }
+        if (username.isBlank() || password.isBlank()) {
+            _uploadAuth.update { it.copy(error = "Username and password are required") }
+            return
+        }
+
+        _uploadAuth.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = runCatching {
+                RunxAuthClient.login(config.graphqlUrl, config.platform, username, password)
+            }
+            outcome.onSuccess { account ->
+                UploadSession.signIn(account)
+                uploadSettings.saveCredentials(username, password, remember)
+                // A queue that stopped itself over a rejected token has just been given a
+                // good one; making the operator also find the Resume button would be rude.
+                if (uploadSettings.pauseReason.value != null) uploadSettings.setPaused(false)
+                UploadScheduler.ensureScheduled(getApplication())
+                _uploadAuth.update { it.copy(busy = false, error = null) }
+                loadUploadEvents()
+            }.onFailure { t ->
+                _uploadAuth.update { it.copy(busy = false, error = t.message ?: "Sign-in failed") }
+            }
+        }
+    }
+
+    /** Drops the token and, if it was stored, the password too. */
+    fun signOutOfUpload() {
+        UploadSession.signOut()
+        uploadSettings.saveCredentials("", "", remember = false)
+        _uploadAuth.value = UploadAuthUiState()
+    }
+
+    fun setUploadEventScope(scope: RunxAuthClient.EventScope) {
+        if (_uploadAuth.value.scope == scope) return
+        _uploadAuth.update { it.copy(scope = scope, events = emptyList(), loaded = false) }
+        loadUploadEvents()
+    }
+
+    fun setUploadEventSearch(search: String) {
+        _uploadAuth.update { it.copy(search = search) }
+    }
+
+    /** Refresh the event picker with whatever scope and search are currently set. */
+    fun loadUploadEvents() {
+        val token = UploadSession.token ?: run {
+            _uploadAuth.update { it.copy(error = "Sign in first") }
+            return
+        }
+        if (_uploadAuth.value.loadingEvents) return
+        val config = uploadSettings.readConfig()
+        val state = _uploadAuth.value
+
+        _uploadAuth.update { it.copy(loadingEvents = true, error = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                RunxAuthClient.events(
+                    graphqlUrl = config.graphqlUrl,
+                    platform = config.platform,
+                    token = token,
+                    scope = state.scope,
+                    search = state.search,
+                )
+            }.onSuccess { list ->
+                _uploadAuth.update {
+                    it.copy(
+                        loadingEvents = false,
+                        loaded = true,
+                        events = list.events,
+                        truncated = list.truncated,
+                    )
+                }
+            }.onFailure { t ->
+                // An expired token shows up here, not at sign-in — this is usually the first
+                // call made after the app has been open for a week.
+                if (t is com.autobots.camera.upload.UploadException.Unauthorized) {
+                    UploadSession.signOut()
+                }
+                _uploadAuth.update {
+                    it.copy(loadingEvents = false, error = t.message ?: "Could not load events")
+                }
+            }
+        }
+    }
+
+    /** Picking an event is what actually writes `eventId` into the durable config. */
+    fun selectUploadEvent(event: RunxAuthClient.EventSummary) {
+        saveUploadConfig(
+            uploadSettings.readConfig().copy(eventId = event.id, eventTitle = event.title),
+        )
+    }
+
+    fun clearUploadAuthError() = _uploadAuth.update { it.copy(error = null) }
+
+    /**
+     * Where uploads actually go. Derived from the same three inputs the worker's selection
+     * rule uses, so the screen can never claim a destination the worker is not using.
+     */
+    val uploadDestinationLabel: StateFlow<String> =
+        combine(uploadSettings.config, UploadSession.current) { config, account ->
+            uploadDestinationLabel(config, account != null, uploadSettings.useFakeTransport)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+            uploadDestinationLabel(
+                uploadSettings.readConfig(),
+                UploadSession.isSignedIn,
+                uploadSettings.useFakeTransport,
+            ),
+        )
+
     private val deviceLoadReader = DeviceLoadReader(
         context = application,
         mainExecutor = ContextCompat.getMainExecutor(application),
@@ -310,6 +512,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                 }
                 state.copy(detectorUnavailable = unavailable, detectorBackend = fallback)
             }
+            // Anything left in the queue from a previous run should move without waiting for
+            // the next photo to be delivered.
+            UploadScheduler.ensureScheduled(getApplication())
         }
 
         deviceLoadReader.start(::applyDeviceLoad)
@@ -326,6 +531,89 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         pipeline = null
         deviceLoadReader.stop()
         super.onCleared()
+    }
+
+    /** Operator pressed *Retry failed* — clears backoff and attempt counts. */
+    fun retryFailedUploads() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { uploadQueue.retryAllFailed() }
+            UploadScheduler.ensureScheduled(getApplication())
+        }
+    }
+
+    /** **Debug only.** Rewind the queue so the drain can be run again from scratch. */
+    fun debugRequeueUploads() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { uploadQueue.debugRequeueAll() }
+            UploadScheduler.ensureScheduled(getApplication())
+        }
+    }
+
+    /**
+     * Debug: queue photos that are already in `DCIM/AutoBots`.
+     *
+     * The queue lives in app storage and the photos do not, so clearing app data leaves a
+     * gallery full of images and nothing to upload. Without this, exercising the transport
+     * means shooting a fresh session with real faces in front of the lens — which is not
+     * something that can be arranged while debugging an HTTP header.
+     *
+     * Deliberately reuses the normal enqueue path, unique index and all, so re-running it
+     * cannot duplicate a row.
+     */
+    fun debugEnqueueExistingPhotos(limit: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val resolver = getApplication<Application>().contentResolver
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.RELATIVE_PATH,
+                MediaStore.Images.Media.SIZE,
+                MediaStore.Images.Media.DATE_TAKEN,
+            )
+            val candidates = mutableListOf<UploadCandidate>()
+            runCatching {
+                resolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?",
+                    arrayOf("DCIM/AutoBots/%"),
+                    "${MediaStore.Images.Media.DATE_ADDED} DESC",
+                )?.use { cursor ->
+                    while (cursor.moveToNext() && candidates.size < limit) {
+                        val id = cursor.getLong(0)
+                        val name = cursor.getString(1) ?: continue
+                        // `DCIM/AutoBots/<album>/` — the album is our sessionId.
+                        val album = cursor.getString(2).orEmpty()
+                            .trimEnd('/').substringAfterLast('/')
+                        if (album.isBlank()) continue
+                        candidates += UploadCandidate(
+                            contentUri = ContentUris.withAppendedId(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                id,
+                            ).toString(),
+                            fileName = name,
+                            sessionId = album,
+                            capturedAtMs = cursor.getLong(4).takeIf { it > 0 }
+                                ?: System.currentTimeMillis(),
+                            sizeBytes = cursor.getLong(3),
+                        )
+                    }
+                }
+            }.onFailure { Log.e("OperatorViewModel", "Cannot read gallery", it) }
+
+            if (candidates.isEmpty()) return@launch
+            runCatching { uploadQueue.enqueue(candidates) }
+                .onSuccess {
+                    Log.i("OperatorViewModel", "Debug enqueued ${candidates.size} existing photos")
+                    UploadScheduler.ensureScheduled(getApplication())
+                }
+                .onFailure { Log.e("OperatorViewModel", "Debug enqueue failed", it) }
+        }
+    }
+
+    fun setUploadPaused(paused: Boolean) {
+        val app = getApplication<Application>()
+        if (paused) UploadScheduler.pause(app) else UploadScheduler.resume(app)
     }
 
     fun setServerIp(ip: String) {
@@ -783,5 +1071,11 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
 
     companion object {
         private const val LOAD_POLL_MS = 2_000L
+
+        /**
+         * How long the queue Flows stay warm after the last collector goes away. Long enough
+         * that navigating Home → Upload → Home does not tear down and rebuild the Room query.
+         */
+        private const val STOP_TIMEOUT_MS = 5_000L
     }
 }

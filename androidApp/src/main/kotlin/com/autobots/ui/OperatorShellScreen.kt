@@ -25,8 +25,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
@@ -44,6 +48,13 @@ import com.autobots.camera.AutobotsApp
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.StreamResolution
+import com.autobots.camera.upload.RunxAuthClient
+import com.autobots.camera.upload.UploadAuthUiState
+import com.autobots.camera.upload.UploadConfig
+import com.autobots.camera.upload.UploadSession
+import com.autobots.camera.upload.UploadSettings
+import com.autobots.camera.upload.UploadItem
+import com.autobots.camera.upload.UploadQueueCounts
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
 
 private val CardBg = Color.Gray.copy(alpha = 0.25f)
@@ -67,6 +78,8 @@ private enum class OperatorDestination {
     SessionHistory,
     ImportPreview,
     NetworkUrl,
+    UploadQueue,
+    UploadSettings,
 }
 
 @Composable
@@ -88,8 +101,36 @@ fun OperatorShellScreen(
     onClearNetworkUrlError: () -> Unit,
     onConfirmImport: (ExtractionTarget, DetectorBackend, Long?, Long?) -> Unit,
     onCancelImport: () -> Unit,
+    uploadCounts: UploadQueueCounts,
+    uploadItems: List<UploadItem>,
+    onRetryFailedUploads: () -> Unit,
+    uploadPaused: Boolean,
+    uploadPauseReason: String?,
+    uploadDestinationLabel: String,
+    onSetUploadPaused: (Boolean) -> Unit,
+    uploadConfig: UploadConfig,
+    uploadAccount: UploadSession.SignedIn?,
+    uploadAuth: UploadAuthUiState,
+    uploadRemembered: UploadSettings.Credentials?,
+    onSaveUploadConfig: (UploadConfig) -> Unit,
+    onUploadSignIn: (username: String, password: String, remember: Boolean) -> Unit,
+    onUploadSignOut: () -> Unit,
+    onLoadUploadEvents: () -> Unit,
+    onSetUploadEventScope: (RunxAuthClient.EventScope) -> Unit,
+    onSetUploadEventSearch: (String) -> Unit,
+    onSelectUploadEvent: (RunxAuthClient.EventSummary) -> Unit,
+    onClearUploadConfig: () -> Unit,
+    /**
+     * Debug-only entry point, set from an `adb am start --es dest <name>` extra.
+     * This device refuses `adb shell input` (MIUI gates event injection behind a setting
+     * that will not stay on), so without this there is no way to reach a screen from a
+     * script. Ignored in release builds — see [MainActivity].
+     */
+    startDestination: String? = null,
 ) {
-    var destination by remember { mutableStateOf(OperatorDestination.Home) }
+    var destination by remember {
+        mutableStateOf(destinationForArg(startDestination) ?: OperatorDestination.Home)
+    }
 
     val goHome = {
         if (destination == OperatorDestination.LiveCapture && state.isCapturing) {
@@ -121,8 +162,16 @@ fun OperatorShellScreen(
         when (destination) {
             OperatorDestination.Home -> OperatorHomePage(
                 state = state,
+                uploadCounts = uploadCounts,
+                uploadAccount = uploadAccount,
+                uploadConfig = uploadConfig,
+                uploadPaused = uploadPaused,
+                uploadDestinationLabel = uploadDestinationLabel,
+                capturing = state.isCapturing,
+                onSetUploadPaused = onSetUploadPaused,
                 onLiveCapture = { destination = OperatorDestination.LiveCapture },
                 onBrowseVideo = onImportVideo,
+                onUploadQueue = { destination = OperatorDestination.UploadQueue },
                 onNetworkUrl = {
                     onClearNetworkUrlError()
                     destination = OperatorDestination.NetworkUrl
@@ -170,6 +219,43 @@ fun OperatorShellScreen(
                     .fillMaxSize()
                     .safeDrawingPadding(),
             )
+            OperatorDestination.UploadSettings -> UploadSettingsPage(
+                config = uploadConfig,
+                account = uploadAccount,
+                auth = uploadAuth,
+                remembered = uploadRemembered,
+                onSave = onSaveUploadConfig,
+                onSignIn = onUploadSignIn,
+                onSignOut = onUploadSignOut,
+                onLoadEvents = onLoadUploadEvents,
+                onSetScope = onSetUploadEventScope,
+                onSetSearch = onSetUploadEventSearch,
+                onSelectEvent = onSelectUploadEvent,
+                onClear = onClearUploadConfig,
+                // Back from settings returns to the queue, not Home — settings is reached
+                // from there and that is where the effect of a change shows up.
+                onBack = { destination = OperatorDestination.UploadQueue },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding(),
+            )
+            OperatorDestination.UploadQueue -> UploadQueuePage(
+                counts = uploadCounts,
+                items = uploadItems,
+                paused = uploadPaused,
+                pauseReason = uploadPauseReason,
+                destinationLabel = uploadDestinationLabel,
+                signedInAs = uploadAccount?.username,
+                eventTitle = uploadConfig.eventTitle,
+                eventId = uploadConfig.eventId,
+                onBack = goHome,
+                onRetryFailed = onRetryFailedUploads,
+                onSetPaused = onSetUploadPaused,
+                onOpenSettings = { destination = OperatorDestination.UploadSettings },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding(),
+            )
         }
     }
 }
@@ -177,8 +263,16 @@ fun OperatorShellScreen(
 @Composable
 private fun OperatorHomePage(
     state: OperatorUiState,
+    uploadCounts: UploadQueueCounts,
+    uploadAccount: UploadSession.SignedIn?,
+    uploadConfig: UploadConfig,
+    uploadPaused: Boolean,
+    uploadDestinationLabel: String,
+    capturing: Boolean,
+    onSetUploadPaused: (Boolean) -> Unit,
     onLiveCapture: () -> Unit,
     onBrowseVideo: () -> Unit,
+    onUploadQueue: () -> Unit,
     onNetworkUrl: () -> Unit,
     onSessionHistory: () -> Unit,
     onOpenGallery: () -> Unit,
@@ -194,6 +288,15 @@ private fun OperatorHomePage(
         ProcessingStatusCard(
             state = state,
             idleLine = "No video to process",
+        )
+        UploadStatusCard(
+            counts = uploadCounts,
+            account = uploadAccount,
+            config = uploadConfig,
+            paused = uploadPaused,
+            destinationLabel = uploadDestinationLabel,
+            capturing = capturing,
+            onSetAutoUpload = { onSetUploadPaused(!it) },
         )
         Spacer(modifier = Modifier.height(8.dp))
         val pipelineBusy = state.isImporting || state.isProcessing || state.isDownloading
@@ -225,6 +328,13 @@ private fun OperatorHomePage(
             enabled = !pipelineBusy,
             onClick = onOpenGallery,
         )
+        HomeMenuButton(
+            // Below Gallery on purpose: delivery to the phone comes first, delivery onward
+            // second. The count follows the same shape as Gallery's, and counts only
+            // outstanding rows — a queue of 5,000 already-uploaded photos is not news.
+            label = uploadCounts.badgeLabel?.let { "Upload ($it)" } ?: "Upload",
+            onClick = onUploadQueue,
+        )
     }
 }
 
@@ -254,6 +364,16 @@ private fun AppIdentityCard(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** Maps the debug `dest` extra onto a screen. Unknown or absent → null (stay Home). */
+private fun destinationForArg(arg: String?): OperatorDestination? = when (arg?.lowercase()) {
+    "upload" -> OperatorDestination.UploadQueue
+    "uploadsettings" -> OperatorDestination.UploadSettings
+    "history" -> OperatorDestination.SessionHistory
+    "network" -> OperatorDestination.NetworkUrl
+    "live" -> OperatorDestination.LiveCapture
+    else -> null
 }
 
 @Composable
@@ -291,6 +411,7 @@ private fun OperatorLiveCapturePage(
     onExposureReadout: (String) -> Unit,
 ) {
     val previewActive = state.isCapturing && cameraPermissionGranted
+    KeepScreenOn(active = state.isCapturing)
     var settingsExpanded by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { OverlayPages.Count })
 
@@ -415,6 +536,132 @@ private fun OperatorControlsPage(
                 )
             }
         }
+    }
+}
+
+/**
+ * Hold the screen awake while the camera is rolling.
+ *
+ * The device is on a tripod for the length of an event with nobody touching it, and a screen
+ * timeout mid-session locks the phone. Scoped to capture only — the upload queue deliberately
+ * does **not** hold the screen on, because a queue that only drains while someone is watching
+ * is a queue that has not been proven to work.
+ */
+@Composable
+private fun KeepScreenOn(active: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(view, active) {
+        view.keepScreenOn = active
+        onDispose { view.keepScreenOn = false }
+    }
+}
+
+/**
+ * Upload, on the screen the operator actually looks at.
+ *
+ * The queue screen already says all of this, but nobody opens it while shooting. Both halves
+ * are here for the same reason: **who** can be the wrong account or none at all, **where** can
+ * be yesterday's event, and neither mistake looks like a mistake until the photos are missing
+ * from the event they were supposed to be in.
+ */
+@Composable
+private fun UploadStatusCard(
+    counts: UploadQueueCounts,
+    account: UploadSession.SignedIn?,
+    config: UploadConfig,
+    paused: Boolean,
+    destinationLabel: String,
+    capturing: Boolean,
+    onSetAutoUpload: (Boolean) -> Unit,
+) {
+    val ready = account != null && config.eventId.isNotBlank()
+    val notifications = rememberNotificationPermissionState()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(CardBg)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Upload · $destinationLabel",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Locked while the camera is rolling: whether a session uploads is a decision
+            // taken before it starts, not something to flip halfway through and then have to
+            // reason about which photos went where. The queue screen's Pause still works —
+            // that one is the emergency stop, not a policy switch.
+            Switch(
+                checked = !paused,
+                onCheckedChange = { on ->
+                    // Ask at the moment the notification would start mattering, not at launch.
+                    if (on) notifications.request()
+                    onSetAutoUpload(on)
+                },
+                enabled = !capturing,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color(0xFF26A69A),
+                    checkedTrackColor = Color(0xFF26A69A).copy(alpha = 0.4f),
+                ),
+            )
+        }
+        Text(
+            text = when {
+                account == null -> "Not signed in"
+                config.eventId.isBlank() -> "${account.username} · no event selected"
+                else -> "${account.username} → ${config.eventTitle.ifBlank { config.eventId }}"
+            },
+            color = if (ready) Color(0xFFA5D6A7) else Color(0xFFFFCC80),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        LinearProgressIndicator(
+            // Fraction of the queue that is finished, not of the photo in flight. Per-file
+            // progress would jump around as the worker moves between rows; this only ever
+            // grows, which is what someone glancing at it wants to know.
+            progress = {
+                if (counts.total == 0) 0f else counts.success.toFloat() / counts.total
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp),
+            color = if (paused) Color(0xFFFFB74D) else Color(0xFF26A69A),
+            trackColor = Color.White.copy(alpha = 0.2f),
+        )
+        Text(
+            text = buildString {
+                when {
+                    counts.total == 0 -> append("Nothing queued")
+                    // "All N uploaded" has to mean all of them. A row that was given up on
+                    // still counts in the total, so claiming the full number here would
+                    // report a photo as delivered that never went anywhere.
+                    counts.outstanding == 0 && counts.abandoned == 0 ->
+                        append("All ${counts.total} uploaded")
+                    else -> append("${counts.success} of ${counts.total} uploaded")
+                }
+                if (counts.uploading > 0) append(" · sending")
+                if (counts.failed > 0) append(" · ${counts.failed} retrying")
+                if (counts.abandoned > 0) append(" · ${counts.abandoned} given up")
+                if (paused) append(if (capturing) " · auto-upload off" else " · paused")
+            },
+            color = when {
+                counts.abandoned > 0 -> Color(0xFFEF9A9A)
+                paused -> Color(0xFFFFCC80)
+                else -> Color(0xFF78909C)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+        )
     }
 }
 
@@ -887,6 +1134,25 @@ private fun OperatorShellPreview() {
             onClearNetworkUrlError = {},
             onConfirmImport = { _, _, _, _ -> },
             onCancelImport = {},
+            uploadCounts = UploadQueueCounts(),
+            uploadItems = emptyList(),
+            onRetryFailedUploads = {},
+            uploadPaused = false,
+            uploadPauseReason = null,
+            uploadDestinationLabel = "local test sink",
+            onSetUploadPaused = {},
+            uploadConfig = UploadConfig(),
+            uploadAccount = null,
+            uploadAuth = UploadAuthUiState(),
+            uploadRemembered = null,
+            onSaveUploadConfig = {},
+            onUploadSignIn = { _, _, _ -> },
+            onUploadSignOut = {},
+            onLoadUploadEvents = {},
+            onSetUploadEventScope = {},
+            onSetUploadEventSearch = {},
+            onSelectUploadEvent = {},
+            onClearUploadConfig = {},
         )
     }
 }

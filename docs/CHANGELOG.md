@@ -6,7 +6,35 @@ Also sync: `shared/.../AutobotsApp.kt` → `version` (KMP, docs, non-Android).
 
 ---
 
-## v0.1.4 (current)
+## v0.1.5 (current)
+
+**Theme:** รื้อ navigation เป็นเมนู + เปิดทางเข้าใหม่ให้ pipeline ผ่าน **Network URL**
+**Phase:** B1 (ยังไม่ถึง B3 — 0.1.5 ทำแค่ขาเข้า ยังไม่มี upload)
+
+รายละเอียดเต็ม: **[RELEASE_0_1_5.md](./RELEASE_0_1_5.md)**
+
+### เพิ่ม
+
+- **Home menu แทน `HorizontalPager`** — 5 destination (Home · Live capture · Import preview · Network URL · Session history) + ปุ่ม Back ของระบบ · กล้องถูก bind เฉพาะหน้า Live capture
+- **Import Preview** — เลือกไฟล์แล้วไม่ extract ทันทีอีกแล้ว เห็น metadata (ขนาด · resolution · ความยาว · **fps**) เลือก Face/Pose เลือก backend (ตัวที่รันไม่ได้บอกเหตุผล) **ตัดช่วงเวลา** และเห็นเวลาโดยประมาณก่อนกด Extract
+- **Network URL ingest** — พิมพ์ URL หรือ **สแกน QR** · รับเฉพาะ URL ของไฟล์วิดีโอตรงๆ · **สตรีมเป็นค่าเริ่มต้น** (byte-range ไม่ต้องโหลดครบก่อน) ดาวน์โหลดเฉพาะเมื่อ CDN ปฏิเสธ `MediaHTTPConnection`
+- **ตัดช่วงเวลาตอน import** — `startTimeUs` / `endTimeUs` ใน `ImportedVideoSplitter` · progress คิดจากช่วงที่เลือก ไม่ใช่ทั้งไฟล์
+- `VideoProbeResult.frameRate` — อ่าน fps จาก `CAPTURE_FRAMERATE` แล้ว fallback `MediaFormat.KEY_FRAME_RATE`
+
+### เปลี่ยน
+
+- ⚠️ **default detector: ML Kit FAST → LiteRT NPU** (fallback NPU → GPU → ML Kit) — **การเทียบผลกับ v0.1.4 ต้องระบุ backend ให้ชัด**
+- `session_log.txt`: `Target: Face` → `Detector: Face · NPU · face_det_lite.tflite` · session จำ backend ที่ใช้จริงแล้ว
+- `usesCleartextTraffic="true"` — รับ URL `http://` ของเซิร์ฟเวอร์ในสนาม
+
+### แก้
+
+- **QNN asset extraction เป็น atomic** (`.tmp` + rename) — เดิม copy ที่ขาดกลางคันทำให้ `err 4000` ถาวร แก้ได้ทางเดียวคือ clear app data · `apkTime` fallback `0L` ที่ทำให้อัปเกรด APK แล้วไม่ re-extract ก็ถูกถอดออก
+- detector probe ย้ายไป `Dispatchers.IO` (แตก DSP library ~96 MB เป็น disk I/O ไม่ใช่งาน CPU)
+
+---
+
+## v0.1.4
 
 **Theme:** Worker 2 เป็นสองเธรด — ทำให้ decode กับ detect ทำงานทับซ้อนกันแทนที่จะรอกัน
 **Phase:** B1 (ไม่เปลี่ยน UI หรือ operator flow)

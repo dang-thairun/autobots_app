@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 31+ equivalent of backup_rules.xml. Both paths must exclude it, or one of them leaks. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude
+            domain="sharedpref"
+            path="autobots_upload.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude
+            domain="sharedpref"
+            path="autobots_upload.xml" />
+    </device-transfer>
+</data-extraction-rules>

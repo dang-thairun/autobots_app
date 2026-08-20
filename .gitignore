@@ -28,3 +28,7 @@ androidApp/src/main/jniLibs/**/*.so
 # Only the SDK itself; tools/restore-qairt.sh must stay in git, since it is what puts the
 # SDK back after a reset. See androidApp/src/main/jniLibs/README.md
 /tools/qairt/
+
+# Upload backend credentials. Holds an admin token — never commit.
+# Template: .env.example
+.env

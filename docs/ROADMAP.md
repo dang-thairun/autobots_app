@@ -11,7 +11,7 @@ Naming: [CONVENTIONS.md](./CONVENTIONS.md).
 | ThermalGuard auto-throttle | Adaptive backoff from Device Load Readout |
 | On-device frame scoring | Smile / pose rank / sharpness ranking (optional) |
 | YOLO / TFLite detector | Replace ML Kit if field recall needs it |
-| Cloud / remote upload | Background sync to event gallery (B3) |
+| Cloud / remote upload | **วางแผนแล้ว → [PHASES.md](./PHASES.md)** (B3) — Room queue + WorkManager + presigned R2 |
 | iOS / iPad operator | Wi‑Fi preview + remote controls |
 | Face AF fallback UI | When tripod moves / focus not calibrated (v0.1 P9) |
 | Denser Capture Zone grid | 11×15+ only if 9×11 is too coarse (v0.1 P10) |

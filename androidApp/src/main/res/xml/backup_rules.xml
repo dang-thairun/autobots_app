@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-API-31 backup rules.
+
+  The upload preferences hold a remembered password and the backend endpoints. Backup would
+  copy them off the device and restore them onto another one, which is not what "remember me
+  on this phone" means. Everything else still backs up normally.
+-->
+<full-backup-content>
+    <exclude
+        domain="sharedpref"
+        path="autobots_upload.xml" />
+</full-backup-content>

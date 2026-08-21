@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
                     uploadPauseReason = uploadPauseReason,
                     uploadFilter = uploadFilter,
                     onSetUploadFilter = operatorViewModel::setUploadFilter,
+                    onClearUploadQueue = operatorViewModel::clearUploadQueue,
                     uploadDestinationLabel = uploadDestination,
                     onSetUploadPaused = operatorViewModel::setUploadPaused,
                     uploadConfig = uploadConfig,

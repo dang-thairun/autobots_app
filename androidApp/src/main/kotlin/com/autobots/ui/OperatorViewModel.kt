@@ -632,6 +632,21 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Empty the upload queue.
+     *
+     * Records only — the photos are untouched in the gallery. Rows that had not uploaded yet
+     * are gone for good, because nothing rebuilds the queue from what is on disk; the screen
+     * says so before this runs.
+     */
+    fun clearUploadQueue() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val removed = runCatching { uploadQueue.clearAll() }.getOrDefault(0)
+            Log.i("OperatorViewModel", "Upload queue cleared ($removed rows)")
+            setUploadFilter(null)
+        }
+    }
+
     fun setUploadPaused(paused: Boolean) {
         val app = getApplication<Application>()
         if (paused) UploadScheduler.pause(app) else UploadScheduler.resume(app)

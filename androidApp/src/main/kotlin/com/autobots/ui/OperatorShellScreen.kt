@@ -109,6 +109,7 @@ fun OperatorShellScreen(
     uploadPauseReason: String?,
     uploadFilter: UploadStatus?,
     onSetUploadFilter: (UploadStatus?) -> Unit,
+    onClearUploadQueue: () -> Unit,
     uploadDestinationLabel: String,
     onSetUploadPaused: (Boolean) -> Unit,
     uploadConfig: UploadConfig,
@@ -255,6 +256,7 @@ fun OperatorShellScreen(
                 onRetryFailed = onRetryFailedUploads,
                 onSetPaused = onSetUploadPaused,
                 onOpenSettings = { destination = OperatorDestination.UploadSettings },
+                onClearQueue = onClearUploadQueue,
                 filter = uploadFilter,
                 onFilter = onSetUploadFilter,
                 modifier = Modifier
@@ -1146,6 +1148,7 @@ private fun OperatorShellPreview() {
             uploadPauseReason = null,
             uploadFilter = null,
             onSetUploadFilter = {},
+            onClearUploadQueue = {},
             uploadDestinationLabel = "local test sink",
             onSetUploadPaused = {},
             uploadConfig = UploadConfig(),

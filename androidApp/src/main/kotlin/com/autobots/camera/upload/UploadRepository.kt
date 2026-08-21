@@ -39,6 +39,9 @@ interface UploadRepository {
      */
     suspend fun enqueue(candidates: List<UploadCandidate>): Int
 
+    /** Empty the queue. Records only — the photos stay in the gallery. */
+    suspend fun clearAll(): Int
+
     /** Rows still owed an upload, counted once. Used to size the progress notification. */
     suspend fun outstandingCount(): Int
 
@@ -139,6 +142,8 @@ class RoomUploadRepository(
         }
         return inserted
     }
+
+    override suspend fun clearAll(): Int = dao.clearAll()
 
     override suspend fun outstandingCount(): Int = dao.countOutstanding()
 

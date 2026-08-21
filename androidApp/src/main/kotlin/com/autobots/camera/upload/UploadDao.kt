@@ -70,6 +70,17 @@ interface UploadDao {
     @Query("SELECT COUNT(*) FROM upload_queue WHERE status IN ('Pending', 'Uploading', 'Uploaded', 'Failed')")
     suspend fun countOutstanding(): Int
 
+    /**
+     * Forget the whole queue.
+     *
+     * Deletes the *records*, never the photos — those live in MediaStore and are not this
+     * table's to remove (`docs/PHASES.md` §2.5). What is lost is the knowledge of what has
+     * already gone up, so rows still owed an upload will never be retried: nothing re-scans
+     * the gallery to rebuild them.
+     */
+    @Query("DELETE FROM upload_queue")
+    suspend fun clearAll(): Int
+
     @Query("SELECT COUNT(*) FROM upload_queue WHERE sessionId = :sessionId AND status = :status")
     fun observeSessionCount(sessionId: String, status: UploadStatus): Flow<Int>
 

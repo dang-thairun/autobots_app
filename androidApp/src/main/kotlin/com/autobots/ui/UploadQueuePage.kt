@@ -58,6 +58,7 @@ fun UploadQueuePage(
     onRetryFailed: () -> Unit,
     onSetPaused: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    onClearQueue: () -> Unit,
     filter: UploadStatus?,
     onFilter: (UploadStatus?) -> Unit,
     modifier: Modifier = Modifier,
@@ -91,6 +92,7 @@ fun UploadQueuePage(
             onRetryFailed = onRetryFailed,
             onSetPaused = onSetPaused,
             onOpenSettings = onOpenSettings,
+            onClearQueue = onClearQueue,
         )
 
         if (counts.total > 0) {
@@ -141,7 +143,10 @@ private fun SummaryCard(
     onRetryFailed: () -> Unit,
     onSetPaused: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    onClearQueue: () -> Unit,
 ) {
+    // Two taps, because this cannot be undone and the second tap is the whole safeguard.
+    var confirmingClear by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -207,6 +212,42 @@ private fun SummaryCard(
                 }
             }
             TextButton(onClick = onOpenSettings) { Text("Settings") }
+        }
+
+        if (counts.total > 0) {
+            TextButton(
+                onClick = {
+                    if (confirmingClear) {
+                        onClearQueue()
+                        confirmingClear = false
+                    } else {
+                        confirmingClear = true
+                    }
+                },
+            ) {
+                Text(
+                    text = if (confirmingClear) {
+                        "Tap again to clear ${counts.total}"
+                    } else {
+                        "Clear queue"
+                    },
+                    color = if (confirmingClear) Color(0xFFEF9A9A) else Color(0xFF90A4AE),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            if (confirmingClear) {
+                // Both halves matter: what survives, and what does not come back.
+                Text(
+                    text = "Photos stay in the gallery. " +
+                        if (counts.outstanding > 0) {
+                            "${counts.outstanding} not yet uploaded will never be sent."
+                        } else {
+                            "Only the upload history is forgotten."
+                        },
+                    color = Color(0xFFFFCC80),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
     }
 }

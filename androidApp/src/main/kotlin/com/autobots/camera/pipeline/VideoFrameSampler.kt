@@ -7,6 +7,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.media.Image
+import com.autobots.BuildConfig
 import android.media.ImageReader
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
@@ -49,6 +50,18 @@ import java.io.File
 object VideoFrameSampler {
     private const val TAG = "VideoFrameSampler"
     private const val TIMEOUT_US = 10_000L
+
+    /**
+     * How many frames per session get checked against the old per-pixel conversion.
+     *
+     * A handful is enough: the plane layout is a property of the decoder and the format, not
+     * of the picture, so if it holds for the first frames it holds for the session. Checking
+     * every frame would cost more than the optimisation saves.
+     */
+    private const val FAST_PATH_VERIFY_FRAMES = 3
+
+    /** Pixel pairs compared when working out the chroma layout. One row's worth is plenty. */
+    private const val PROBE_PAIRS = 64
 
     /**
      * Quality of the intermediate JPEG the YUV path produces.
@@ -489,32 +502,228 @@ object VideoFrameSampler {
         }
     }
 
+    /**
+     * YUV_420_888 → NV21.
+     *
+     * Measured at **63.9 ms/frame and 61.7 % of the whole import** on 4K (session
+     * `ext_v0_1_5_20082026_1725`), which made it the single largest cost in the pipeline and
+     * the reason the producer thread, not the detector, set the pace — the workers sat idle
+     * 109 ms per frame waiting for it.
+     *
+     * The cost was never the copying; it was doing it one byte at a time. At 4K the chroma
+     * loop ran 2,073,600 times per frame with two bounds-checked `ByteBuffer.get(int)` calls
+     * each. The fast paths do the same work in ~1,080 bulk reads.
+     *
+     * **Which fast path is right depends on the device**, and guessing was wrong: this phone
+     * hands back a U-first (NV12) buffer, so reading forward from the V plane yields
+     * `V0 U1 V1 U2 …` — the chroma shifted by one sample, which is a colour bug that no test
+     * would fail and no crash would announce. [pickChromaCopy] therefore *measures* the
+     * layout on every frame instead of assuming it, and falls back to the per-pixel loop when
+     * neither shape matches.
+     */
     private fun yuv420ToNv21(image: Image): ByteArray? {
         val planes = image.planes
         if (planes.size < 3) return null
         val yBuffer = planes[0].buffer
-        val uBuffer = planes[1].buffer
-        val vBuffer = planes[2].buffer
         val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
+        val uSize = planes[1].buffer.remaining()
+        val vSize = planes[2].buffer.remaining()
         val nv21 = ByteArray(ySize + uSize + vSize)
         yBuffer.get(nv21, 0, ySize)
+
         val chromaHeight = image.height / 2
         val chromaWidth = image.width / 2
-        val vRowStride = planes[2].rowStride
-        val vPixelStride = planes[2].pixelStride
-        val uRowStride = planes[1].rowStride
-        val uPixelStride = planes[1].pixelStride
-        var offset = ySize
-        for (row in 0 until chromaHeight) {
-            for (col in 0 until chromaWidth) {
-                val vIndex = row * vRowStride + col * vPixelStride
-                val uIndex = row * uRowStride + col * uPixelStride
-                nv21[offset++] = vBuffer.get(vIndex)
-                nv21[offset++] = uBuffer.get(uIndex)
+
+        when (pickChromaCopy(planes, chromaWidth)) {
+            ChromaCopy.FromV -> {
+                copyChromaRows(planes[2].buffer, nv21, ySize, planes[2].rowStride, chromaWidth, chromaHeight, swap = false)
+                patchLastPair(planes, nv21, ySize, chromaWidth, chromaHeight)
             }
+            ChromaCopy.FromUSwapped -> {
+                copyChromaRows(planes[1].buffer, nv21, ySize, planes[1].rowStride, chromaWidth, chromaHeight, swap = true)
+                patchLastPair(planes, nv21, ySize, chromaWidth, chromaHeight)
+            }
+            ChromaCopy.Slow ->
+                copyChromaPlanar(planes, nv21, ySize, chromaWidth, chromaHeight)
+        }
+
+        if (BuildConfig.DEBUG && verifiedFastFrames < FAST_PATH_VERIFY_FRAMES) {
+            verifyFastPath(planes, nv21, ySize, chromaWidth, chromaHeight)
         }
         return nv21
     }
+
+    private enum class ChromaCopy { FromV, FromUSwapped, Slow }
+
+    /**
+     * Work out how this device lays out chroma, by trying each shape on the first few pixels
+     * and comparing against the per-pixel loop.
+     *
+     * Done per frame rather than cached per session: the probe is [PROBE_PAIRS] iterations of
+     * the slow loop — microseconds — and caching would mean a stale answer the first time a
+     * different decoder or resolution comes through. Cheap enough that correctness wins.
+     */
+    private fun pickChromaCopy(planes: Array<out Image.Plane>, chromaWidth: Int): ChromaCopy {
+        if (planes[1].pixelStride != 2 || planes[2].pixelStride != 2) return ChromaCopy.Slow
+        val pairs = minOf(PROBE_PAIRS, chromaWidth)
+        val bytes = pairs * 2
+
+        val expected = ByteArray(bytes)
+        copyChromaPlanar(planes, expected, 0, pairs, 1)
+
+        val candidate = ByteArray(bytes)
+        if (readRow(planes[2].buffer, candidate, 0, 0, bytes, swap = false) &&
+            candidate.contentEquals(expected)
+        ) {
+            return ChromaCopy.FromV
+        }
+        if (readRow(planes[1].buffer, candidate, 0, 0, bytes, swap = true) &&
+            candidate.contentEquals(expected)
+        ) {
+            return ChromaCopy.FromUSwapped
+        }
+        return ChromaCopy.Slow
+    }
+
+    /**
+     * Copy the chroma plane a row at a time.
+     *
+     * @param swap true when the source is U-first: the bytes arrive as `U V U V` and NV21
+     *   wants `V U V U`, so each pair is exchanged in place — still an array-local loop, which
+     *   costs a fraction of the bounds-checked buffer reads it replaces.
+     */
+    private fun copyChromaRows(
+        source: java.nio.ByteBuffer,
+        dest: ByteArray,
+        offset: Int,
+        rowStride: Int,
+        chromaWidth: Int,
+        chromaHeight: Int,
+        swap: Boolean,
+    ) {
+        val rowBytes = chromaWidth * 2
+        var out = offset
+        for (row in 0 until chromaHeight) {
+            if (!readRow(source, dest, out, row * rowStride, rowBytes, swap)) break
+            out += rowBytes
+        }
+    }
+
+    /**
+     * One bulk read into [dest], optionally exchanging byte pairs.
+     *
+     * @return false when the source has nothing left to give — the last row of a semi-planar
+     *   buffer is one byte short of a full pair, and that final byte is the second chroma
+     *   sample of the last pixel, which no decoder reads.
+     */
+    private fun readRow(
+        source: java.nio.ByteBuffer,
+        dest: ByteArray,
+        destOffset: Int,
+        sourceStart: Int,
+        length: Int,
+        swap: Boolean,
+    ): Boolean {
+        val view = source.duplicate()
+        if (sourceStart >= view.limit()) return false
+        val len = minOf(length, view.limit() - sourceStart, dest.size - destOffset)
+        if (len <= 0) return false
+        view.position(sourceStart)
+        view.get(dest, destOffset, len)
+        if (swap) {
+            var i = destOffset
+            val end = destOffset + len - 1
+            while (i < end) {
+                val first = dest[i]
+                dest[i] = dest[i + 1]
+                dest[i + 1] = first
+                i += 2
+            }
+        }
+        return len == length
+    }
+
+    /**
+     * Write the final chroma pair the way the per-pixel loop would.
+     *
+     * A semi-planar buffer ends one byte before its last pair is complete: whichever plane the
+     * bulk copy reads from, the very last sample lives in the *other* plane's view. Two direct
+     * reads settle it, and doing so lets the verification compare every byte with no
+     * exceptions — an excluded byte is a byte nothing checks.
+     */
+    private fun patchLastPair(
+        planes: Array<out Image.Plane>,
+        dest: ByteArray,
+        offset: Int,
+        chromaWidth: Int,
+        chromaHeight: Int,
+    ) {
+        val out = offset + (chromaHeight * chromaWidth * 2) - 2
+        if (out < offset || out + 1 >= dest.size) return
+        val vIndex = (chromaHeight - 1) * planes[2].rowStride + (chromaWidth - 1) * planes[2].pixelStride
+        val uIndex = (chromaHeight - 1) * planes[1].rowStride + (chromaWidth - 1) * planes[1].pixelStride
+        if (vIndex < planes[2].buffer.limit()) dest[out] = planes[2].buffer.get(vIndex)
+        if (uIndex < planes[1].buffer.limit()) dest[out + 1] = planes[1].buffer.get(uIndex)
+    }
+
+    /** The original per-pixel path. Correct for any layout, and slow enough to prove it. */
+    private fun copyChromaPlanar(
+        planes: Array<out Image.Plane>,
+        dest: ByteArray,
+        offset: Int,
+        chromaWidth: Int,
+        chromaHeight: Int,
+    ) {
+        val uBuffer = planes[1].buffer
+        val vBuffer = planes[2].buffer
+        val uRowStride = planes[1].rowStride
+        val uPixelStride = planes[1].pixelStride
+        val vRowStride = planes[2].rowStride
+        val vPixelStride = planes[2].pixelStride
+        var out = offset
+        for (row in 0 until chromaHeight) {
+            for (col in 0 until chromaWidth) {
+                dest[out++] = vBuffer.get(row * vRowStride + col * vPixelStride)
+                dest[out++] = uBuffer.get(row * uRowStride + col * uPixelStride)
+            }
+        }
+    }
+
+    /**
+     * Debug builds only: run the slow path over the same frame and compare byte for byte.
+     *
+     * A colour bug here would not crash and would not fail a test — it would quietly ship
+     * green faces. Comparing against the implementation this replaces is the only check that
+     * actually proves the result on a device, and it has already earned its place: it caught
+     * the U-first layout on the first run.
+     */
+    private fun verifyFastPath(
+        planes: Array<out Image.Plane>,
+        produced: ByteArray,
+        offset: Int,
+        chromaWidth: Int,
+        chromaHeight: Int,
+    ) {
+        verifiedFastFrames++
+        val reference = ByteArray(produced.size)
+        copyChromaPlanar(planes, reference, offset, chromaWidth, chromaHeight)
+        val end = minOf(offset + chromaWidth * chromaHeight * 2, produced.size)
+        val mismatch = (offset until end).firstOrNull { produced[it] != reference[it] }
+        if (mismatch == null) {
+            Log.i(
+                TAG,
+                "yuv_nv21 verified byte-exact via ${pickChromaCopy(planes, chromaWidth)} " +
+                    "(frame $verifiedFastFrames)",
+            )
+        } else {
+            val rel = mismatch - offset
+            fun dump(a: ByteArray) = (0 until 16).joinToString(" ") { "%02x".format(a[offset + it]) }
+            Log.e(
+                TAG,
+                "yuv_nv21 MISMATCH at chroma[$rel]\n  fast  ${dump(produced)}\n  slow  ${dump(reference)}",
+            )
+        }
+    }
+
+    private var verifiedFastFrames = 0
 }

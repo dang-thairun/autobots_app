@@ -41,12 +41,14 @@ import com.autobots.camera.upload.UploadSession
 import com.autobots.camera.upload.UploadSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -318,7 +320,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
      * re-map every row each time a worker touched one.
      */
     val uploadCounts: StateFlow<UploadQueueCounts> = uploadQueue.observeCounts()
-        .catch { emit(UploadQueueCounts()) }
+        .retryWhenFailed("upload counts")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UploadQueueCounts())
 
     /** Which status the queue screen is showing, or null for everything. */
@@ -340,7 +342,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         .flatMapLatest { status ->
             if (status == null) uploadQueue.observePage() else uploadQueue.observePageOf(status)
         }
-        .catch { emit(emptyList()) }
+        .retryWhenFailed("upload page")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     private val uploadSettings = UploadSettings(application)
@@ -1152,5 +1154,27 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
 
         /** Scratch copies of videos downloaded because a CDN refused `MediaHTTPConnection`. */
         private const val NETWORK_IMPORT_DIR = "network_import"
+
     }
+}
+
+/** How long to wait before re-observing a query stream that failed. */
+private const val RETRY_OBSERVE_MS = 1_000L
+
+/**
+ * Keep observing after a failure instead of giving up on the stream.
+ *
+ * `catch { emit(fallback) }` reads like error handling but **ends the flow**: one transient
+ * database error and the screen it feeds is frozen at whatever it showed last, for as long as
+ * the process lives. `stateIn(WhileSubscribed)` does not rescue it either, because the
+ * collector never goes away — the Activity holds it for the whole session, so the subscriber
+ * count never drops to zero and nothing is ever restarted.
+ *
+ * That is a bad trade for counters someone watches through a two-hour job. Re-observing keeps
+ * the screen honest: a hiccup costs a second of stale numbers instead of all of them.
+ */
+private fun <T> Flow<T>.retryWhenFailed(label: String): Flow<T> = retryWhen { cause, attempt ->
+    Log.w("OperatorViewModel", "$label stream failed (attempt $attempt), re-observing", cause)
+    delay(RETRY_OBSERVE_MS)
+    true
 }

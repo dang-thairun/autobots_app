@@ -3,6 +3,9 @@ package com.autobots.camera.perf
 import android.os.Build
 import com.autobots.BuildConfig
 import com.autobots.camera.load.DeviceLoadSnapshot
+import com.autobots.camera.load.PowerSample
+import com.autobots.camera.load.ProcessVitals
+import com.autobots.camera.load.ProcessVitalsReader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Collections
@@ -113,6 +116,12 @@ class PerfReport {
         val availRamMb: Long,
         /** 0 when the platform would not report it — see [DeviceLoadSnapshot.cpuMaxFreqKhz]. */
         val cpuMaxFreqKhz: Int,
+        /** This process's own CPU/memory, or null when the reader was not the detailed one. */
+        val vitals: ProcessVitals? = null,
+        /** Battery counters, or null. */
+        val power: PowerSample? = null,
+        val socTempC: Double = Double.NaN,
+        val gpuBusyPercent: Int = -1,
     )
 
     private val chunks = Collections.synchronizedList(mutableListOf<ChunkEntry>())
@@ -140,12 +149,31 @@ class PerfReport {
     @Volatile private var session: JSONObject? = null
     @Volatile private var startedAtMs: Long = 0L
 
+    /**
+     * Optional write-ahead log. Every record is appended here **before** the in-memory caps
+     * get a chance to thin or drop it, which is what makes a crashed session recoverable and
+     * what lets the stream carry detail the report itself cannot afford to hold.
+     */
+    @Volatile private var stream: PerfStream? = null
+
     val enabled: Boolean get() = CamPerf.enabled
+
+    /**
+     * Start writing a crash-survivable copy of everything this report collects.
+     *
+     * Attach before the first chunk. Records that arrived earlier are not backfilled — there
+     * are none in practice, because the coordinator attaches at session start.
+     */
+    fun attachStream(target: PerfStream) {
+        if (!enabled) return
+        stream = target
+    }
 
     /** Session start, so every event timestamp can be rendered relative to it. */
     fun markStart(startedAtEpochMs: Long) {
         if (!enabled) return
         startedAtMs = startedAtEpochMs
+        stream?.start(startedAtEpochMs, envJson())
     }
 
     /**
@@ -155,8 +183,35 @@ class PerfReport {
      */
     fun setSession(build: JSONObject.() -> Unit) {
         if (!enabled) return
+        val json = JSONObject().apply(build)
+        session = json
+        stream?.session(json)
+    }
+
+    /**
+     * Stand in a session block only if the real one never arrived.
+     *
+     * Used by [PerfRecovery]: a crashed session never reached [setSession], and [render]
+     * returns null without one. Never overwrites a real block.
+     */
+    fun setSessionIfAbsent(build: JSONObject.() -> Unit) {
+        if (!enabled) return
+        if (session != null) return
         session = JSONObject().apply(build)
     }
+
+    /**
+     * Which optional probes this device answered, from `DeviceLoadReader.probeAvailability`.
+     *
+     * Recorded in `env` so `socTempC` missing from every sample reads as *"this phone would
+     * not report it"* rather than as a run that never got warm.
+     */
+    fun setProbeAvailability(probes: Map<String, Boolean>) {
+        if (!enabled) return
+        probeAvailability = probes
+    }
+
+    @Volatile private var probeAvailability: Map<String, Boolean> = emptyMap()
 
     /**
      * Record one chunk, keeping its per-frame detail only while there is budget for it.
@@ -182,6 +237,10 @@ class PerfReport {
             return
         }
         val summary = summarise(diag)
+        // Streamed with its frames[] intact regardless of budget — MAX_FRAME_DIAGS is a
+        // memory limit, and the stream is not memory. A recovered report can therefore be
+        // *more* complete than one rendered in RAM from the same session.
+        stream?.chunk(chunkJson(entry.copy(sharpness = summary)))
         val kept = framesKept.get()
         val withinBudget = kept + diag.frames.size <= MAX_FRAME_DIAGS
         if (withinBudget) {
@@ -225,12 +284,14 @@ class PerfReport {
         imageQueuePending: Int = -1,
     ) {
         if (!enabled) return
+        val event = Event(atMs, type, chunkIndex, videoQueueDepth, imageQueuePending)
+        stream?.event(eventJson(event))
         synchronized(events) {
             if (events.size >= MAX_EVENTS) {
                 eventsDropped.incrementAndGet()
                 return
             }
-            events.add(Event(atMs, type, chunkIndex, videoQueueDepth, imageQueuePending))
+            events.add(event)
         }
     }
 
@@ -256,7 +317,14 @@ class PerfReport {
             usedRamMb = snapshot.usedRamMb,
             availRamMb = snapshot.availRamMb,
             cpuMaxFreqKhz = snapshot.cpuMaxFreqKhz,
+            vitals = snapshot.vitals,
+            power = snapshot.power,
+            socTempC = snapshot.socTempC,
+            gpuBusyPercent = snapshot.gpuBusyPercent,
         )
+        // Streamed before thinning: the file keeps every sample, memory keeps a thinned copy.
+        // The caps exist because of RAM, and the stream does not live in RAM.
+        stream?.load(loadSampleJson(sample))
         synchronized(load) {
             // Skip whatever the current stride says is between kept samples.
             if (loadSeen++ % loadStride != 0L) return
@@ -332,6 +400,13 @@ class PerfReport {
         put("appVersion", BuildConfig.VERSION_NAME)
         put("camPerf", BuildConfig.CAM_PERF)
         put("debugBuild", BuildConfig.DEBUG)
+        put("jiffiesPerSecond", ProcessVitalsReader.JIFFIES_PER_SECOND)
+        if (probeAvailability.isNotEmpty()) {
+            put(
+                "probes",
+                JSONObject().apply { probeAvailability.forEach { (k, v) -> put(k, v) } },
+            )
+        }
     }
 
     private fun totalsJson(): JSONObject {
@@ -357,9 +432,182 @@ class PerfReport {
                 if (recorded > 0) round3(processed.toDouble() / recorded) else JSONObject.NULL,
             )
             put("cpuProbe", cpuProbeJson(diags))
+            put("cpu", cpuUsageJson())
+            put("memory", memoryJson())
+            put("thermal", thermalJson())
+            put("power", powerJson(diags.sumOf { it.kept }))
             put("stages", mergedStagesJson(diags))
         }
     }
+
+    /**
+     * How much CPU the process actually burned, and where.
+     *
+     * Differenced across the whole load series rather than per sample: `cpuJiffies` is a
+     * cumulative counter, so first-to-last over the session's wall clock is exact even when
+     * samples are unevenly spaced or the series was thinned by [addLoad].
+     *
+     * `percentOfOneCore` can exceed 100 — the pipeline runs a producer and two detect workers
+     * concurrently, so 250% is a healthy reading on an 8-core phone, not an error.
+     */
+    private fun cpuUsageJson(): JSONObject {
+        val samples = snapshotOf(load).filter { it.vitals != null }
+        return JSONObject().apply {
+            put("n", samples.size)
+            if (samples.size < 2) return@apply
+            val first = samples.first()
+            val last = samples.last()
+            val wallMs = last.atMs - first.atMs
+            if (wallMs <= 0L) return@apply
+            val ticks = last.vitals!!.cpuJiffies - first.vitals!!.cpuJiffies
+            val cpuMs = ticks / ProcessVitalsReader.JIFFIES_PER_SECOND * 1000.0
+            put("wallMs", wallMs)
+            put("cpuMs", round3(cpuMs))
+            put("percentOfOneCore", round3(cpuMs * 100.0 / wallMs))
+            put("percentOfDevice", round3(cpuMs * 100.0 / wallMs / cores()))
+            val threads = JSONObject()
+            val names = first.vitals.threadCpuJiffies.keys + last.vitals.threadCpuJiffies.keys
+            for (name in names) {
+                val delta = (last.vitals.threadCpuJiffies[name] ?: 0L) -
+                    (first.vitals.threadCpuJiffies[name] ?: 0L)
+                if (delta <= 0L) continue
+                val threadMs = delta / ProcessVitalsReader.JIFFIES_PER_SECOND * 1000.0
+                threads.put(name, round3(threadMs * 100.0 / wallMs))
+            }
+            put("percentOfOneCoreByThread", threads)
+            put(
+                "note",
+                "percentOfOneCore > 100 is expected: producer and detect workers run at " +
+                    "once. Thread rows are bucketed by role, not by tid — a role covers " +
+                    "however many threads the dispatcher spun up.",
+            )
+        }
+    }
+
+    /**
+     * Our own memory, high-water and final.
+     *
+     * `nativeHeapKb` is the row to read on a session that died: since Android 8 a Bitmap's
+     * pixels are native, so a leak of 4K frames climbs here while the Java heap stays flat.
+     */
+    private fun memoryJson(): JSONObject {
+        val vitals = snapshotOf(load).mapNotNull { it.vitals }
+        return JSONObject().apply {
+            put("n", vitals.size)
+            if (vitals.isEmpty()) return@apply
+            put("javaHeapMaxKb", vitals.last().javaHeapMaxKb)
+            put("javaHeapPeakKb", vitals.maxOf { it.javaHeapKb })
+            put("javaHeapEndKb", vitals.last().javaHeapKb)
+            put("nativeHeapPeakKb", vitals.maxOf { it.nativeHeapKb })
+            put("nativeHeapEndKb", vitals.last().nativeHeapKb)
+            put("nativeHeapStartKb", vitals.first().nativeHeapKb)
+            vitals.filter { it.graphicsKb > 0 }.maxOfOrNull { it.graphicsKb }
+                ?.let { put("graphicsPeakKb", it) }
+            vitals.filter { it.totalPssKb > 0 }.maxOfOrNull { it.totalPssKb }
+                ?.let { put("totalPssPeakKb", it) }
+            put(
+                "note",
+                "process-scoped. deviceLoad.usedRamMb is the whole machine and moves with " +
+                    "other apps; these do not. Bitmaps live in the native heap.",
+            )
+        }
+    }
+
+    /** Heat, from the three sources that disagree with each other in useful ways. */
+    private fun thermalJson(): JSONObject {
+        val samples = snapshotOf(load)
+        return JSONObject().apply {
+            put("maxLevel", samples.maxOfOrNull { it.thermalLevel } ?: 0)
+            put("endLevel", samples.lastOrNull()?.thermalLevel ?: 0)
+            samples.mapNotNull { it.power?.batteryTempC?.takeIf { t -> !t.isNaN() } }
+                .let { temps ->
+                    if (temps.isEmpty()) return@let
+                    put("batteryTempStartC", round3(temps.first()))
+                    put("batteryTempMaxC", round3(temps.max()))
+                    put("batteryTempEndC", round3(temps.last()))
+                }
+            samples.map { it.socTempC }.filter { !it.isNaN() }.let { temps ->
+                if (temps.isEmpty()) return@let
+                put("socTempMaxC", round3(temps.max()))
+                put("socTempEndC", round3(temps.last()))
+            }
+            samples.mapNotNull { it.power?.thermalHeadroom?.takeIf { h -> h >= 0f } }
+                .let { headroom ->
+                    if (headroom.isEmpty()) return@let
+                    put("headroomMax", round3(headroom.max().toDouble()))
+                    put("headroomEnd", round3(headroom.last().toDouble()))
+                }
+            put(
+                "note",
+                "thermalLevel is the platform's 0-6 status and stayed OK through a run that " +
+                    "throttled 23% (TC-06). headroom 1.0 means throttling now; it leads the " +
+                    "level. Compare both against cpuProbe.driftPercent.",
+            )
+        }
+    }
+
+    /**
+     * Energy, or an explicit refusal to state it.
+     *
+     * A charging phone's `chargeUah` *rises*, so a session run with the cable in would report
+     * a negative drain — a number that looks like a measurement and is not one. Every sample
+     * carries `charging`, and if **any** of them was charging this block reports why it has
+     * no figure instead of producing one. Measuring energy therefore requires an unplugged
+     * run, which is a change to the test protocol, not something the code can work around.
+     */
+    private fun powerJson(photosKept: Int): JSONObject {
+        val samples = snapshotOf(load).mapNotNull { it.power }
+        return JSONObject().apply {
+            put("n", samples.size)
+            if (samples.isEmpty()) {
+                put("note", "no battery samples")
+                return@apply
+            }
+            put("capacityStartPercent", samples.first().capacityPercent)
+            put("capacityEndPercent", samples.last().capacityPercent)
+            val charging = samples.count { it.isCharging }
+            put("samplesCharging", charging)
+            if (charging > 0) {
+                put("energyMeasured", false)
+                put(
+                    "note",
+                    "charging during $charging of ${samples.size} samples — charge counter " +
+                        "rises while plugged in, so no energy figure is reported. Re-run " +
+                        "unplugged to measure.",
+                )
+                return@apply
+            }
+            val counters = samples.map { it.chargeCounterUah }
+                .filter { it != PowerSample.UNAVAILABLE }
+            if (counters.size < 2) {
+                put("energyMeasured", false)
+                put("note", "no usable charge counter on this device")
+                return@apply
+            }
+            val usedUah = counters.first() - counters.last()
+            val usedMah = usedUah / 1000.0
+            put("energyMeasured", true)
+            put("usedMah", round3(usedMah))
+            val volts = samples.mapNotNull { it.voltageMv.takeIf { v -> v != PowerSample.UNAVAILABLE_INT } }
+            if (volts.isNotEmpty()) {
+                val meanV = volts.average() / 1000.0
+                put("meanVoltageV", round3(meanV))
+                put("usedMwh", round3(usedMah * meanV))
+            }
+            if (photosKept > 0 && usedMah > 0) {
+                put("mahPerPhoto", round3(usedMah / photosKept))
+                put("photosPerMah", round3(photosKept / usedMah))
+            }
+            put(
+                "note",
+                "usedMah is first-to-last charge counter on an unplugged run. currentUa " +
+                    "sign convention varies by OEM and is recorded raw, not interpreted.",
+            )
+        }
+    }
+
+    private fun cores(): Double =
+        Runtime.getRuntime().availableProcessors().coerceAtLeast(1).toDouble()
 
     /**
      * The session's DVFS drift, as one number to check before reading anything else.
@@ -447,8 +695,11 @@ class PerfReport {
     }
 
     private fun chunksJson() = JSONArray().apply {
-        for (entry in snapshotOf(chunks)) {
-            put(
+        for (entry in snapshotOf(chunks)) put(chunkJson(entry))
+    }
+
+    /** One chunk. Shared by [chunksJson] and the JSONL stream — see [loadSampleJson]. */
+    internal fun chunkJson(entry: ChunkEntry): JSONObject =
                 JSONObject().apply {
                     put("index", entry.index)
                     put("file", entry.fileName)
@@ -493,10 +744,7 @@ class PerfReport {
                             put("framesOmitted", diag.framesSampled)
                         }
                     }
-                },
-            )
-        }
-    }
+                }
 
     private fun stagesJson(rows: List<StageStats.StageRow>) = JSONArray().apply {
         for (row in rows) {
@@ -552,29 +800,82 @@ class PerfReport {
     }
 
     private fun eventsJson() = JSONArray().apply {
-        for (event in snapshotOf(events)) {
-            put(
-                JSONObject().apply {
-                    put("tMs", event.atMs - startedAtMs)
-                    put("type", event.type)
-                    put("chunk", event.chunkIndex ?: JSONObject.NULL)
-                    if (event.videoQueueDepth >= 0) put("videoQueue", event.videoQueueDepth)
-                    if (event.imageQueuePending >= 0) put("imageQueue", event.imageQueuePending)
-                },
-            )
-        }
+        for (event in snapshotOf(events)) put(eventJson(event))
+    }
+
+    /** One event. Shared by [eventsJson] and the JSONL stream — see [loadSampleJson]. */
+    internal fun eventJson(event: Event): JSONObject = JSONObject().apply {
+        put("tMs", event.atMs - startedAtMs)
+        put("type", event.type)
+        put("chunk", event.chunkIndex ?: JSONObject.NULL)
+        if (event.videoQueueDepth >= 0) put("videoQueue", event.videoQueueDepth)
+        if (event.imageQueuePending >= 0) put("imageQueue", event.imageQueuePending)
     }
 
     private fun loadJson() = JSONArray().apply {
-        for (sample in snapshotOf(load)) {
+        for (sample in snapshotOf(load)) put(loadSampleJson(sample))
+    }
+
+    /**
+     * One device-load sample.
+     *
+     * Shared by [loadJson] and by the JSONL stream on purpose: a recovered report must be
+     * indistinguishable from one rendered in memory, and the cheapest way to guarantee that
+     * is for there to be exactly one function that knows the shape.
+     *
+     * Absent readings are **omitted**, never written as zero. A missing battery gauge and a
+     * battery at 0% must not read the same.
+     */
+    internal fun loadSampleJson(sample: LoadSample): JSONObject = JSONObject().apply {
+        put("tMs", sample.atMs - startedAtMs)
+        put("thermal", sample.thermalLabel)
+        put("thermalLevel", sample.thermalLevel)
+        put("usedRamMb", sample.usedRamMb)
+        put("availRamMb", sample.availRamMb)
+        if (sample.cpuMaxFreqKhz > 0) put("cpuMaxFreqKhz", sample.cpuMaxFreqKhz)
+        if (!sample.socTempC.isNaN()) put("socTempC", round3(sample.socTempC))
+        if (sample.gpuBusyPercent >= 0) put("gpuBusyPercent", sample.gpuBusyPercent)
+        sample.vitals?.let { v ->
             put(
+                "proc",
                 JSONObject().apply {
-                    put("tMs", sample.atMs - startedAtMs)
-                    put("thermal", sample.thermalLabel)
-                    put("thermalLevel", sample.thermalLevel)
-                    put("usedRamMb", sample.usedRamMb)
-                    put("availRamMb", sample.availRamMb)
-                    if (sample.cpuMaxFreqKhz > 0) put("cpuMaxFreqKhz", sample.cpuMaxFreqKhz)
+                    // Cumulative ticks, not a rate — see ProcessVitals. The report differences
+                    // consecutive samples in `totals.cpu`; keeping the raw counter here means a
+                    // gap in sampling cannot be mistaken for idle time.
+                    put("cpuJiffies", v.cpuJiffies)
+                    put("javaHeapKb", v.javaHeapKb)
+                    put("javaHeapMaxKb", v.javaHeapMaxKb)
+                    put("nativeHeapKb", v.nativeHeapKb)
+                    if (v.graphicsKb > 0) put("graphicsKb", v.graphicsKb)
+                    if (v.totalPssKb > 0) put("totalPssKb", v.totalPssKb)
+                    if (v.threadCpuJiffies.isNotEmpty()) {
+                        put(
+                            "threadCpuJiffies",
+                            JSONObject().apply {
+                                v.threadCpuJiffies.forEach { (name, ticks) -> put(name, ticks) }
+                            },
+                        )
+                    }
+                },
+            )
+        }
+        sample.power?.let { p ->
+            put(
+                "power",
+                JSONObject().apply {
+                    if (p.chargeCounterUah != PowerSample.UNAVAILABLE) {
+                        put("chargeUah", p.chargeCounterUah)
+                    }
+                    if (p.currentNowUa != PowerSample.UNAVAILABLE) put("currentUa", p.currentNowUa)
+                    if (p.capacityPercent != PowerSample.UNAVAILABLE_INT) {
+                        put("capacityPercent", p.capacityPercent)
+                    }
+                    if (p.voltageMv != PowerSample.UNAVAILABLE_INT) put("voltageMv", p.voltageMv)
+                    if (!p.batteryTempC.isNaN()) put("batteryTempC", round3(p.batteryTempC))
+                    if (p.thermalHeadroom >= 0f) {
+                        put("thermalHeadroom", round3(p.thermalHeadroom.toDouble()))
+                    }
+                    put("charging", p.isCharging)
                 },
             )
         }
@@ -604,8 +905,26 @@ class PerfReport {
          * `yuv_jpeg_argb` share is not comparable with any single schema-4 stage; the nearest
          * equivalent is the sum of all four. Chunks also gained `cpuProbeMs` and totals gained
          * `cpuProbe`, so DVFS drift is visible instead of inferred.
+         *
+         * 5 — **additive only**; every schema-4 field is unchanged and in the same place, so
+         * a schema-4 report and a schema-5 one are directly comparable (unlike 3 → 4). What
+         * is new answers the two questions a schema-4 report could not:
+         *
+         * - *Were we the ones holding the memory?* `deviceLoad[].proc` and `totals.memory`
+         *   are process-scoped. `usedRamMb` was, and still is, the whole machine.
+         * - *How hard did we actually work, and where?* `totals.cpu` differences the CPU
+         *   counter across the session and splits it by thread role, which distinguishes
+         *   saturated detect workers from idle ones — a reading `queue_wait` cannot give.
+         *
+         * Also new: `totals.thermal` (battery °C, SoC °C where the device allows it, and the
+         * platform's throttling forecast), `totals.power` (energy, or an explicit refusal to
+         * state it for a session that was charging), and `env.probes` saying which optional
+         * sysfs readings this device answered at all.
+         *
+         * A schema-5 report may also be *recovered* rather than rendered live — see
+         * [PerfStream]. Recovered ones carry `session.recovered = true`.
          */
-        const val SCHEMA_VERSION = 4
+        const val SCHEMA_VERSION = 5
         const val FILE_NAME = "perf_report.json"
 
         /**

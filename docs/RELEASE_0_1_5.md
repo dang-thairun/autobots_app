@@ -300,6 +300,34 @@ adb shell dumpsys battery reset
 | **`UploadSettings` แต่ละอินสแตนซ์ไม่รู้เรื่องกัน** | pause ผ่าน scheduler ไม่เคยขึ้นบนจอ และ worker ที่พักคิวเองเพราะ token ถูกปฏิเสธก็เงียบไปด้วย · แก้ด้วย `OnSharedPreferenceChangeListener` |
 | **การแจ้งเตือนไม่มีตัวเลข** | HyperOS ตัด `contentText` ทิ้งทั้งบรรทัดเมื่อมี progress bar · ย้ายจำนวนกับ % ไปไว้ที่ `title` และชื่อ event ไว้ที่ `subText` |
 
+### telemetry — perf schema 5 · 24/08/2026
+
+**ปัญหา:** `perf_report.json` ถูกสร้างในหน่วยความจำทั้งก้อนแล้วเขียนครั้งเดียวตอน drain · session ที่ตายนาทีที่ 105 ของ 120 จึงเหลือ **ศูนย์** ไม่ใช่ "ไม่ครบ" (NA-05 ที่ comment ในโค้ดระบุว่าเกิดมาแล้วสองครั้ง) และตัวเลขที่เก็บก็ตอบคำถามหลังเกิดเหตุไม่ได้ — `usedRamMb` เป็น RAM **ทั้งเครื่อง** ไม่ใช่ของ process เรา
+
+**ไฟล์ใหม่:** [PerfStream.kt](../androidApp/src/main/kotlin/com/autobots/camera/perf/PerfStream.kt) · [PerfRecovery.kt](../androidApp/src/main/kotlin/com/autobots/camera/perf/PerfRecovery.kt) · [ProcessVitals.kt](../androidApp/src/main/kotlin/com/autobots/camera/load/ProcessVitals.kt) · [PowerReader.kt](../androidApp/src/main/kotlin/com/autobots/camera/load/PowerReader.kt) · [SysfsProbes.kt](../androidApp/src/main/kotlin/com/autobots/camera/load/SysfsProbes.kt) · [CrashDiagnostics.kt](../androidApp/src/main/kotlin/com/autobots/camera/diag/CrashDiagnostics.kt) · [SessionRecovery.kt](../androidApp/src/main/kotlin/com/autobots/camera/diag/SessionRecovery.kt) · [AutobotsApplication.kt](../androidApp/src/main/kotlin/com/autobots/AutobotsApplication.kt)
+
+**1. write-ahead log** — `perf_stream.jsonl` ใน session dir · หนึ่งบรรทัดหนึ่ง record · **flush ทุกบรรทัด** (buffer จะกลืนวินาทีสุดท้ายก่อน crash ซึ่งคือส่วนเดียวที่มีคนอ่าน) · เขียนต่อ **chunk** ไม่ใช่ต่อเฟรม — TC-16 คือ ~300 บรรทัด ไม่ใช่ 22,643 · เพิ่ม **heartbeat ทุก 30 วินาที** เพื่อผูกเวลาตายให้แคบกว่าความยาว chunk
+
+**2. กู้รายงาน** — `SessionRecovery` กวาดตอนเปิดแอป: session dir ที่มี `.jsonl` แต่ไม่มี `perf_report.json` = ตายก่อน drain → parse กลับเป็น data class เดิม แล้ว replay ผ่าน `PerfReport.render()` **ตัวเดียวกัน** (ไม่เขียน renderer ที่สอง — มันจะ drift แล้วไปโผล่ตอนอ่านรายงานของ crash ที่กำลังสืบอยู่พอดี) · ผลลง `Download/AutoBots/recovered_<sessionId>/`
+
+> **stream เก็บครบกว่ารายงาน** — เขียนก่อนที่ `MAX_FRAME_DIAGS`/`MAX_EVENTS`/`loadStride` จะตัด เพราะ cap พวกนั้นมีไว้กัน RAM และ stream ไม่ได้อยู่ใน RAM · รายงานที่กู้มาจึงอาจ**สมบูรณ์กว่า**ที่ session จะเขียนเองถ้ารอด
+
+**3. ตายเพราะอะไร** — `ApplicationExitInfo` อ่านตอนเปิดแอป → `last_exit.json` · เหตุผลที่ต้องมี: native crash (MediaCodec/QNN) กับ LMKD kill คือสองแบบที่**น่าจะเกิดที่สุด**กับ pipeline นี้ และเป็นสองแบบที่ `UncaughtExceptionHandler` จับไม่ได้เลย — ไม่มีโค้ดเราทำงานตอนตาย · มี crash handler ด้วยแต่เป็นของแถม และ **chain ต่อ handler เดิมเสมอ** ไม่งั้นจะไปปิด crash reporting ของ platform ซึ่งเป็นตัวที่เติม `ApplicationExitInfo` ให้เราตั้งแต่แรก
+
+**4. ตัวเลขใหม่ (schema 4 → 5, เพิ่มอย่างเดียว เทียบกับรายงานเก่าได้ตรงๆ)**
+
+| block | ตอบคำถาม |
+|--|--|
+| `deviceLoad[].proc` · `totals.memory` | **แอปเรา**กินเท่าไร · Java heap / **native heap (bitmap 4K อยู่ตรงนี้)** / graphics / PSS |
+| `totals.cpu` | CPU ที่ใช้จริง + **แยกตาม role ของเธรด** — แยก "detect worker ทำงานเต็มที่" ออกจาก "detect worker รอ" ซึ่ง `queue_wait` แยกไม่ได้ |
+| `totals.thermal` | อุณหภูมิแบต °C · SoC °C (ถ้าเครื่องยอมบอก) · **thermal headroom** ซึ่งนำหน้าระดับ 0–6 ที่รายงาน OK ตลอด TC-06 ทั้งที่ throttle ไป 23% |
+| `totals.power` | mAh / mWh / **mAh ต่อรูป** |
+| `env.probes` | เครื่องนี้ยอมบอกอะไรบ้าง — `socTempC` หายไปทุก sample จะได้อ่านว่า *"เครื่องไม่บอก"* ไม่ใช่ *"ไม่ร้อน"* |
+
+**⚠️ พลังงานวัดได้เฉพาะรอบที่ถอดสาย** — charge counter ตอนชาร์จมัน**เพิ่มขึ้น** รอบที่เสียบสายจะได้ค่าติดลบที่หน้าตาเหมือนผลวัด · ทุก sample เก็บ `charging` ไว้ และถ้ามีสักตัวที่เสียบอยู่ `totals.power` จะเขียน `energyMeasured: false` พร้อมเหตุผล **แทนที่จะเดา** · แปลว่าถ้าจะได้ตัวเลขพลังงานจริง ต้องเพิ่มรอบเทสแบบถอดสาย
+
+**สถานะ:** build ผ่าน · **ยังไม่ได้รันบนเครื่อง** (ไม่มี device ต่ออยู่ตอนเขียน) — วิธีตรวจอยู่ใน [BUILD.md](./BUILD.md)
+
 ### 🟡 ทำได้เลย ไม่ต้องรอใคร
 
 - **แถว `Abandoned` ยังลบทีละใบไม่ได้** — เหตุผลของแต่ละใบแสดงอยู่ในแถวแล้ว และกรองด้วยชิปได้ถูกต้องแล้ว แต่ยังมีแต่ Retry แบบเหมารวม

@@ -230,6 +230,63 @@ Crash / fatal:
 adb logcat -d -v time | grep -E 'com\.autobots\.camera|AndroidRuntime|FATAL' | tail -100
 ```
 
+## 6b. Diagnosing a run that died (v0.1.5+)
+
+A session writes `perf_report.json` only at drain, so a crash used to leave nothing. Three
+artifacts now cover it — read them in this order.
+
+**1. Why the process died.** The platform's own record, and the only source that sees a
+native crash or a low-memory kill. Works with no app code involved:
+
+```bash
+adb shell dumpsys activity exit-info com.autobots.camera
+```
+
+The app reads the same thing at startup and writes it to `cache/autobots/diag/last_exit.json`.
+`reason` of `CRASH_NATIVE` or `LOW_MEMORY` means no Kotlin handler ran and there is **no**
+`crash.txt` — that is expected, not a second bug.
+
+**2. What the pipeline was doing.** `perf_stream.jsonl` in the session's cache directory, one
+JSON record per line, flushed as it goes:
+
+```bash
+adb shell run-as com.autobots.camera ls cache/autobots
+adb shell run-as com.autobots.camera cat cache/autobots/<sessionId>/perf_stream.jsonl > stream.jsonl
+tail -3 stream.jsonl | python3 -m json.tool   # last line may be truncated; that is normal
+```
+
+**3. The report itself.** Relaunching the app rebuilds one for any session that has a stream
+but no report, and publishes it:
+
+```bash
+adb logcat -d -s SessionRecovery PerfRecovery CrashDiagnostics
+adb shell ls /sdcard/Download/AutoBots/ | grep recovered_
+```
+
+A recovered report carries `session.recovered = true` and is otherwise the same shape as a
+normal one.
+
+### Verifying the telemetry itself
+
+After any capture, check the new schema-5 blocks are populated:
+
+```bash
+S=$(adb shell ls /sdcard/Download/AutoBots/ | tail -1 | tr -d '\r')
+adb pull /sdcard/Download/AutoBots/$S/perf_report.json
+python3 -c "
+import json; r=json.load(open('perf_report.json'))
+print('schema', r['schema'], '| probes', r['env'].get('probes'))
+for k in ('cpu','memory','thermal','power'): print(k, json.dumps(r['totals'][k])[:200])
+"
+```
+
+`totals.power.energyMeasured` will be `false` with a charging note on any run done with the
+cable in — that is correct behaviour, not a missing figure. **Energy requires an unplugged
+run.** `env.probes` says whether this phone reports SoC temperature and GPU busy at all;
+both are absent on many builds and that is recorded rather than silently zero.
+
+---
+
 Legacy v0.1 stills path (if debugging old code):
 
 ```bash

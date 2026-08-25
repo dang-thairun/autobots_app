@@ -13,7 +13,7 @@ Edge-AI sports camera on tripod-mounted Android.
 |-----|---------|
 | [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) | **v0.1.2 operator flow** — ใช้งานจริง, live + import |
 | [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) | **Pipeline เทคนิค** — workers, thresholds, storage, session log |
-| [SEQUENCE_FLOW.md](./SEQUENCE_FLOW.md) | **Sequence diagram (Mermaid)** — Start/Import → chunk → Worker 2 → Gallery + backpressure |
+| [SEQUENCE_FLOW.md](./SEQUENCE_FLOW.md) | **Sequence diagram (Mermaid)** — Live/Browse/Network URL → chunk → Worker 2 → Gallery → upload queue → Runx + backpressure |
 | [RELEASE_0_1_3.md](./RELEASE_0_1_3.md) | **v0.1.3** — เหตุผล/ตัวเลขเบื้องหลังการแก้ Worker 2 (perf + yield) |
 | [RELEASE_0_1_4.md](./RELEASE_0_1_4.md) | **v0.1.4** — แยก Worker 2 เป็นสองเธรด (perf: realtimeRatio 2.196 → 1.010) |
 | [RELEASE_0_1_5.md](./RELEASE_0_1_5.md) | **v0.1.5** — Home menu แทน pager · Import Preview + trim · Network URL ingest · default = NPU |

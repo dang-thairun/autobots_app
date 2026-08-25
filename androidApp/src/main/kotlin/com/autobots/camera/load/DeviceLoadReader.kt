@@ -10,9 +10,17 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Samples thermal status + approximate RAM. Display-only — never throttles capture.
+ *
+ * @param detailed adds this process's own CPU/memory, battery counters and the sysfs probes.
+ *   Off by default because **two readers exist**: the ViewModel's, which drives the UI, and
+ *   the pipeline's, which feeds `perf_report.json`. Only the second one should pay for the
+ *   extra reads — and one of them, `gpubusy`, *resets its counters when read*, so two
+ *   instances sampling it would each see a fraction of the real busy time and neither would
+ *   be wrong in a way that shows.
  */
 class DeviceLoadReader(
     context: Context,
+    private val detailed: Boolean = false,
     private val mainExecutor: Executor,
 ) {
     private val appContext = context.applicationContext
@@ -21,10 +29,18 @@ class DeviceLoadReader(
     private val activityManager =
         appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
 
+    private val vitalsReader = if (detailed) ProcessVitalsReader(appContext) else null
+    private val powerReader = if (detailed) PowerReader(appContext) else null
+    private val sysfs = if (detailed) SysfsProbes() else null
+
+    /** Which optional probes this device actually answers — written into the report's `env`. */
+    val probeAvailability: Map<String, Boolean> get() = sysfs?.available ?: emptyMap()
+
     private val listenerRef = AtomicReference<((DeviceLoadSnapshot) -> Unit)?>(null)
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
 
     fun sample(): DeviceLoadSnapshot {
+        val now = System.currentTimeMillis()
         val thermal = readThermal()
         val mem = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(mem)
@@ -38,6 +54,10 @@ class DeviceLoadReader(
             availRamMb = availMb,
             totalRamMb = totalMb,
             cpuMaxFreqKhz = readCpuMaxFreqKhz(),
+            vitals = vitalsReader?.sample(now),
+            power = powerReader?.sample(now),
+            socTempC = sysfs?.socTempC() ?: Double.NaN,
+            gpuBusyPercent = sysfs?.gpuBusyPercent() ?: -1,
         )
     }
 

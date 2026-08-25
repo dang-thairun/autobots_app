@@ -28,6 +28,7 @@ import com.autobots.camera.toLogText
 import com.autobots.camera.load.DeviceLoadReader
 import com.autobots.camera.perf.CamPerf
 import com.autobots.camera.perf.PerfReport
+import com.autobots.camera.perf.PerfStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,7 +86,8 @@ class CapturePipelineCoordinator(
     private val deliveryWriter = LocalDeliveryWriter(appContext)
     private val perfReport = PerfReport()
     private val loadReader = if (CamPerf.enabled) {
-        DeviceLoadReader(appContext) { it.run() }
+        // The detailed reader — this is the one whose samples reach `perf_report.json`.
+        DeviceLoadReader(appContext, detailed = true) { it.run() }
     } else {
         null
     }
@@ -216,6 +218,10 @@ class CapturePipelineCoordinator(
     /** Guards against writing the session log more than once per session. */
     private val drainNotified = AtomicBoolean(false)
     private var drainWatchdog: Job? = null
+
+    /** Crash-survivable copy of the perf data. Null when instrumentation is off. */
+    private var perfStream: PerfStream? = null
+    private var heartbeat: Job? = null
 
     init {
         sessionDir.mkdirs()
@@ -652,6 +658,10 @@ class CapturePipelineCoordinator(
         closed = true
         recording = false
         drainWatchdog?.cancel()
+        heartbeat?.cancel()
+        // No `end` record: a coordinator closed before drain did not write a report, so the
+        // stream must stay recoverable. SessionRecovery decides by whether the report exists.
+        perfStream?.finish("closed")
         videoQueue.close()
         frameProcessor.close()
         imageDelivery.close()
@@ -747,6 +757,27 @@ class CapturePipelineCoordinator(
      * `perf_report.json`. The events still fire the check (so a quiet session finishes
      * promptly); this loop only guarantees no session can end without one.
      */
+    /**
+     * A load sample on a fixed clock, independent of chunk boundaries.
+     *
+     * Without it the last line in the stream is the last chunk that *finished*, so a session
+     * that dies mid-chunk is pinned only to within however long a chunk takes — minutes, on a
+     * portrait 4K run. A tick every 30 seconds bounds the time of death to half a minute and
+     * gives the memory series a constant sampling rate, which is what makes a leak show as a
+     * slope instead of as noise.
+     */
+    private fun startHeartbeat() {
+        heartbeat?.cancel()
+        if (!perfReport.enabled) return
+        heartbeat = scope.launch {
+            while (isActive) {
+                delay(HEARTBEAT_MS)
+                if (closed || sessionMeta == null) return@launch
+                samplePerfLoad("heartbeat", null)
+            }
+        }
+    }
+
     private fun startDrainWatchdog() {
         drainWatchdog?.cancel()
         drainWatchdog = scope.launch {
@@ -782,8 +813,11 @@ class CapturePipelineCoordinator(
             publishStats()
             withContext(Dispatchers.IO) {
                 session?.let { writeSessionLog(it) }
+                // After the report is on disk, so a crash between the two still recovers.
+                perfStream?.finish("drain")
             }
             drainWatchdog?.cancel()
+            heartbeat?.cancel()
             onDrainComplete()
         }
     }
@@ -915,8 +949,15 @@ class CapturePipelineCoordinator(
         expectedChunks = 0
         drainNotified.set(false)
         startDrainWatchdog()
+        // Attach before markStart: the stream's first record is written by markStart itself.
+        if (perfReport.enabled) {
+            perfStream = PerfStream(File(sessionDir, PerfStream.FILE_NAME))
+                .also { perfReport.attachStream(it) }
+            loadReader?.let { perfReport.setProbeAvailability(it.probeAvailability) }
+        }
         perfReport.markStart(startedAt)
         samplePerfLoad("session_start", null)
+        startHeartbeat()
         sessionMeta = SessionMeta(
             source = source,
             displayName = displayName,
@@ -1089,6 +1130,12 @@ class CapturePipelineCoordinator(
 
         /** Watchdog cadence — a session ends at most this late. */
         private const val DRAIN_POLL_MS = 1_000L
+
+        /**
+         * Load-sample cadence while a session is open. Bounds the time of death in the
+         * stream to half a minute without adding a line anyone has to read.
+         */
+        private const val HEARTBEAT_MS = 30_000L
 
         /**
          * Raised from 16 in 0.1.3: keeping the top 3 frames per dedup window instead of 1

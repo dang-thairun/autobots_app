@@ -13,6 +13,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCase
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
@@ -42,6 +43,10 @@ class VideoPreviewController(
     private val mainExecutor = ContextCompat.getMainExecutor(context)
     private var camera: Camera? = null
     private var videoCapture: VideoCapture<Recorder>? = null
+
+    /** Exactly what this controller bound, so unbinding never reaches another pane's. */
+    @Volatile
+    private var boundUseCases: List<UseCase> = emptyList()
     private var chunkRecorder: VideoChunkRecorder? = null
     private val bindGeneration = AtomicReference(0)
     private var shutdown = false
@@ -146,9 +151,20 @@ class VideoPreviewController(
         lastExposurePublishMs.set(0L)
         mainExecutor.execute { onExposureReadout?.invoke(CameraExposureReadout()) }
         val provider = providerRef.get() ?: return
+        val mine = boundUseCases
+        boundUseCases = emptyList()
         try {
-            provider.unbindAll()
-            Log.i(TAG, "Camera unbound")
+            // Only this controller's own use cases. `unbindAll()` would also tear down a
+            // preview another pane has just bound — leaving the camera on (green dot lit)
+            // with nothing on screen. That is what happens when the operator moves from the
+            // live page into the zone editor, since the old pane's asynchronous stop lands
+            // after the new pane has bound.
+            if (mine.isEmpty()) {
+                Log.i(TAG, "Nothing bound by this controller")
+            } else {
+                provider.unbind(*mine.toTypedArray())
+                Log.i(TAG, "Camera unbound (${mine.size} use cases)")
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "unbind failed", t)
         }
@@ -192,6 +208,7 @@ class VideoPreviewController(
                 .build()
             val capture = VideoCapture.withOutput(recorder)
             videoCapture = capture
+            boundUseCases = listOf(capture)
 
             val previewBuilder = Preview.Builder()
             Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(
@@ -210,6 +227,7 @@ class VideoPreviewController(
                 .also { it.surfaceProvider = previewView.surfaceProvider }
 
             exposureStats = ExposureStats()
+            boundUseCases = listOf(preview, capture)
             provider.unbindAll()
 
             val boundCamera: Camera = run {

@@ -24,9 +24,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -45,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
+import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.StreamResolution
@@ -78,6 +88,7 @@ private enum class OperatorDestination {
     LiveCapture,
     SessionHistory,
     ImportPreview,
+    ZoneEditor,
     NetworkUrl,
     UploadQueue,
     UploadSettings,
@@ -102,6 +113,7 @@ fun OperatorShellScreen(
     onClearNetworkUrlError: () -> Unit,
     onConfirmImport: (ExtractionTarget, DetectorBackend, Long?, Long?) -> Unit,
     onCancelImport: () -> Unit,
+    onDetectZone: (DetectZone?) -> Unit,
     uploadCounts: UploadQueueCounts,
     uploadItems: List<UploadItem>,
     onRetryFailedUploads: () -> Unit,
@@ -135,12 +147,16 @@ fun OperatorShellScreen(
     var destination by remember {
         mutableStateOf(destinationForArg(startDestination) ?: OperatorDestination.Home)
     }
+    // Where the zone editor's OK/back returns to: the import preview, or the live page.
+    var zoneEditorReturn by remember { mutableStateOf(OperatorDestination.ImportPreview) }
 
     val goHome = {
         if (destination == OperatorDestination.LiveCapture && state.isCapturing) {
             onToggleCapture()
         }
-        if (destination == OperatorDestination.ImportPreview) {
+        if (destination == OperatorDestination.ImportPreview ||
+            destination == OperatorDestination.ZoneEditor
+        ) {
             onCancelImport()
         }
         destination = OperatorDestination.Home
@@ -148,14 +164,25 @@ fun OperatorShellScreen(
 
     LaunchedEffect(state.showImportPreview) {
         if (state.showImportPreview) {
-            destination = OperatorDestination.ImportPreview
-        } else if (destination == OperatorDestination.ImportPreview) {
+            // Not while the operator is drawing a zone — that page belongs to the same
+            // pending import and returns to the preview by itself.
+            if (destination != OperatorDestination.ZoneEditor) {
+                destination = OperatorDestination.ImportPreview
+            }
+        } else if (destination == OperatorDestination.ImportPreview ||
+            destination == OperatorDestination.ZoneEditor
+        ) {
             destination = OperatorDestination.Home
         }
     }
 
     BackHandler(enabled = destination != OperatorDestination.Home) {
-        goHome()
+        if (destination == OperatorDestination.ZoneEditor) {
+            // Discards the edit, exactly like the page's own back arrow.
+            destination = zoneEditorReturn
+        } else {
+            goHome()
+        }
     }
 
     Box(
@@ -195,6 +222,11 @@ fun OperatorShellScreen(
                 onDetectorBackend = onDetectorBackend,
                 onRecordingProgress = onRecordingProgress,
                 onExposureReadout = onExposureReadout,
+                onDetectZone = onDetectZone,
+                onEditZone = {
+                    zoneEditorReturn = OperatorDestination.LiveCapture
+                    destination = OperatorDestination.ZoneEditor
+                },
             )
             OperatorDestination.SessionHistory -> ChunkHistoryPage(
                 sessions = state.sessionHistory,
@@ -211,10 +243,62 @@ fun OperatorShellScreen(
                     destination = OperatorDestination.Home
                 },
                 onCancel = goHome,
+                onZoneChange = onDetectZone,
+                onEditZone = {
+                    zoneEditorReturn = OperatorDestination.ImportPreview
+                    destination = OperatorDestination.ZoneEditor
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .safeDrawingPadding(),
             )
+            OperatorDestination.ZoneEditor -> {
+                val fromLive = zoneEditorReturn == OperatorDestination.LiveCapture
+                val pending = state.pendingImport
+                ZoneEditorPage(
+                    initialZone = state.detectZone,
+                    // Live capture is portrait-locked, so the upright frame the detectors see
+                    // is the stream resolution on its side.
+                    frameWidth = if (fromLive) {
+                        state.streamResolution.height
+                    } else {
+                        pending?.displayWidth?.takeIf { it > 0 } ?: 16
+                    },
+                    frameHeight = if (fromLive) {
+                        state.streamResolution.width
+                    } else {
+                        pending?.displayHeight?.takeIf { it > 0 } ?: 9
+                    },
+                    onConfirm = { zone ->
+                        onDetectZone(zone)
+                        destination = zoneEditorReturn
+                    },
+                    onCancel = { destination = zoneEditorReturn },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .safeDrawingPadding(),
+                    backdrop = {
+                        if (fromLive) {
+                            CameraPreviewPane(
+                                active = cameraPermissionGranted,
+                                recording = false,
+                                streamResolution = state.streamResolution,
+                                pipelineCoordinator = null,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            state.pendingImportFrame?.let { frame ->
+                                Image(
+                                    bitmap = frame.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.FillBounds,
+                                )
+                            }
+                        }
+                    },
+                )
+            }
             OperatorDestination.NetworkUrl -> NetworkUrlPage(
                 state = state,
                 onBack = goHome,
@@ -307,43 +391,145 @@ private fun OperatorHomePage(
         )
         Spacer(modifier = Modifier.height(8.dp))
         val pipelineBusy = state.isImporting || state.isProcessing || state.isDownloading
-        HomeMenuButton(
-            label = "Live capture",
-            enabled = !pipelineBusy,
-            onClick = onLiveCapture,
-        )
-        HomeMenuButton(
-            label = if (state.isImporting) "Browse Video…" else "Browse Video",
-            enabled = state.canImportVideo,
-            onClick = onBrowseVideo,
-        )
-        HomeMenuButton(
-            label = "Network URL",
-            enabled = state.canImportVideo,
-            onClick = onNetworkUrl,
-        )
-        HomeMenuButton(
-            label = "Session History",
-            onClick = onSessionHistory,
-        )
-        HomeMenuButton(
-            label = if (state.keptPhotoCount > 0) {
-                "Gallery (${state.keptPhotoCount})"
-            } else {
-                "Gallery"
-            },
-            enabled = !pipelineBusy,
-            onClick = onOpenGallery,
-        )
-        HomeMenuButton(
-            // Below Gallery on purpose: delivery to the phone comes first, delivery onward
-            // second. The count follows the same shape as Gallery's, and counts only
-            // outstanding rows — a queue of 5,000 already-uploaded photos is not news.
-            label = uploadCounts.badgeLabel?.let { "Upload ($it)" } ?: "Upload",
-            onClick = onUploadQueue,
+
+        // Two groups, because the six destinations answer two different questions: what the
+        // phone should ingest next, and what it has already produced. Grouping them costs one
+        // caption each and saves the operator reading six labels to find one.
+        HomeMenuGroup(title = "CAPTURE") {
+            HomeMenuTile(
+                icon = "▶",
+                label = "Live",
+                enabled = !pipelineBusy,
+                onClick = onLiveCapture,
+                modifier = Modifier.weight(1f),
+            )
+            HomeMenuTile(
+                icon = "📁",
+                label = if (state.isImporting) "Browse…" else "Browse",
+                enabled = state.canImportVideo,
+                onClick = onBrowseVideo,
+                modifier = Modifier.weight(1f),
+            )
+            HomeMenuTile(
+                icon = "🔗",
+                label = "Network",
+                enabled = state.canImportVideo,
+                onClick = onNetworkUrl,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        HomeMenuGroup(title = "REVIEW") {
+            HomeMenuTile(
+                icon = "🕘",
+                label = "History",
+                badge = state.sessionHistory.size.takeIf { it > 0 }?.toString(),
+                onClick = onSessionHistory,
+                modifier = Modifier.weight(1f),
+            )
+            HomeMenuTile(
+                icon = "🖼",
+                label = "Gallery",
+                badge = state.keptPhotoCount.takeIf { it > 0 }?.toString(),
+                enabled = !pipelineBusy,
+                onClick = onOpenGallery,
+                modifier = Modifier.weight(1f),
+            )
+            HomeMenuTile(
+                // The badge counts only outstanding rows — a queue of 5,000 already-uploaded
+                // photos is not news.
+                icon = "☁",
+                label = "Upload",
+                badge = uploadCounts.badgeLabel,
+                onClick = onUploadQueue,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** A captioned row of tiles. Three per row is what fits a phone without truncating labels. */
+@Composable
+private fun HomeMenuGroup(
+    title: String,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                color = Color(0xFF78909C),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+            )
+            HorizontalDivider(
+                color = Color.White.copy(alpha = 0.1f),
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
         )
     }
 }
+
+/**
+ * One destination: icon, label, and the count that decides whether it is worth opening.
+ *
+ * The counts used to live inside the labels (`Gallery (248)`) or on the cards above; on a
+ * tile there is room for them to sit apart from the label, which is what lets the operator
+ * take in all six numbers in one glance instead of reading six sentences.
+ */
+@Composable
+private fun HomeMenuTile(
+    icon: String,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    badge: String? = null,
+    enabled: Boolean = true,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(TileHeight),
+        shape = CardShape,
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+        colors = ButtonDefaults.buttonColors(
+            disabledContainerColor = Color.White.copy(alpha = 0.14f),
+            disabledContentColor = Color.White.copy(alpha = 0.55f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(text = icon, fontSize = 20.sp, lineHeight = 22.sp, maxLines = 1)
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                // Always laid out, even when empty: without it the tiles with a count would
+                // stand a few pixels taller than the ones without.
+                text = badge.orEmpty(),
+                color = LocalContentColor.current.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** Square-ish, thumb-sized, and identical across both groups. */
+private val TileHeight = 84.dp
 
 @Composable
 private fun AppIdentityCard(
@@ -384,26 +570,6 @@ private fun destinationForArg(arg: String?): OperatorDestination? = when (arg?.l
 }
 
 @Composable
-private fun HomeMenuButton(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.fillMaxWidth(),
-        colors = ButtonDefaults.buttonColors(
-            disabledContainerColor = Color.White.copy(alpha = 0.14f),
-            disabledContentColor = Color.White.copy(alpha = 0.55f),
-        ),
-    ) {
-        Text(text = label, maxLines = 1)
-    }
-}
-
-@Composable
 private fun OperatorLiveCapturePage(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
@@ -416,8 +582,12 @@ private fun OperatorLiveCapturePage(
     onDetectorBackend: (DetectorBackend) -> Unit,
     onRecordingProgress: (Int, Long, Long) -> Unit,
     onExposureReadout: (String) -> Unit,
+    onDetectZone: (DetectZone?) -> Unit,
+    onEditZone: () -> Unit,
 ) {
-    val previewActive = state.isCapturing && cameraPermissionGranted
+    // Bound as soon as the page opens: the operator aims the tripod by what the lens sees,
+    // and had to press Start — and so begin writing chunks — just to get a picture.
+    val previewActive = cameraPermissionGranted
     KeepScreenOn(active = state.isCapturing)
     var settingsExpanded by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { OverlayPages.Count })
@@ -425,6 +595,7 @@ private fun OperatorLiveCapturePage(
     Box(modifier = Modifier.fillMaxSize()) {
         CameraPreviewPane(
             active = previewActive,
+            recording = state.isCapturing && cameraPermissionGranted,
             streamResolution = state.streamResolution,
             pipelineCoordinator = pipelineCoordinator,
             pipelinePaused = state.pipelinePaused,
@@ -434,6 +605,15 @@ private fun OperatorLiveCapturePage(
             onExposureReadout = onExposureReadout,
             modifier = Modifier.fillMaxSize(),
         )
+
+        state.detectZone?.let { zone ->
+            LiveZoneOverlay(
+                zone = zone,
+                frameWidth = state.streamResolution.height,
+                frameHeight = state.streamResolution.width,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         Column(
             modifier = Modifier
@@ -451,6 +631,8 @@ private fun OperatorLiveCapturePage(
                     OverlayPages.Controls -> OperatorControlsPage(
                         state = state,
                         cameraPermissionGranted = cameraPermissionGranted,
+                        onDetectZone = onDetectZone,
+                        onEditZone = onEditZone,
                         pipelineExpanded = settingsExpanded,
                         onBack = onBack,
                         onPipelineToggle = { settingsExpanded = !settingsExpanded },
@@ -480,6 +662,8 @@ private fun OperatorLiveCapturePage(
 private fun OperatorControlsPage(
     state: OperatorUiState,
     cameraPermissionGranted: Boolean,
+    onDetectZone: (DetectZone?) -> Unit,
+    onEditZone: () -> Unit,
     pipelineExpanded: Boolean,
     onBack: () -> Unit,
     onPipelineToggle: () -> Unit,
@@ -509,6 +693,16 @@ private fun OperatorControlsPage(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+
+        DetectZoneRow(
+            zone = state.detectZone,
+            enabled = !state.isCapturing,
+            onZoneChange = onDetectZone,
+            onEdit = onEditZone,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp),
         )
 
         Spacer(modifier = Modifier.weight(1f))
@@ -542,6 +736,104 @@ private fun OperatorControlsPage(
                     maxLines = 1,
                 )
             }
+        }
+    }
+}
+
+/** Blue, and thick enough to read against a bright lane in daylight. */
+private val ZoneOutline = Color(0xFF2979FF)
+private const val ZoneOutlineWidthPx = 10f
+
+/**
+ * The Capture Zone, outlined over the live preview.
+ *
+ * Mapping matters here in a way it does not in the editor: [CameraPreviewPane] scales the
+ * stream with `FILL_CENTER`, so a 1080×1920 frame on a taller screen is blown up until it
+ * fills the height and loses its sides off-screen. Drawing the zone against the raw view
+ * bounds would put the outline somewhere the detectors never look. This repeats that scale
+ * and centring so the rectangle sits exactly where the gate will cut.
+ */
+@Composable
+private fun LiveZoneOverlay(
+    zone: DetectZone,
+    frameWidth: Int,
+    frameHeight: Int,
+    modifier: Modifier = Modifier,
+) {
+    if (frameWidth <= 0 || frameHeight <= 0) return
+    Canvas(modifier = modifier) {
+        val scale = maxOf(size.width / frameWidth, size.height / frameHeight)
+        val drawnWidth = frameWidth * scale
+        val drawnHeight = frameHeight * scale
+        val originX = (size.width - drawnWidth) / 2f
+        val originY = (size.height - drawnHeight) / 2f
+
+        val left = originX + zone.left * drawnWidth
+        val top = originY + zone.top * drawnHeight
+        val right = originX + zone.right * drawnWidth
+        val bottom = originY + zone.bottom * drawnHeight
+
+        drawRect(
+            color = ZoneOutline,
+            topLeft = Offset(left, top),
+            size = Size(right - left, bottom - top),
+            style = Stroke(width = ZoneOutlineWidthPx),
+        )
+    }
+}
+
+/**
+ * Capture Zone control for live capture — same switch and the same editor as the import
+ * preview, over the camera instead of over a clip.
+ *
+ * Locked while recording: the zone is read when the session starts, so flipping it mid-run
+ * would change nothing and only mislead.
+ */
+@Composable
+private fun DetectZoneRow(
+    zone: DetectZone?,
+    enabled: Boolean,
+    onZoneChange: (DetectZone?) -> Unit,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(CardShape)
+            .background(CardBg)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = "Detect zone",
+                color = Color(0xFF90A4AE),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                text = if (zone == null) "Whole frame" else "Custom area",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (zone != null && enabled) {
+                Text(
+                    text = "Edit",
+                    color = Color(0xFF80CBC4),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .clip(CardShape)
+                        .clickable(onClick = onEdit)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+            AutobotsSwitch(
+                checked = zone != null,
+                onCheckedChange = { on -> onZoneChange(if (on) DetectZone.DEFAULT else null) },
+                enabled = enabled,
+            )
         }
     }
 }
@@ -607,7 +899,7 @@ private fun UploadStatusCard(
             // taken before it starts, not something to flip halfway through and then have to
             // reason about which photos went where. The queue screen's Pause still works —
             // that one is the emergency stop, not a policy switch.
-            Switch(
+            AutobotsSwitch(
                 checked = !paused,
                 onCheckedChange = { on ->
                     // Ask at the moment the notification would start mattering, not at launch.
@@ -615,10 +907,6 @@ private fun UploadStatusCard(
                     onSetAutoUpload(on)
                 },
                 enabled = !capturing,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF26A69A),
-                    checkedTrackColor = Color(0xFF26A69A).copy(alpha = 0.4f),
-                ),
             )
         }
         Text(
@@ -893,6 +1181,8 @@ private fun CompactStatusCard(
                 tooltip = when (state.extractionTarget) {
                     ExtractionTarget.Face -> "เฟรมที่คัดได้ — มีหน้าและชัดพอ"
                     ExtractionTarget.Pose -> "เฟรมที่คัดได้ — มีท่าทางและชัดพอ"
+                    ExtractionTarget.FaceAndPose ->
+                        "เฟรมที่คัดได้ — มีทั้งหน้าและลำตัวครบ และชัดพอ"
                 },
                 highlight = state.facesKept > 0,
                 active = activeTooltip,
@@ -1069,48 +1359,6 @@ private fun CompactStatusCard(
     }
 }
 
-@Composable
-private fun StatChip(
-    label: String,
-    value: String,
-    tooltip: String,
-    modifier: Modifier = Modifier,
-    highlight: Boolean = false,
-    valueColor: Color? = null,
-    active: String? = null,
-    onTooltip: (String?) -> Unit = {},
-) {
-    val selected = active == tooltip
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(
-                if (selected) Color.White.copy(alpha = 0.12f)
-                else Color.Black.copy(alpha = 0.32f),
-            )
-            .clickable { onTooltip(if (selected) null else tooltip) }
-            .padding(horizontal = 2.dp, vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = label,
-            color = Color(0xFF90A4AE),
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 8.sp,
-            lineHeight = 9.sp,
-            maxLines = 1,
-        )
-        Text(
-            text = value,
-            color = valueColor ?: if (highlight) Color(0xFF69F0AE) else Color.White,
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 10.sp,
-            lineHeight = 11.sp,
-            maxLines = 1,
-        )
-    }
-}
-
 private fun thermalColor(level: Int): Color = when (level) {
     PowerManager.THERMAL_STATUS_NONE, -1 -> Color.White
     PowerManager.THERMAL_STATUS_LIGHT -> Color(0xFF26A69A)
@@ -1137,6 +1385,7 @@ private fun OperatorShellPreview() {
             onExposureReadout = {},
             onOpenGallery = {},
             onImportVideo = {},
+            onDetectZone = {},
             onCheckNetworkUrl = {},
             onClearNetworkUrlError = {},
             onConfirmImport = { _, _, _, _ -> },

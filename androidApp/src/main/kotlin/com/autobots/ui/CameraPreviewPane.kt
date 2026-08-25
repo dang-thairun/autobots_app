@@ -38,6 +38,12 @@ import kotlin.coroutines.resume
 fun CameraPreviewPane(
     active: Boolean,
     streamResolution: StreamResolution,
+    /**
+     * Whether chunks are being written. Separate from [active] so the operator can see
+     * through the lens — to frame the lane, or to draw a detect zone — without the phone
+     * recording anything, which is what the Live page shows before Start is pressed.
+     */
+    recording: Boolean = active,
     pipelineCoordinator: CapturePipelineCoordinator?,
     pipelinePaused: Boolean = false,
     videoQueueDepth: Int = 0,
@@ -51,6 +57,7 @@ fun CameraPreviewPane(
     val controller = remember { VideoPreviewController(context.applicationContext) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     val activeState by rememberUpdatedState(active)
+    val recordingState by rememberUpdatedState(recording)
     val exposureListener by rememberUpdatedState(onExposureReadout)
 
     DisposableEffect(controller) {
@@ -58,11 +65,11 @@ fun CameraPreviewPane(
         onDispose { controller.shutdown() }
     }
 
-    LaunchedEffect(active, previewView, streamResolution, pipelineCoordinator) {
+    LaunchedEffect(active, recording, previewView, streamResolution, pipelineCoordinator) {
         if (active) {
             val view = previewView ?: return@LaunchedEffect
             controller.bindPreview(lifecycleOwner, view, streamResolution) {
-                if (!activeState) return@bindPreview
+                if (!activeState || !recordingState) return@bindPreview
                 val coordinator = pipelineCoordinator ?: return@bindPreview
                 if (!coordinator.hasStorageForRecording()) return@bindPreview
                 controller.startChunkRecording(
@@ -78,19 +85,21 @@ fun CameraPreviewPane(
         }
     }
 
-    LaunchedEffect(active, pipelineCoordinator) {
-        if (active) return@LaunchedEffect
+    LaunchedEffect(active, recording, pipelineCoordinator) {
+        if (active && recording) return@LaunchedEffect
         suspendCancellableCoroutine { cont ->
             controller.stopChunkRecording {
                 pipelineCoordinator?.onRecorderStopSettled()
-                controller.unbindCamera()
+                // Keep the camera bound while the pane is merely previewing; unbind only
+                // when the pane itself is going away.
+                if (!activeState) controller.unbindCamera()
                 cont.resume(Unit)
             }
         }
     }
 
-    LaunchedEffect(active, pipelinePaused, videoQueueDepth) {
-        if (active && pipelinePaused && pipelineCoordinator?.canAcceptVideoChunk() == true) {
+    LaunchedEffect(active, recording, pipelinePaused, videoQueueDepth) {
+        if (active && recording && pipelinePaused && pipelineCoordinator?.canAcceptVideoChunk() == true) {
             controller.resumeRecordingIfPaused()
         }
     }

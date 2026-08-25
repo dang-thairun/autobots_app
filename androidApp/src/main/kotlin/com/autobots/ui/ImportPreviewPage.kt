@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,11 +16,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,11 +32,57 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import android.graphics.Bitmap
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
+
+/** Miniature of the frame in the card — big enough to recognise the lane, no bigger. */
+private val ZonePreviewHeight = 150.dp
+
+/** One switch per detector. [ExtractionTarget.FaceAndPose] is both switches on, not a row. */
+private val DetectionRows = listOf(ExtractionTarget.Face, ExtractionTarget.Pose)
+
+/** Tall enough for the three-line values (label + 3 × 11.sp) and no taller. */
+private val StatChipHeight = 54.dp
+
+/** Units and separators sit a notch below the numbers they belong to. */
+private val ChipUnitFontSize = 8.sp
+
+/**
+ * Stack a chip value over several lines — `403` over `MB`, `2160` over `×` over `3840`.
+ *
+ * Lines carrying no digits are the glue (a unit, a `×`), so they are set smaller and the
+ * numbers stay the thing the eye lands on.
+ */
+private fun stackedChipValue(vararg lines: String): AnnotatedString =
+    buildAnnotatedString {
+        lines.forEachIndexed { index, line ->
+            if (index > 0) append("\n")
+            if (line.any { it.isDigit() }) {
+                append(line)
+            } else {
+                withStyle(SpanStyle(fontSize = ChipUnitFontSize)) { append(line) }
+            }
+        }
+    }
 
 private val CardBg = Color.Gray.copy(alpha = 0.25f)
 private val CardShape = RoundedCornerShape(12.dp)
@@ -46,14 +93,31 @@ fun ImportPreviewPage(
     onBack: () -> Unit,
     onExtract: (ExtractionTarget, DetectorBackend, Long?, Long?) -> Unit,
     onCancel: () -> Unit,
+    onZoneChange: (DetectZone?) -> Unit,
+    onEditZone: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val pending = state.pendingImport
+    var activeTooltip by remember(pending?.uri) { mutableStateOf<String?>(null) }
     val initialBackend = remember(pending?.uri, state.detectorBackend, state.detectorUnavailable) {
         defaultImportBackend(state)
     }
-    var target by remember(pending?.uri, state.extractionTarget) {
-        mutableStateOf(state.extractionTarget)
+    // Two independent switches; both on is its own mode, where a frame has to satisfy the
+    // face gate and the torso gate before it is kept. Both off means nothing to extract.
+    var faceOn by remember(pending?.uri, state.extractionTarget) {
+        mutableStateOf(state.extractionTarget.usesFace)
+    }
+    var poseOn by remember(pending?.uri, state.extractionTarget) {
+        mutableStateOf(state.extractionTarget.usesPose)
+    }
+    val enabledTarget: ExtractionTarget? = when {
+        faceOn && poseOn -> ExtractionTarget.FaceAndPose
+        faceOn -> ExtractionTarget.Face
+        poseOn -> ExtractionTarget.Pose
+        else -> null
+    }
+    var expandedTarget by remember(pending?.uri) {
+        mutableStateOf<ExtractionTarget?>(null)
     }
     var backend by remember(pending?.uri, initialBackend) {
         mutableStateOf(initialBackend)
@@ -105,44 +169,102 @@ fun ImportPreviewPage(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Column(
+                        Text(
+                            text = pending.displayName,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(end = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = pending.displayName,
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelLarge,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = pending.sizeLabel,
-                                color = Color(0xFFB0BEC5),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = pending.resolutionLine,
-                                color = Color(0xFFE0E0E0),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                            )
-                            Text(
-                                text = "${pending.durationLabel} · ${pending.fpsLabel}",
-                                color = Color(0xFFB0BEC5),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                            )
-                        }
+                                .padding(end = 8.dp),
+                        )
+                        Text(
+                            text = if (pending.isRemote) "URL" else "LOCAL",
+                            color = Color(0xFF90A4AE),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp,
+                            maxLines = 1,
+                        )
+                    }
+
+                    // Fixed height: every chip is the same box whether its value is one line
+                    // or three, so the row reads as a single strip.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        StatChip(
+                            label = "Type",
+                            value = pending.typeLabel,
+                            tooltip = "Type — สกุลไฟล์ต้นทาง",
+                            active = activeTooltip,
+                            onTooltip = { activeTooltip = it },
+                            height = StatChipHeight,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatChip(
+                            label = "Size",
+                            value = stackedChipValue(
+                                pending.sizeChipNumber,
+                                pending.sizeChipUnit,
+                            ),
+                            tooltip = "Size — ขนาดไฟล์",
+                            valueMaxLines = 3,
+                            active = activeTooltip,
+                            onTooltip = { activeTooltip = it },
+                            height = StatChipHeight,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatChip(
+                            label = "Res",
+                            value = if (pending.hasResolution) {
+                                stackedChipValue(
+                                    "${pending.displayWidth}",
+                                    "×",
+                                    "${pending.displayHeight}",
+                                )
+                            } else {
+                                AnnotatedString("—")
+                            },
+                            tooltip = "Res — ขนาดภาพจริงหลังหมุน ที่ pipeline เห็น",
+                            valueMaxLines = 3,
+                            active = activeTooltip,
+                            onTooltip = { activeTooltip = it },
+                            height = StatChipHeight,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatChip(
+                            label = "FPS",
+                            value = pending.fpsChipValue,
+                            tooltip = "FPS — เฟรมต่อวินาทีของไฟล์ต้นทาง",
+                            active = activeTooltip,
+                            onTooltip = { activeTooltip = it },
+                            height = StatChipHeight,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatChip(
+                            label = "Dur.",
+                            value = pending.durationLabel,
+                            tooltip = "Duration — ความยาวคลิปทั้งไฟล์",
+                            valueMaxLines = 2,
+                            active = activeTooltip,
+                            onTooltip = { activeTooltip = it },
+                            height = StatChipHeight,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    activeTooltip?.let { hint ->
+                        Text(
+                            text = hint,
+                            color = Color(0xFFB0BEC5),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            maxLines = 2,
+                        )
                     }
                 }
 
@@ -164,7 +286,7 @@ fun ImportPreviewPage(
                                 style = MaterialTheme.typography.labelLarge,
                             )
                         }
-                        Switch(
+                        AutobotsSwitch(
                             checked = useFullLength,
                             onCheckedChange = { checked ->
                                 fullLength = checked
@@ -174,12 +296,6 @@ fun ImportPreviewPage(
                                 }
                             },
                             enabled = rangeEnabled,
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF80CBC4),
-                                uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = Color.White.copy(alpha = 0.28f),
-                            ),
                         )
                     }
                     if (!useFullLength) {
@@ -214,67 +330,102 @@ fun ImportPreviewPage(
 
                 ImportInfoCard {
                     Text(
-                        text = "Target",
+                        text = "Detection",
                         color = Color(0xFF90A4AE),
                         style = MaterialTheme.typography.labelSmall,
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ExtractionTarget.entries.forEach { option ->
-                            FilterChip(
-                                selected = target == option,
-                                onClick = { target = option },
-                                modifier = Modifier.weight(1f),
-                                label = { Text(option.label) },
+                    DetectionRows.forEachIndexed { index, option ->
+                        if (index > 0) {
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.12f),
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
+                        val checked = when (option) {
+                            ExtractionTarget.Pose -> poseOn
+                            else -> faceOn
+                        }
+                        DetectionToggleRow(
+                            title = "${option.label} Detection",
+                            subtitle = "Process with ${importPreviewBackendLabel(backend)}",
+                            checked = checked,
+                            onCheckedChange = { on ->
+                                when (option) {
+                                    ExtractionTarget.Pose -> poseOn = on
+                                    else -> faceOn = on
+                                }
+                                if (!on && expandedTarget == option) expandedTarget = null
+                            },
+                            expanded = expandedTarget == option,
+                            onToggleExpanded = {
+                                expandedTarget = if (expandedTarget == option) null else option
+                            },
+                        )
+                        if (expandedTarget == option) {
+                            ProcessWithPicker(
+                                state = state,
+                                target = option,
+                                selected = backend,
+                                onSelect = { backend = it },
                             )
                         }
                     }
-                    Text(
-                        text = "Process with",
-                        color = Color(0xFF90A4AE),
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
+                }
+
+                ImportInfoCard {
+                    val zone = state.detectZone
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ImportPreviewBackends.forEach { option ->
-                            val unavailable = state.detectorUnavailable[option]
-                            FilterChip(
-                                selected = backend == option,
-                                onClick = { backend = option },
-                                enabled = unavailable == null,
-                                modifier = Modifier.weight(1f),
-                                label = {
-                                    Text(
-                                        importPreviewBackendLabel(option),
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
-                                },
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Detect zone",
+                                color = Color(0xFF90A4AE),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            Text(
+                                text = if (zone == null) "Whole frame" else "Custom area",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelLarge,
                             )
                         }
+                        AutobotsSwitch(
+                            checked = zone != null,
+                            onCheckedChange = { on ->
+                                onZoneChange(if (on) DetectZone.DEFAULT else null)
+                            },
+                        )
                     }
-                    ImportPreviewBackends.forEach { option ->
-                        val reason = state.detectorUnavailable[option] ?: return@forEach
+                    if (zone != null) {
+                        // Tapping the preview is the way into the editor: the picture is the
+                        // thing the operator is reasoning about, so it is also the target.
+                        ZonePreview(
+                            zone = zone,
+                            frame = state.pendingImportFrame,
+                            frameWidth = pending.displayWidth,
+                            frameHeight = pending.displayHeight,
+                            onClick = onEditZone,
+                        )
                         Text(
-                            text = "${importPreviewBackendLabel(option)}: $reason",
-                            color = Color(0xFFB0704A),
+                            text = zone.pixelSummary(pending.displayWidth, pending.displayHeight),
+                            color = Color(0xFFB0BEC5),
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 }
 
-                val estimateMs = estimateImportWallMs(
-                    durationMs = if (useFullLength) pending.durationMs else clipRange.durationMs,
-                    width = pending.width,
-                    height = pending.height,
-                    rotationDegrees = pending.rotationDegrees,
-                    target = target,
-                    backend = backend,
-                )
+                val estimateMs = enabledTarget?.let { active ->
+                    estimateImportWallMs(
+                        durationMs = if (useFullLength) pending.durationMs else clipRange.durationMs,
+                        width = pending.width,
+                        height = pending.height,
+                        rotationDegrees = pending.rotationDegrees,
+                        target = active,
+                        backend = backend,
+                    )
+                }
                 val clipLabel = if (useFullLength) {
                     "${pending.durationLabel} clip"
                 } else {
@@ -287,12 +438,14 @@ fun ImportPreviewPage(
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Text(
-                        text = formatImportEstimate(estimateMs),
+                        text = estimateMs?.let(::formatImportEstimate) ?: "—",
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = "${target.label} · ${importPreviewBackendLabel(backend)} · $clipLabel",
+                        text = enabledTarget?.let { active ->
+                            "${active.label} · ${importPreviewBackendLabel(backend)} · $clipLabel"
+                        } ?: "Turn on a detection to extract",
                         color = Color(0xFFB0BEC5),
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -301,16 +454,18 @@ fun ImportPreviewPage(
         }
 
         val canExtract = pending != null &&
+            enabledTarget != null &&
             !state.isPreparingImport &&
             !state.detectorUnavailable.containsKey(backend) &&
             clipRange.isValid
         Button(
             onClick = {
                 if (pending == null) return@Button
+                val active = enabledTarget ?: return@Button
                 if (useFullLength) {
-                    onExtract(target, backend, null, null)
+                    onExtract(active, backend, null, null)
                 } else {
-                    onExtract(target, backend, clipRange.startMs, clipRange.endMs)
+                    onExtract(active, backend, clipRange.startMs, clipRange.endMs)
                 }
             },
             enabled = canExtract,
@@ -329,6 +484,171 @@ fun ImportPreviewPage(
             modifier = Modifier.align(Alignment.CenterHorizontally),
         ) {
             Text("Cancel", color = Color(0xFFB0BEC5))
+        }
+    }
+}
+
+/**
+ * One detection, switched like [Range]: title, toggle, then a chevron that reveals the
+ * backend picker. Collapsed by default — the backend rarely needs changing.
+ */
+@Composable
+private fun DetectionToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                color = if (checked) Color.White else Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = subtitle,
+                color = if (checked) Color(0xFF90A4AE) else Color(0xFF607D8B),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        AutobotsSwitch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+        Text(
+            text = "|",
+            color = Color.White.copy(alpha = 0.28f),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 6.dp),
+        )
+        Text(
+            text = if (expanded) "\u25B4" else "\u25BE",
+            color = Color(0xFFB0BEC5),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .clickable(onClick = onToggleExpanded)
+                .padding(horizontal = 10.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/** Which detector runs the pass. One picker serves whichever detection is switched on. */
+@Composable
+private fun ProcessWithPicker(
+    state: OperatorUiState,
+    target: ExtractionTarget,
+    selected: DetectorBackend,
+    onSelect: (DetectorBackend) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ImportPreviewBackends.forEach { option ->
+            val unavailable = state.detectorUnavailable[option]
+            FilterChip(
+                selected = selected == option,
+                onClick = { onSelect(option) },
+                enabled = unavailable == null,
+                modifier = Modifier.weight(1f),
+                label = {
+                    // Hardware over model, inside the chip: the two belong to one choice.
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = importPreviewBackendLabel(option),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = option.modelTag(target),
+                            color = LocalContentColor.current.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp,
+                            lineHeight = 11.sp,
+                            maxLines = 1,
+                        )
+                    }
+                },
+            )
+        }
+    }
+    ImportPreviewBackends.forEach { option ->
+        val reason = state.detectorUnavailable[option] ?: return@forEach
+        Text(
+            text = "${importPreviewBackendLabel(option)}: $reason",
+            color = Color(0xFFB0704A),
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * Read-only miniature of the zone over a frame of the clip. Tap opens [ZoneEditorPage].
+ */
+@Composable
+private fun ZonePreview(
+    zone: DetectZone,
+    frame: Bitmap?,
+    frameWidth: Int,
+    frameHeight: Int,
+    onClick: () -> Unit,
+) {
+    val ratio = if (frameWidth > 0 && frameHeight > 0) {
+        frameWidth.toFloat() / frameHeight.toFloat()
+    } else {
+        16f / 9f
+    }
+    Box(
+        // Height-constrained, not width-constrained: a portrait 4K clip is 9:16, and sizing
+        // this by width would push the Estimate card off the screen.
+        modifier = Modifier
+            .height(ZonePreviewHeight)
+            .aspectRatio(ratio)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color(0xFF2B2B2B))
+            .clickable(onClick = onClick),
+    ) {
+        if (frame != null) {
+            Image(
+                bitmap = frame.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.FillBounds,
+            )
+        }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val left = zone.left * size.width
+            val top = zone.top * size.height
+            val right = zone.right * size.width
+            val bottom = zone.bottom * size.height
+            val dim = Color.Black.copy(alpha = 0.5f)
+            drawRect(dim, size = Size(size.width, top))
+            drawRect(dim, topLeft = Offset(0f, bottom), size = Size(size.width, size.height - bottom))
+            drawRect(dim, topLeft = Offset(0f, top), size = Size(left, bottom - top))
+            drawRect(dim, topLeft = Offset(right, top), size = Size(size.width - right, bottom - top))
+            drawRect(
+                color = Color(0xFF80CBC4),
+                topLeft = Offset(left, top),
+                size = Size(right - left, bottom - top),
+                style = Stroke(width = 2f),
+            )
         }
     }
 }

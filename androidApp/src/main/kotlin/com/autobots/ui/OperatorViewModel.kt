@@ -13,6 +13,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobots.camera.ChunkRecordingProgress
 import com.autobots.camera.PipelineSessionRecord
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
+import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.detection.DetectorAvailability
 import com.autobots.camera.ExtractionTarget
@@ -100,6 +105,10 @@ data class OperatorUiState(
     val sessionHistory: List<PipelineSessionRecord> = emptyList(),
     val isPreparingImport: Boolean = false,
     val pendingImport: PendingVideoImport? = null,
+    /** Capture Zone for the next run. Null means the whole frame is scanned. */
+    val detectZone: DetectZone? = null,
+    /** A frame from the pending clip, drawn under the zone editor. Null while loading. */
+    val pendingImportFrame: Bitmap? = null,
     val isCheckingNetworkUrl: Boolean = false,
     val networkUrlError: String? = null,
     val isDownloading: Boolean = false,
@@ -169,11 +178,17 @@ data class OperatorUiState(
             }
         }
 
-    /** Can Worker 2 keep up, and how long until a photo lands? Live capture only. */
+    /**
+     * Extraction time over footage length, for every source.
+     *
+     * It used to be suppressed for imports — and, because the check looked at the whole
+     * session list, for live capture too once anything had ever been imported. The number is
+     * exactly as meaningful for a browsed file or a network URL: it is what says whether this
+     * phone can chew through a clip faster than the clip is long.
+     */
     val throughputLine: String
         get() {
             if (lastRealtimeRatio <= 0f) return ""
-            if (sessionHistory.any { it.source == SessionSource.VideoImport }) return ""
             return buildString {
                 append(String.format("%.2fx realtime", lastRealtimeRatio))
                 if (avgPhotoLatencyMs > 0) {
@@ -183,8 +198,17 @@ data class OperatorUiState(
             }
         }
 
+    /** True when the run is reading a file rather than a live camera. */
+    val isImportRun: Boolean
+        get() = sessionHistory.firstOrNull()?.source == SessionSource.VideoImport
+
+    /**
+     * Only a live capture can fall behind: its footage keeps arriving whether or not the
+     * queue is draining. An import above 1× is slow, not broken — nothing is piling up
+     * behind it — so it gets the number without the alarm.
+     */
     val isThroughputTooSlow: Boolean
-        get() = lastRealtimeRatio >= 1f
+        get() = lastRealtimeRatio >= 1f && !isImportRun
 
     /**
      * Compact size for the processing card title (`FHD` / `4K` / `720p`).
@@ -207,6 +231,9 @@ data class OperatorUiState(
             return null
         }
 }
+
+/** Scratch copies of videos downloaded because a CDN refused `MediaHTTPConnection`. */
+internal const val NETWORK_IMPORT_DIR = "network_import"
 
 data class PendingVideoImport(
     val uri: Uri,
@@ -243,6 +270,51 @@ data class PendingVideoImport(
 
     val sizeLabel: String
         get() = if (sizeBytes > 0) formatChunkBytes(sizeBytes) else "—"
+
+    /**
+     * A URL import that had to be downloaded first (R2 and friends) arrives here with
+     * [remoteUrl] null and [uri] pointing at the scratch copy — the path is the only
+     * thing left that still says where it came from.
+     */
+    val isRemote: Boolean
+        get() = remoteUrl != null || uri.path?.contains("/$NETWORK_IMPORT_DIR/") == true
+
+    /** Container of the source file, e.g. `MP4`. Extensions only — no probing. */
+    val typeLabel: String
+        get() {
+            val ext = displayName.substringAfterLast('.', "")
+            if (ext.isEmpty() || ext.length > 4 || !ext.all { it.isLetterOrDigit() }) return "—"
+            return ext.uppercase()
+        }
+
+    /** Size for a stat chip, switching to GB once MB stops being readable. */
+    val sizeChipNumber: String
+        get() = when {
+            sizeBytes <= 0L -> "—"
+            sizeBytes >= 1_073_741_824L -> "%.1f".format(sizeBytes / 1_073_741_824.0)
+            sizeBytes >= 1_048_576L -> "%.0f".format(sizeBytes / 1_048_576.0)
+            else -> "%.0f".format(sizeBytes / 1024.0)
+        }
+
+    /** Unit for [sizeChipNumber] — its own line in the chip, set smaller. */
+    val sizeChipUnit: String
+        get() = when {
+            sizeBytes <= 0L -> ""
+            sizeBytes >= 1_073_741_824L -> "GB"
+            sizeBytes >= 1_048_576L -> "MB"
+            else -> "KB"
+        }
+
+    /** True once [displayWidth] and [displayHeight] are worth showing. */
+    val hasResolution: Boolean
+        get() = displayWidth > 0 && displayHeight > 0
+
+    /** Bare number — the chip label already says FPS. */
+    val fpsChipValue: String
+        get() {
+            val fps = frameRate ?: return "—"
+            return if (fps % 1f == 0f) "${fps.toInt()}" else "%.2f".format(fps)
+        }
 }
 
 /** Backends the import preview lets the operator pick — matches the Home mockup. */
@@ -273,7 +345,13 @@ internal fun estimateImportWallMs(
         DetectorBackend.LiteRtNpu -> 50L
         else -> 110L
     }
-    val poseMul = if (target == ExtractionTarget.Pose) 1.3 else 1.0
+    // Pose is ML Kit on the CPU whatever the backend. In the combined mode it runs only on
+    // frames the face gate already passed, so it costs a fraction of a full pose pass.
+    val poseMul = when (target) {
+        ExtractionTarget.Pose -> 1.3
+        ExtractionTarget.FaceAndPose -> 1.5
+        ExtractionTarget.Face -> 1.0
+    }
     val rotated = rotationDegrees == 90 || rotationDegrees == 270
     val longEdge = maxOf(
         if (rotated) height else width,
@@ -685,6 +763,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         coordinator.setResolution(resolution)
         coordinator.setExtractionTarget(extractionTarget)
         coordinator.setDetectorBackend(_state.value.detectorBackend)
+        coordinator.setDetectZone(_state.value.detectZone)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -760,6 +839,40 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                     ),
                 )
             }
+            loadPreviewFrame(uri, remoteUrl = null, durationMs = probe.durationMs)
+        }
+    }
+
+
+    /**
+     * Grab one frame to draw the Capture Zone against.
+     *
+     * Drawing a zone on an empty rectangle is guessing where the lane is; drawing it on a
+     * real frame is seeing it. Failure is not worth reporting — the editor falls back to a
+     * plain backdrop and stays usable.
+     */
+    private fun loadPreviewFrame(uri: Uri, remoteUrl: String?, durationMs: Long) {
+        previewFrameJob?.cancel()
+        previewFrameJob = viewModelScope.launch(Dispatchers.IO) {
+            val bitmap = withTimeoutOrNull(PREVIEW_FRAME_TIMEOUT_MS) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    if (remoteUrl != null) {
+                        retriever.setDataSource(remoteUrl, HashMap())
+                    } else {
+                        retriever.setDataSource(getApplication(), uri)
+                    }
+                    // Midpoint: the first frame of a race clip is often an empty lane.
+                    val atUs = (durationMs.coerceAtLeast(0L) / 2) * 1000L
+                    retriever.getFrameAtTime(atUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                } catch (t: Throwable) {
+                    Log.i("OperatorViewModel", "No preview frame: ${t.message}")
+                    null
+                } finally {
+                    runCatching { retriever.release() }
+                }
+            }
+            _state.update { it.copy(pendingImportFrame = bitmap) }
         }
     }
 
@@ -767,7 +880,10 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         // A cancelled network import leaves its downloaded copy behind otherwise, and those
         // are whole videos — gigabytes, not kilobytes.
         _state.value.pendingImport?.uri?.let(::deleteIfImportCache)
-        _state.update { it.copy(isPreparingImport = false, pendingImport = null) }
+        previewFrameJob?.cancel()
+        _state.update {
+            it.copy(isPreparingImport = false, pendingImport = null, pendingImportFrame = null)
+        }
     }
 
     /** Delete a file only if it is ours: a scratch copy under `cacheDir/network_import`. */
@@ -802,6 +918,8 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         }
         Log.i("OperatorViewModel", "Cleared ${stale.size} stale import file(s), ${freed / 1_048_576} MB")
     }
+
+    private var previewFrameJob: Job? = null
 
     fun clearNetworkUrlError() {
         _state.update { it.copy(networkUrlError = null) }
@@ -879,6 +997,11 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
                         ),
                     )
                 }
+                loadPreviewFrame(
+                    uri = localFile?.let { file -> Uri.fromFile(file) } ?: url.toUri(),
+                    remoteUrl = if (localFile == null) url else null,
+                    durationMs = ready.durationMs,
+                )
             } catch (t: kotlinx.coroutines.TimeoutCancellationException) {
                 _state.update {
                     it.copy(
@@ -947,6 +1070,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         coordinator.setResolution(_state.value.streamResolution)
         coordinator.setExtractionTarget(_state.value.extractionTarget)
         coordinator.setDetectorBackend(_state.value.detectorBackend)
+        coordinator.setDetectZone(_state.value.detectZone)
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -1077,6 +1201,12 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(streamResolution = resolution) }
     }
 
+    /** Null clears the zone back to the whole frame. */
+    fun setDetectZone(zone: DetectZone?) {
+        if (_state.value.isCapturing) return
+        _state.update { it.copy(detectZone = zone?.takeUnless { z -> z.isFullFrame }) }
+    }
+
     fun setExtractionTarget(target: ExtractionTarget) {
         if (_state.value.isCapturing) return
         _state.update { it.copy(extractionTarget = target) }
@@ -1152,8 +1282,8 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
          */
         private const val STOP_TIMEOUT_MS = 5_000L
 
-        /** Scratch copies of videos downloaded because a CDN refused `MediaHTTPConnection`. */
-        private const val NETWORK_IMPORT_DIR = "network_import"
+        /** A remote clip may never yield a frame in reasonable time; the editor copes. */
+        private const val PREVIEW_FRAME_TIMEOUT_MS = 4_000L
 
     }
 }

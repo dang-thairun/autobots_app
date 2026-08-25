@@ -1,6 +1,5 @@
 package com.autobots
 
-import android.net.Uri
 import com.autobots.BuildConfig
 import com.autobots.camera.upload.UploadSettings
 import android.os.Bundle
@@ -100,13 +99,11 @@ class MainActivity : ComponentActivity() {
                     onStreamResolution = operatorViewModel::setStreamResolution,
                     onExtractionTarget = operatorViewModel::setExtractionTarget,
                     onDetectorBackend = operatorViewModel::setDetectorBackend,
+                    onDetectZone = operatorViewModel::setDetectZone,
                     onRecordingProgress = operatorViewModel::onRecordingProgress,
                     onPhotoDelivered = operatorViewModel::onPhotoDelivered,
                     onExposureReadout = operatorViewModel::onExposureReadout,
-                    onOpenGallery = {
-                        val uri = state.lastGalleryUri?.let(Uri::parse)
-                        GalleryLauncher.open(this@MainActivity, uri)
-                    },
+                    onOpenGallery = { GalleryLauncher.open(this@MainActivity) },
                     onImportVideo = {
                         operatorViewModel.clearImportError()
                         videoPicker.launch(arrayOf("video/*"))

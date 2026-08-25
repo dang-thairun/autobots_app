@@ -30,6 +30,13 @@ data class PipelineSessionRecord(
     val resolution: StreamResolution,
     val extractionTarget: ExtractionTarget,
     val detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
+    /** Capture Zone this run used, if the operator drew one. */
+    val detectZone: DetectZone? = null,
+    /** Shutter ceiling as a pinned frame rate; null means AE was left to decide. */
+    val shutterCeilingFps: Int? = null,
+    /** AE bias in device steps, with the step size needed to read it back as EV. */
+    val exposureIndex: Int = 0,
+    val exposureStepEv: Double? = null,
     val status: SessionStatus,
     val splitDurationMs: Long = 0,
     /**
@@ -138,6 +145,26 @@ data class PipelineSessionRecord(
                 processDurationMs > 0 ->
                     append(" (extract ${formatDurationMs(processDurationMs)})")
             }
+        }
+
+    /**
+     * The settings that shaped what this run kept, in one line.
+     *
+     * A field report that says "4 a.m. produced almost nothing" is unusable without them:
+     * a shutter ceiling, an EV bias and a capture zone each change the yield on their own,
+     * and none of them is recoverable from the photos afterwards.
+     */
+    val captureSettingsLine: String?
+        get() {
+            val parts = buildList {
+                shutterCeilingFps?.let { add("shutter ≤ 1/$it") }
+                if (exposureIndex != 0) {
+                    val ev = exposureStepEv?.let { step -> exposureIndex * step }
+                    add(ev?.let { formatEv(it) } ?: "EV index $exposureIndex")
+                }
+                detectZone?.let { add("zone ${it.pixelSummary(sourceVideoWidth ?: 0, sourceVideoHeight ?: 0)}") }
+            }
+            return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
         }
 
     val progressLine: String?
@@ -260,6 +287,14 @@ fun formatDurationMs(ms: Long): String {
     val min = totalSec / 60
     val sec = totalSec % 60
     return if (min > 0) "${min}m ${sec}s" else "${sec}s"
+}
+
+/** `+1.5 EV` / `-0.5 EV`, hand-rounded because common code has no String.format. */
+fun formatEv(ev: Double): String {
+    val tenths = (ev * 10).toInt()
+    val sign = if (tenths > 0) "+" else if (tenths < 0) "-" else ""
+    val abs = if (tenths < 0) -tenths else tenths
+    return "$sign${abs / 10}.${abs % 10} EV"
 }
 
 /**

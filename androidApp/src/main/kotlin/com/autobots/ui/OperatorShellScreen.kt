@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autobots.camera.AutobotsApp
+import com.autobots.camera.CameraCapabilities
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
@@ -114,6 +115,9 @@ fun OperatorShellScreen(
     onConfirmImport: (ExtractionTarget, DetectorBackend, Long?, Long?) -> Unit,
     onCancelImport: () -> Unit,
     onDetectZone: (DetectZone?) -> Unit,
+    onShutterCeiling: (Int?) -> Unit,
+    onStepExposure: (Int) -> Unit,
+    onCameraCapabilities: (CameraCapabilities?) -> Unit,
     uploadCounts: UploadQueueCounts,
     uploadItems: List<UploadItem>,
     onRetryFailedUploads: () -> Unit,
@@ -223,6 +227,9 @@ fun OperatorShellScreen(
                 onRecordingProgress = onRecordingProgress,
                 onExposureReadout = onExposureReadout,
                 onDetectZone = onDetectZone,
+                onShutterCeiling = onShutterCeiling,
+                onStepExposure = onStepExposure,
+                onCameraCapabilities = onCameraCapabilities,
                 onEditZone = {
                     zoneEditorReturn = OperatorDestination.LiveCapture
                     destination = OperatorDestination.ZoneEditor
@@ -583,6 +590,9 @@ private fun OperatorLiveCapturePage(
     onRecordingProgress: (Int, Long, Long) -> Unit,
     onExposureReadout: (String) -> Unit,
     onDetectZone: (DetectZone?) -> Unit,
+    onShutterCeiling: (Int?) -> Unit,
+    onStepExposure: (Int) -> Unit,
+    onCameraCapabilities: (CameraCapabilities?) -> Unit,
     onEditZone: () -> Unit,
 ) {
     // Bound as soon as the page opens: the operator aims the tripod by what the lens sees,
@@ -603,6 +613,9 @@ private fun OperatorLiveCapturePage(
             isProcessing = state.isProcessing,
             onRecordingProgress = onRecordingProgress,
             onExposureReadout = onExposureReadout,
+            onCapabilities = onCameraCapabilities,
+            shutterCeilingFps = state.shutterCeilingFps,
+            exposureIndex = state.exposureIndex,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -633,6 +646,8 @@ private fun OperatorLiveCapturePage(
                         cameraPermissionGranted = cameraPermissionGranted,
                         onDetectZone = onDetectZone,
                         onEditZone = onEditZone,
+                        onShutterCeiling = onShutterCeiling,
+                        onStepExposure = onStepExposure,
                         pipelineExpanded = settingsExpanded,
                         onBack = onBack,
                         onPipelineToggle = { settingsExpanded = !settingsExpanded },
@@ -664,6 +679,8 @@ private fun OperatorControlsPage(
     cameraPermissionGranted: Boolean,
     onDetectZone: (DetectZone?) -> Unit,
     onEditZone: () -> Unit,
+    onShutterCeiling: (Int?) -> Unit,
+    onStepExposure: (Int) -> Unit,
     pipelineExpanded: Boolean,
     onBack: () -> Unit,
     onPipelineToggle: () -> Unit,
@@ -693,6 +710,15 @@ private fun OperatorControlsPage(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+
+        LightCard(
+            state = state,
+            onShutterCeiling = onShutterCeiling,
+            onStepExposure = onStepExposure,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp),
         )
 
         DetectZoneRow(
@@ -780,6 +806,138 @@ private fun LiveZoneOverlay(
             style = Stroke(width = ZoneOutlineWidthPx),
         )
     }
+}
+
+/**
+ * What the AE is allowed to do, and what it actually chose.
+ *
+ * A race that starts at 4 a.m. and finishes after sunrise crosses a hundredfold change in
+ * light. Full auto answers the dark half by opening the shutter, which turns every runner
+ * into a smear that the sharpness gate then discards — a session that quietly keeps nothing
+ * while every indicator says the pipeline is healthy. A ceiling makes AE pay in ISO instead.
+ *
+ * Every control here is greyed out unless the device advertises support, rather than
+ * accepting a value the camera will refuse.
+ */
+@Composable
+private fun LightCard(
+    state: OperatorUiState,
+    onShutterCeiling: (Int?) -> Unit,
+    onStepExposure: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val choices = state.shutterCeilingChoices
+    Column(
+        modifier = modifier
+            .clip(CardShape)
+            .background(CardBg)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "Light",
+            color = Color(0xFF90A4AE),
+            style = MaterialTheme.typography.labelSmall,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Shutter",
+                color = Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.weight(1f),
+            )
+            ShutterChip(
+                label = "Auto",
+                selected = state.shutterCeilingFps == null,
+                enabled = true,
+                onClick = { onShutterCeiling(null) },
+            )
+            SHUTTER_CEILING_FPS.forEach { fps ->
+                ShutterChip(
+                    label = "1/$fps",
+                    selected = state.shutterCeilingFps == fps,
+                    // Offered only where the device advertises the range; 60 fps is
+                    // commonly missing at 4K.
+                    enabled = fps in choices,
+                    onClick = { onShutterCeiling(fps) },
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Exposure",
+                color = Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.weight(1f),
+            )
+            ShutterChip(
+                label = "−",
+                selected = false,
+                enabled = state.canCompensateExposure,
+                onClick = { onStepExposure(-1) },
+            )
+            Text(
+                text = state.exposureLabel,
+                color = if (state.exposureIndex == 0) Color(0xFFB0BEC5) else Color(0xFF80CBC4),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            ShutterChip(
+                label = "+",
+                selected = false,
+                enabled = state.canCompensateExposure,
+                onClick = { onStepExposure(1) },
+            )
+        }
+
+        // What the sensor chose, not what was asked for. Without it the controls above are
+        // guesswork: on a tripod at 5 a.m. the shutter reading is the whole story.
+        Text(
+            text = state.exposureLine,
+            color = Color(0xFF78909C),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun ShutterChip(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        color = when {
+            !enabled -> Color.White.copy(alpha = 0.3f)
+            selected -> Color(0xFF102027)
+            else -> Color.White
+        },
+        style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                when {
+                    selected -> Color(0xFF80CBC4)
+                    enabled -> Color.White.copy(alpha = 0.12f)
+                    else -> Color.White.copy(alpha = 0.05f)
+                },
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
 }
 
 /**
@@ -1386,6 +1544,9 @@ private fun OperatorShellPreview() {
             onOpenGallery = {},
             onImportVideo = {},
             onDetectZone = {},
+            onShutterCeiling = {},
+            onStepExposure = {},
+            onCameraCapabilities = {},
             onCheckNetworkUrl = {},
             onClearNetworkUrlError = {},
             onConfirmImport = { _, _, _, _ -> },

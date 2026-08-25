@@ -201,6 +201,9 @@ class CapturePipelineCoordinator(
     private var extractionTarget = ExtractionTarget.Face
     /** Capture Zone, normalised. Null (or full frame) means every corner counts. */
     private var detectZone: DetectZone? = null
+    private var shutterCeilingFps: Int? = null
+    private var exposureIndex: Int = 0
+    private var exposureStepEv: Double? = null
     private var detectorBackend = DetectorBackend.DEFAULT
 
     /**
@@ -325,6 +328,13 @@ class CapturePipelineCoordinator(
     /** Null or a full-frame zone both mean "scan everything". */
     fun setDetectZone(value: DetectZone?) {
         detectZone = value?.takeUnless { it.isFullFrame }
+    }
+
+    /** Recorded onto the session so a field report can say what the AE was told to do. */
+    fun setExposureSettings(shutterCeilingFps: Int?, exposureIndex: Int, stepEv: Double?) {
+        this.shutterCeilingFps = shutterCeilingFps
+        this.exposureIndex = exposureIndex
+        this.exposureStepEv = stepEv
     }
 
     /**
@@ -1040,6 +1050,10 @@ class CapturePipelineCoordinator(
             resolution = resolution,
             extractionTarget = extractionTarget,
             detectorBackend = detectorBackend,
+            detectZone = detectZone,
+            shutterCeilingFps = shutterCeilingFps,
+            exposureIndex = exposureIndex,
+            exposureStepEv = exposureStepEv,
             status = status,
             splitDurationMs = meta.splitDurationMs,
             splitBlockedMs = meta.splitBlockedMs,

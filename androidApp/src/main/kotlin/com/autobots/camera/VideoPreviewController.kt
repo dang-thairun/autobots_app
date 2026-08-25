@@ -8,7 +8,10 @@ import android.hardware.camera2.TotalCaptureResult
 import android.os.StatFs
 import android.os.SystemClock
 import android.util.Log
+import android.util.Range
+import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -51,6 +54,19 @@ class VideoPreviewController(
     private val bindGeneration = AtomicReference(0)
     private var shutdown = false
     private var onExposureReadout: ((CameraExposureReadout) -> Unit)? = null
+    private var onCapabilities: ((CameraCapabilities?) -> Unit)? = null
+
+    /**
+     * What the operator asked the AE to do. Held here, not passed to [bindPreview], because
+     * both can change mid-session and neither is worth a rebind — they are applied to the
+     * repeating request through `Camera2CameraControl`, and re-applied after every bind so a
+     * resolution change does not silently drop them.
+     */
+    @Volatile
+    private var shutterCeilingFps: Int? = null
+
+    @Volatile
+    private var exposureIndex: Int = 0
     private val lastExposurePublishMs = AtomicLong(0L)
 
     /**
@@ -66,6 +82,51 @@ class VideoPreviewController(
      * Live sensor readout from the repeating request. Always attached — the operator
      * needs to see the shutter speed on the tripod; only the verbose logging is gated.
      */
+    fun setCapabilitiesListener(listener: (CameraCapabilities?) -> Unit) {
+        onCapabilities = listener
+    }
+
+    /**
+     * Cap how long the AE may open the shutter, by pinning the target frame rate.
+     *
+     * In the dark AE pays for light with **time**, and a runner exposed for 1/30 s is a
+     * smear that the sharpness gate then throws away — the session quietly keeps nothing.
+     * Pinning the range to 30 or 60 fps forces AE to spend ISO instead: noise is sellable,
+     * motion blur is not. Null hands the decision back to the camera.
+     *
+     * The value must be one the device advertises; an unsupported range makes some devices
+     * reject the whole request rather than clamp it.
+     */
+    fun setShutterCeilingFps(fps: Int?) {
+        shutterCeilingFps = fps
+        applyAeSettings()
+    }
+
+    /** AE bias in device steps, not EV. Clamp against `aeCompensationRange` before calling. */
+    fun setExposureIndex(index: Int) {
+        exposureIndex = index
+        applyAeSettings()
+    }
+
+    private fun applyAeSettings() {
+        val cam = camera ?: return
+        val fps = shutterCeilingFps
+        runCatching {
+            val options = CaptureRequestOptions.Builder().apply {
+                if (fps != null) {
+                    setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                        Range(fps, fps),
+                    )
+                } else {
+                    clearCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE)
+                }
+            }.build()
+            Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(options)
+            cam.cameraControl.setExposureCompensationIndex(exposureIndex)
+        }.onFailure { Log.w(TAG, "AE settings not applied", it) }
+    }
+
     fun setExposureReadoutListener(listener: (CameraExposureReadout) -> Unit) {
         onExposureReadout = listener
     }
@@ -262,11 +323,18 @@ class VideoPreviewController(
             }
 
             camera = boundCamera
+            val caps = CameraCapabilities.read(boundCamera.cameraInfo)
             CamPerf.log {
-                val caps = CameraCapabilities.read(boundCamera.cameraInfo)
                 caps?.summary() ?: "┌─ camera capabilities\n└ unavailable (Camera2 interop read failed)"
             }
-            mainExecutor.execute { onBound(capture) }
+            // Re-applied on every bind: a resolution change rebinds, and settings that
+            // silently reverted to auto halfway through a dark session would be worse than
+            // never having them.
+            applyAeSettings()
+            mainExecutor.execute {
+                onCapabilities?.invoke(caps)
+                onBound(capture)
+            }
         } catch (t: Throwable) {
             Log.e(TAG, "bindInternal failed", t)
         }

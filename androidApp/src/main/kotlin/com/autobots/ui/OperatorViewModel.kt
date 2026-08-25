@@ -17,6 +17,7 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
+import com.autobots.camera.CameraCapabilities
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.detection.DetectorAvailability
@@ -85,6 +86,12 @@ data class OperatorUiState(
     val availRamMb: Long = 0,
     val totalRamMb: Long = 0,
     val exposureLine: String = "—mm  ·  —  ·  ISO —",
+    /** Read at every bind; null until the camera has been bound once. */
+    val cameraCapabilities: CameraCapabilities? = null,
+    /** Longest exposure AE may choose, as a pinned frame rate. Null lets AE decide. */
+    val shutterCeilingFps: Int? = null,
+    /** AE bias in device steps. Meaningful only through [CameraCapabilities]. */
+    val exposureIndex: Int = 0,
     val serverIp: String = "—",
     val storageBlocked: Boolean = false,
     val recordingProgress: ChunkRecordingProgress = ChunkRecordingProgress(),
@@ -198,6 +205,30 @@ data class OperatorUiState(
             }
         }
 
+    /** Frame rates worth offering as a shutter ceiling, from what the device advertises. */
+    val shutterCeilingChoices: List<Int>
+        get() {
+            val caps = cameraCapabilities ?: return emptyList()
+            return SHUTTER_CEILING_FPS.filter { fps ->
+                caps.supportedFrameRateRanges.any { it.lower <= fps && it.upper >= fps }
+            }
+        }
+
+    /** `+1.0 EV` — the index means nothing to an operator, the stops do. */
+    val exposureLabel: String
+        get() {
+            val step = cameraCapabilities?.aeCompensationStepEv ?: return "0 EV"
+            val ev = exposureIndex * step
+            return when {
+                ev > 0 -> String.format("+%.1f EV", ev)
+                ev < 0 -> String.format("%.1f EV", ev)
+                else -> "0 EV"
+            }
+        }
+
+    val canCompensateExposure: Boolean
+        get() = (cameraCapabilities?.aeCompensationRange?.upper ?: 0) > 0
+
     /** True when the run is reading a file rather than a live camera. */
     val isImportRun: Boolean
         get() = sessionHistory.firstOrNull()?.source == SessionSource.VideoImport
@@ -234,6 +265,14 @@ data class OperatorUiState(
 
 /** Scratch copies of videos downloaded because a CDN refused `MediaHTTPConnection`. */
 internal const val NETWORK_IMPORT_DIR = "network_import"
+
+/**
+ * Shutter ceilings offered in the UI, as pinned frame rates: 1/30 s and 1/60 s.
+ *
+ * Anything slower than 1/30 is already a smear at running pace; anything faster costs more
+ * ISO than a phone sensor can pay for at 5 a.m.
+ */
+internal val SHUTTER_CEILING_FPS = listOf(30, 60)
 
 data class PendingVideoImport(
     val uri: Uri,
@@ -764,6 +803,11 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         coordinator.setExtractionTarget(extractionTarget)
         coordinator.setDetectorBackend(_state.value.detectorBackend)
         coordinator.setDetectZone(_state.value.detectZone)
+        coordinator.setExposureSettings(
+            shutterCeilingFps = _state.value.shutterCeilingFps,
+            exposureIndex = _state.value.exposureIndex,
+            stepEv = _state.value.cameraCapabilities?.aeCompensationStepEv,
+        )
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -1071,6 +1115,9 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         coordinator.setExtractionTarget(_state.value.extractionTarget)
         coordinator.setDetectorBackend(_state.value.detectorBackend)
         coordinator.setDetectZone(_state.value.detectZone)
+        // No exposure settings: they drive the camera, and an imported clip was exposed
+        // before it ever reached this phone. Recording them here would put a shutter and an
+        // EV bias on a session they had no part in.
 
         if (!coordinator.hasStorageForRecording()) {
             _state.update { it.copy(storageBlocked = true) }
@@ -1225,6 +1272,36 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(exposureLine = line) }
     }
 
+    fun onCameraCapabilities(capabilities: CameraCapabilities?) {
+        _state.update { current ->
+            val range = capabilities?.aeCompensationRange
+            current.copy(
+                cameraCapabilities = capabilities,
+                // Another camera may not reach as far; keep the operator's intent but never
+                // hold a value the device would reject.
+                exposureIndex = if (range == null) {
+                    current.exposureIndex
+                } else {
+                    current.exposureIndex.coerceIn(range.lower, range.upper)
+                },
+            )
+        }
+    }
+
+    /** Null = let AE decide how long to open the shutter. */
+    fun setShutterCeilingFps(fps: Int?) {
+        _state.update { it.copy(shutterCeilingFps = fps) }
+    }
+
+    fun stepExposure(delta: Int) {
+        _state.update { current ->
+            val range = current.cameraCapabilities?.aeCompensationRange ?: return@update current
+            current.copy(
+                exposureIndex = (current.exposureIndex + delta).coerceIn(range.lower, range.upper),
+            )
+        }
+    }
+
     private fun applyPipelineStats(stats: PipelineStats) {
         _state.update {
             it.copy(
@@ -1275,6 +1352,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
 
     companion object {
         private const val LOAD_POLL_MS = 2_000L
+
 
         /**
          * How long the queue Flows stay warm after the last collector goes away. Long enough

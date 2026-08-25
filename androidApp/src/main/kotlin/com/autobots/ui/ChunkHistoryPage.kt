@@ -200,6 +200,14 @@ private fun SessionRecordCard(
             )
         }
 
+        session.captureSettingsLine?.let { settings ->
+            Text(
+                text = settings,
+                color = Color(0xFF90A4AE),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
         if (session.totalDurationMs > 0) {
             Text(
                 text = session.timingSummary,

@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.autobots.camera.CameraCapabilities
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.VideoPreviewController
 import com.autobots.camera.pipeline.CapturePipelineCoordinator
@@ -50,6 +51,10 @@ fun CameraPreviewPane(
     isProcessing: Boolean = false,
     onRecordingProgress: (Int, Long, Long) -> Unit = { _, _, _ -> },
     onExposureReadout: (String) -> Unit = {},
+    onCapabilities: (CameraCapabilities?) -> Unit = {},
+    /** Longest exposure AE may pick, as a pinned frame rate. Null lets AE decide. */
+    shutterCeilingFps: Int? = null,
+    exposureIndex: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -60,9 +65,18 @@ fun CameraPreviewPane(
     val recordingState by rememberUpdatedState(recording)
     val exposureListener by rememberUpdatedState(onExposureReadout)
 
+    val capabilitiesListener by rememberUpdatedState(onCapabilities)
+
     DisposableEffect(controller) {
         controller.setExposureReadoutListener { readout -> exposureListener(readout.line) }
+        controller.setCapabilitiesListener { caps -> capabilitiesListener(caps) }
         onDispose { controller.shutdown() }
+    }
+
+    // Applied to the repeating request, so a change costs nothing and needs no rebind.
+    LaunchedEffect(controller, shutterCeilingFps, exposureIndex) {
+        controller.setShutterCeilingFps(shutterCeilingFps)
+        controller.setExposureIndex(exposureIndex)
     }
 
     LaunchedEffect(active, recording, previewView, streamResolution, pipelineCoordinator) {

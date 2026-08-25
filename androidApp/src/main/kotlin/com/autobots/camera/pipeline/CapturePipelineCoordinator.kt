@@ -3,6 +3,7 @@ package com.autobots.camera.pipeline
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.ExtractionTarget
@@ -196,6 +197,8 @@ class CapturePipelineCoordinator(
 
     private var resolution = StreamResolution.Fhd
     private var extractionTarget = ExtractionTarget.Face
+    /** Capture Zone, normalised. Null (or full frame) means every corner counts. */
+    private var detectZone: DetectZone? = null
     private var detectorBackend = DetectorBackend.DEFAULT
 
     /**
@@ -240,6 +243,7 @@ class CapturePipelineCoordinator(
                         extractionTarget = extractionTarget,
                         sampleIntervalMs = resolution.frameSampleIntervalMs,
                         detectorBackend = detectorBackend,
+                        detectZone = detectZone,
                     ) { percent ->
                         currentChunkPercent = percent
                         publishStats()
@@ -310,6 +314,11 @@ class CapturePipelineCoordinator(
     fun setExtractionTarget(value: ExtractionTarget) {
         extractionTarget = value
         publishStats()
+    }
+
+    /** Null or a full-frame zone both mean "scan everything". */
+    fun setDetectZone(value: DetectZone?) {
+        detectZone = value?.takeUnless { it.isFullFrame }
     }
 
     /**

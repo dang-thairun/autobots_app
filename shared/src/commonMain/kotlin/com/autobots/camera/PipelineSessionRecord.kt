@@ -90,6 +90,9 @@ data class PipelineSessionRecord(
             ExtractionTarget.Pose -> "Pose · ML Kit · pose-detection"
             ExtractionTarget.Face ->
                 "Face · ${detectorBackend.hardwareLabel} · ${detectorBackend.modelName}"
+            ExtractionTarget.FaceAndPose ->
+                "Face + Pose · ${detectorBackend.hardwareLabel} · " +
+                    "${detectorBackend.modelName} + pose-detection"
         }
 
     val headlineSummary: String
@@ -99,9 +102,34 @@ data class PipelineSessionRecord(
             if (totalDurationMs > 0) append(" · ${formatDurationMs(totalDurationMs)}")
         }
 
+    /**
+     * Footage this run had to get through: the source clip for an import, the sum of what was
+     * recorded for a live capture.
+     */
+    val footageDurationMs: Long
+        get() = sourceDurationMs ?: chunks.sumOf { it.recordDurationMs }
+
+    /**
+     * Extraction time over footage length — the same definition `perf_report.json` uses per
+     * chunk, so a session line and a report can be compared without converting anything.
+     *
+     * Below 1 the phone gets through footage faster than it arrives; above 1 it falls behind,
+     * which is fatal for live capture and merely slow for an import.
+     */
+    val realtimeRatio: Float?
+        get() {
+            val footage = footageDurationMs
+            if (footage <= 0L || processDurationMs <= 0L) return null
+            return processDurationMs.toFloat() / footage
+        }
+
+    val realtimeRatioLabel: String?
+        get() = realtimeRatio?.let { formatRealtimeRatio(it) }
+
     val timingSummary: String
         get() = buildString {
             append("Total ${formatDurationMs(totalDurationMs)}")
+            realtimeRatioLabel?.let { append(" · $it") }
             when {
                 splitDurationMs > 0 && processDurationMs > 0 ->
                     append(" (split ${formatDurationMs(splitDurationMs)} + extract ${formatDurationMs(processDurationMs)})")
@@ -232,6 +260,17 @@ fun formatDurationMs(ms: Long): String {
     val min = totalSec / 60
     val sec = totalSec % 60
     return if (min > 0) "${min}m ${sec}s" else "${sec}s"
+}
+
+/**
+ * `0.50x realtime` — extraction time over footage length.
+ *
+ * Hand-rounded to two decimals rather than `String.format`, which is not available to
+ * common code.
+ */
+fun formatRealtimeRatio(ratio: Float): String {
+    val hundredths = (ratio * 100).toInt()
+    return "${hundredths / 100}.${(hundredths % 100).toString().padStart(2, '0')}x realtime"
 }
 
 /** Precise duration in seconds with millisecond precision (e.g. 45.123 s, 83.456 s). */

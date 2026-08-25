@@ -100,6 +100,22 @@ enum class DetectorBackend(val label: String) {
             CompareAll -> "all backends"
         }
 
+    /**
+     * Short model tag for the picker chips — what this backend actually loads.
+     *
+     * Pose ignores the backend entirely: `OfflinePoseDetector` runs ML Kit's pose model
+     * whichever chip is selected, so saying `face_det_lite` under it would be a lie.
+     */
+    fun modelTag(target: ExtractionTarget): String = when (target) {
+        ExtractionTarget.Pose, ExtractionTarget.FaceAndPose -> "pose_detection"
+        ExtractionTarget.Face -> when (this) {
+            MlKitFast -> "FAST"
+            MlKitAccurate -> "ACCURATE"
+            LiteRtCpu, LiteRtGpu, LiteRtNpu -> "face_det_lite"
+            CompareAll -> "all models"
+        }
+    }
+
     companion object {
         val DEFAULT = LiteRtNpu
 

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Rect
 import android.media.MediaMetadataRetriever
 import android.util.Log
+import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.StreamResolution
@@ -97,6 +98,8 @@ class VideoFrameProcessor(
 
     private var profile = ProcessProfile.forResolution(StreamResolution.Fhd)
     private var target = ExtractionTarget.Face
+    /** Null means the whole frame counts — the zone gate is then skipped entirely. */
+    private var zone: DetectZone? = null
     private var backend = DetectorBackend.DEFAULT
 
     /** Per-chunk stage timings. Chunks are serial, but workers within one are not — see [StageStats]. */
@@ -123,12 +126,14 @@ class VideoFrameProcessor(
         extractionTarget: ExtractionTarget,
         sampleIntervalMs: Long,
         detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
+        detectZone: DetectZone? = null,
         onProgress: (Int) -> Unit = {},
     ): VideoProcessResult {
         currentChunkIndex = chunkIndex
         profile = ProcessProfile.forResolution(resolution)
         target = extractionTarget
         backend = detectorBackend
+        zone = detectZone?.takeUnless { it.isFullFrame }
         ensureDetectors(detectorBackend)
 
         // Before the pipeline starts, so the reading is of an idle-ish core rather than of
@@ -356,60 +361,136 @@ class VideoFrameProcessor(
         return Triple(ordered.size, ordered.map { it.file }, ordered.map { it.timestampUs })
     }
 
+    /**
+     * One frame, one detect bitmap, however many detectors the target asks for.
+     *
+     * The detect bitmap is decoded once and shared: running the two detectors as separate
+     * passes would pay [uprightDetectBitmap] twice per frame for nothing. Face runs first
+     * because it rejects the most frames and, on a LiteRT backend, it rejects them on the
+     * NPU — so pose (always ML Kit, always CPU) only ever sees frames that already have a
+     * runner close enough to matter.
+     */
     private suspend fun evaluateFrame(
         set: DetectorSet,
         frame: SampledFrame,
         rejects: RejectStats,
     ): FrameCandidate? {
-        return when (target) {
-            ExtractionTarget.Face -> evaluateFaceFrame(set, frame, rejects)
-            ExtractionTarget.Pose -> evaluatePoseFrame(set, frame, rejects)
-        }
-    }
-
-    private suspend fun evaluateFaceFrame(
-        set: DetectorSet,
-        frame: SampledFrame,
-        rejects: RejectStats,
-    ): FrameCandidate? {
         val timestampUs = frame.timestampUs
         val detectBmp = uprightDetectBitmap(frame) ?: run {
             logFrame(timestampUs, "decode_failed")
             return null
         }
-        val faces = try {
-            CamPerf.timed(perf, "detect") { set.face.detect(detectBmp) }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Face detect failed at ${timestampUs}us", t)
-            emptyList()
-        }
-        // Size is judged in detect space, so a rejected frame never pays for a full-res rotate.
-        // Observation only, and it has to happen while the detect bitmap is still alive.
-        comparison?.record(currentChunkIndex, timestampUs, detectBmp)
-
-        val largest = faces.maxByOrNull { it.height() }
         val detectWidth = detectBmp.width
         val detectHeight = detectBmp.height
-        detectBmp.recycle()
 
-        if (largest == null) {
-            rejects.noSubject.incrementAndGet()
-            logFrame(timestampUs, "no_subject")
+        var faceBox: Rect? = null
+        var torsoBox: Rect? = null
+        var subjectRatio = 0f
+        var reject: String? = null
+
+        try {
+            if (target.usesFace) {
+                val faces = try {
+                    CamPerf.timed(perf, "detect") { set.face.detect(detectBmp) }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Face detect failed at ${timestampUs}us", t)
+                    emptyList()
+                }
+                // Observation only, and it has to happen while the detect bitmap is alive.
+                comparison?.record(currentChunkIndex, timestampUs, detectBmp)
+
+                // Filter before ranking, not after: the largest face in the frame may well
+                // be a spectator standing closer than the runner in the lane. Picking the
+                // largest first would then reject a frame that has a perfectly good subject
+                // inside the zone.
+                val inZone = zone?.let { z ->
+                    faces.filter {
+                        z.containsCentre(it.left, it.top, it.right, it.bottom, detectWidth, detectHeight)
+                    }
+                } ?: faces
+                if (zone != null && faces.isNotEmpty() && inZone.isEmpty()) {
+                    rejects.outOfZone.incrementAndGet()
+                    reject = "out_of_zone"
+                }
+                val largest = inZone.maxByOrNull { it.height() }
+                if (reject != null) {
+                    // already decided
+                } else if (largest == null) {
+                    rejects.noSubject.incrementAndGet()
+                    reject = "no_subject"
+                } else {
+                    // Size is judged in detect space, so a rejected frame never pays for a
+                    // full-res rotate.
+                    subjectRatio = largest.height().toFloat() / detectHeight
+                    if (subjectRatio < profile.minFaceHeightRatio) {
+                        rejects.tooSmall.incrementAndGet()
+                        reject = "too_small"
+                    } else {
+                        faceBox = largest
+                    }
+                }
+            }
+
+            if (reject == null && target.usesPose) {
+                val detection = try {
+                    CamPerf.timed(perf, "detect_pose") { set.pose.detect(detectBmp) }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Pose detect failed at ${timestampUs}us", t)
+                    null
+                }
+                val torso = detection?.torsoBounds
+                if (torso == null) {
+                    // Not "nobody is there" in the combined mode — the face may well have
+                    // passed. It means no torso was resolved, which is the whole point of
+                    // the gate: the runner's body is not usably in this frame.
+                    rejects.noSubject.incrementAndGet()
+                    reject = "no_subject"
+                } else if (!target.usesFace && zone?.containsCentre(
+                        torso.left, torso.top, torso.right, torso.bottom, detectWidth, detectHeight,
+                    ) == false
+                ) {
+                    // Only the anchor is zone-tested. With a face running, that face already
+                    // passed the zone, and demanding the torso centre pass it too would reject
+                    // a runner leaning out of the zone from the waist down.
+                    rejects.outOfZone.incrementAndGet()
+                    reject = "out_of_zone"
+                } else {
+                    val torsoRatio = torso.height().toFloat() / detectHeight
+                    if (!target.usesFace) subjectRatio = torsoRatio
+                    if (torsoRatio < MIN_TORSO_HEIGHT_RATIO) {
+                        rejects.tooSmall.incrementAndGet()
+                        reject = "too_small"
+                    } else if (target == ExtractionTarget.FaceAndPose &&
+                        !isFullyFramed(torso, detectWidth, detectHeight)
+                    ) {
+                        rejects.cropped.incrementAndGet()
+                        reject = "cropped"
+                    } else {
+                        torsoBox = torso
+                    }
+                }
+            }
+        } finally {
+            detectBmp.recycle()
+        }
+
+        if (reject != null) {
+            logFrame(timestampUs, reject, subjectRatio = subjectRatio.takeIf { it > 0f })
             return null
         }
-        val subjectRatio = largest.height().toFloat() / detectHeight
-        if (subjectRatio < profile.minFaceHeightRatio) {
-            rejects.tooSmall.incrementAndGet()
-            logFrame(timestampUs, "too_small", subjectRatio = subjectRatio)
-            return null
-        }
 
-        // Only here, past the size gate, does the frame earn a full-resolution decode.
+        // Sharpness is measured on the face wherever there is one, in every mode. It is the
+        // highest-frequency region in the frame and the one a buyer judges; scoring the union
+        // with the torso would dilute it with flat fabric and invalidate every MIN_SHARPNESS
+        // value tuned so far.
+        val subjectBox = faceBox ?: torsoBox ?: return null
+
+        // Only here, past the detect-space gates, does the frame earn a full-resolution decode.
         val upright = uprightFullFrame(frame) ?: run {
             logFrame(timestampUs, "decode_failed", subjectRatio = subjectRatio)
             return null
         }
-        val roi = mapRect(largest, upright, detectWidth, detectHeight)
+        val roi = mapRect(subjectBox, upright, detectWidth, detectHeight)
         if (!isUsableRoi(roi)) {
             rejects.roiInvalid.incrementAndGet()
             logFrame(timestampUs, "roi_invalid", subjectRatio = subjectRatio)
@@ -428,59 +509,22 @@ class VideoFrameProcessor(
         return FrameCandidate(timestampUs, upright, sharpness, subjectRatio)
     }
 
-    private suspend fun evaluatePoseFrame(
-        set: DetectorSet,
-        frame: SampledFrame,
-        rejects: RejectStats,
-    ): FrameCandidate? {
-        val timestampUs = frame.timestampUs
-        val detectBmp = uprightDetectBitmap(frame) ?: run {
-            logFrame(timestampUs, "decode_failed")
-            return null
-        }
-        val detection = try {
-            CamPerf.timed(perf, "detect_pose") { set.pose.detect(detectBmp) }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Pose detect failed at ${timestampUs}us", t)
-            null
-        }
-        val detectWidth = detectBmp.width
-        val detectHeight = detectBmp.height
-        detectBmp.recycle()
-
-        if (detection == null) {
-            rejects.noSubject.incrementAndGet()
-            logFrame(timestampUs, "no_subject")
-            return null
-        }
-        val subjectRatio = detection.torsoBounds.height().toFloat() / detectHeight
-        if (subjectRatio < MIN_TORSO_HEIGHT_RATIO) {
-            rejects.tooSmall.incrementAndGet()
-            logFrame(timestampUs, "too_small", subjectRatio = subjectRatio)
-            return null
-        }
-
-        val upright = uprightFullFrame(frame) ?: run {
-            logFrame(timestampUs, "decode_failed", subjectRatio = subjectRatio)
-            return null
-        }
-        val roi = mapRect(detection.torsoBounds, upright, detectWidth, detectHeight)
-        if (!isUsableRoi(roi)) {
-            rejects.roiInvalid.incrementAndGet()
-            logFrame(timestampUs, "roi_invalid", subjectRatio = subjectRatio)
-            upright.recycle()
-            return null
-        }
-        val sharpness = scoreSharpness(upright, roi)
-        if (sharpness < profile.minSharpness) {
-            rejects.tooSoft.incrementAndGet()
-            logFrame(timestampUs, "too_soft", sharpness, subjectRatio)
-            upright.recycle()
-            return null
-        }
-
-        logFrame(timestampUs, "candidate", sharpness, subjectRatio)
-        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio)
+    /**
+     * Whether a box sits clear of the frame edges.
+     *
+     * `OfflinePoseDetector` already refuses to report a torso unless both shoulders and both
+     * hips are in frame, so this only catches the remaining case: a torso resolved right at
+     * the edge, where the runner is half out of the lane. Legs are deliberately not required —
+     * `FIELD_SETUP.md` aims the phone at chest–head height, so ankles are legitimately out of
+     * frame in a correctly set up capture.
+     */
+    private fun isFullyFramed(box: Rect, width: Int, height: Int): Boolean {
+        val marginX = (width * EDGE_MARGIN_RATIO).toInt()
+        val marginY = (height * EDGE_MARGIN_RATIO).toInt()
+        return box.left >= marginX &&
+            box.top >= marginY &&
+            box.right <= width - marginX &&
+            box.bottom <= height - marginY
     }
 
     /**
@@ -649,10 +693,7 @@ class VideoFrameProcessor(
     }
 
     private fun saveFrame(candidate: FrameCandidate): File? {
-        val prefix = when (target) {
-            ExtractionTarget.Face -> "face"
-            ExtractionTarget.Pose -> "pose"
-        }
+        val prefix = target.filePrefix
         // Chunk index is part of the name because presentation timestamps restart at ~0
         // in every chunk — without it, frames from different chunks overwrite each other.
         val name = "${prefix}_c${currentChunkIndex.toString().padStart(3, '0')}_${candidate.timestampUs}.jpg"
@@ -774,10 +815,15 @@ class VideoFrameProcessor(
         val tooSoft = AtomicInteger(0)
         /** Subject found, but its box mapped outside the frame — not a quality verdict. */
         val roiInvalid = AtomicInteger(0)
+        /** Face was good, torso sat on a frame edge — the shot would be half a runner. */
+        val cropped = AtomicInteger(0)
+        /** Someone was there, outside the capture zone. High counts mean the zone is wrong. */
+        val outOfZone = AtomicInteger(0)
 
         override fun toString(): String =
             "noSubject=${noSubject.get()},small=${tooSmall.get()}," +
-                "soft=${tooSoft.get()},roiInvalid=${roiInvalid.get()}"
+                "soft=${tooSoft.get()},roiInvalid=${roiInvalid.get()}," +
+                "cropped=${cropped.get()},outOfZone=${outOfZone.get()}"
     }
 
     private data class ProcessProfile(
@@ -886,6 +932,9 @@ class VideoFrameProcessor(
             private const val MIN_FACE_HEIGHT_RATIO_UHD = 0.030f
         private const val MIN_FACE_HEIGHT_RATIO_FHD = 0.035f
         private const val MIN_TORSO_HEIGHT_RATIO = 0.25f
+
+        /** How far a torso must stay from the frame edge to count as fully in shot. */
+        private const val EDGE_MARGIN_RATIO = 0.02f
         const val MIN_SHARPNESS = 80.0
         const val MIN_SHARPNESS_UHD = 65.0
     }

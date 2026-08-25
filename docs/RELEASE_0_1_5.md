@@ -337,6 +337,53 @@ adb shell dumpsys battery reset
 
 ---
 
+## งาน upload (B3) แบบเต็ม
+
+> ย้ายมาจากร่าง `RELEASE_0_1_6.md` เมื่อ 25/08/2026 · ตอนที่เขียนร่างนั้น ตั้งใจจะตัด upload เป็น 0.1.6
+> แต่ `appVersionName` ไม่เคยถูก bump — งาน B3 ทั้งหมดจึงรันอยู่บนบิลด์ที่ขึ้นแบนเนอร์ **v0.1.5**
+> และรายงานภาคสนาม TC-16..19 ก็ทดสอบบนบิลด์นั้น จุดตัด 0.1.5 คือ `0636e21`
+
+**✅ ยิงขึ้น production จริงแล้ว** (`api.photo.thai.run` · event `test-upload`) — 15 ใบจาก import คลิป 1 นาที 4K · PUT 15 · complete 15 · fail 0
+
+## เพิ่ม
+
+- **คิวอัปโหลดบนดิสก์** (Room v2) — รูปที่ส่งมอบทุกใบเข้าคิวทันทีที่ publish ลง MediaStore เก็บเป็น `content://` เพราะไฟล์ cache ถูกลบไปแล้วตอนนั้น
+- **หกสถานะ** `Pending → Uploading → Uploaded → Success` + `Failed` (ลองใหม่ได้) + `Abandoned` (เลิกถาวร) · `Uploaded` คือสถานะที่บอกว่า "ไฟล์ขึ้นไปแล้ว เหลือแค่แจ้ง" ซึ่งทำให้ retry ไม่ส่งไฟล์ซ้ำ
+- **`RunxUploadTransport`** — presign (GraphQL `photoUpload`) → PUT (signed URL) → complete (form POST คนละ host)
+- **Sign in** ด้วย username/password (`authAdminUser`) — **token ไม่ลงดิสก์เลย** ต้อง login ใหม่ทุกครั้งที่เปิดแอป · ติ๊ก "จำ username/password" ได้ (ปิดเป็นค่าเริ่มต้น)
+- **เลือก event จาก dropdown** — `eventItems` ตามหน้าจนครบ (เพดาน 10 หน้า) และประกาศบนจอเมื่อโดนตัด
+- **หน้า Upload** — สรุปคิว · ตัวกรองตามสถานะ · Pause/Resume · Retry · ทางเข้าหน้าตั้งค่า
+- **การ์ด Upload บนหน้าแรก** — ใครส่งเข้างานไหน · แถบ progress · **สวิตช์ auto-upload ที่ล็อกระหว่างถ่าย**
+- **`.env`** → `BuildConfig` → ค่าเริ่มต้นในแอป · URL สองตัวมาจาก `.env` ทุกครั้งที่เปิดแอป ที่เหลือ seed ครั้งแรกครั้งเดียว
+- **จอไม่ดับระหว่างถ่าย** — `keepScreenOn` ผูกกับ `isCapturing`
+
+## เปลี่ยน
+
+- **worker ไม่ทำงานเมื่อยังไม่ได้ตั้งค่าหรือยังไม่ login** — ไม่ตกไปใช้ fake sink · fake transport ต้องเปิดเองด้วย debug deep link
+- prefs ของ upload ถูก **กันออกจาก backup** ทั้ง cloud และ device transfer เพราะอาจมีรหัสผ่านอยู่
+
+## แก้
+
+- **`UploadSettings` แต่ละตัวไม่รู้เรื่องกัน** — มี prefs ไฟล์เดียวแต่มีอ็อบเจกต์หลายตัว (ViewModel · worker · scheduler) แต่ละตัวถือ `StateFlow` ของตัวเอง การ pause ผ่าน scheduler จึงไม่เคยขึ้นบนจอ และการที่ worker พักคิวเองเพราะ token ถูกปฏิเสธก็เงียบไปด้วย · แก้ด้วย `OnSharedPreferenceChangeListener`
+- **build default ถูกเอามาทับซ้ำๆ** — `.env` ถูก apply ใหม่ทุกครั้งที่มีการสร้าง `UploadSettings` ทำให้ค่าที่เพิ่งแก้หายไปได้จาก background thread · ตอนนี้ทำครั้งเดียวต่อโปรเซส
+- **QNN asset extraction ไม่ atomic** — ไฟล์ครึ่งใบที่ดูเหมือนสมบูรณ์ทำให้ NPU พังถาวรจนกว่าจะล้างข้อมูลแอป · เขียนลง `.tmp` แล้ว rename
+
+---
+
+## ยังไม่ได้ทำใน 0.1.6
+
+| | |
+|--|--|
+| 🔴 **คิวรอดไหมตอนจอดับ / แอปอยู่หลัง** | ยังไม่ทดสอบ · ถ้าไม่รอดต้องมี foreground service ([PHASES.md §2.6](./PHASES.md)) |
+| 🟠 **live capture → production** | ทดสอบขึ้นจริงเฉพาะเส้นทาง import · live capture พิสูจน์กับ fake transport เท่านั้น |
+| 🟠 **requeue = object ซ้ำ** | server มินต์ key เอง · แก้ได้ถ้า `$path` ใช้ได้ (คำถามข้อ 2) |
+| 🟡 **`Unauthorized` → พักทั้งคิว** | ยังไม่เคยเกิดกับ backend จริง |
+| 🟡 **แถว `Abandoned`** | ไม่มี UI ให้เคลียร์ |
+
+หนี้เก่าที่ยกมาจาก 0.1.5: `yuv420ToNv21` 61.6% ของเวลา · `estimateImportWallMs` ต่ำไป 30–40% · `cacheDir/network_import/` ไม่เคยถูกล้าง · `usesCleartextTraffic` เปิดทั้งแอป
+
+---
+
 ## ถัดไป
 
 > ย่อหน้านี้เขียนไว้ตอนตัดเวอร์ชัน 0.1.5 ซึ่ง B3 ยังไม่เริ่ม · ตอนนี้ B3a–B3f ทำเสร็จแล้ว ดู [สถานะงาน upload](#สถานะงาน-upload--20082026) ข้างบน

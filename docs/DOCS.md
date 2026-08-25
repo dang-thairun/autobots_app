@@ -17,6 +17,7 @@ Edge-AI sports camera on tripod-mounted Android.
 | [RELEASE_0_1_3.md](./RELEASE_0_1_3.md) | **v0.1.3** — เหตุผล/ตัวเลขเบื้องหลังการแก้ Worker 2 (perf + yield) |
 | [RELEASE_0_1_4.md](./RELEASE_0_1_4.md) | **v0.1.4** — แยก Worker 2 เป็นสองเธรด (perf: realtimeRatio 2.196 → 1.010) |
 | [RELEASE_0_1_5.md](./RELEASE_0_1_5.md) | **v0.1.5** — Home menu แทน pager · Import Preview + trim · Network URL ingest · default = NPU |
+| [RELEASE_0_1_6.md](./RELEASE_0_1_6.md) | **v0.1.6** — Face+Pose gate · Capture Zone · เพดานชัตเตอร์ + EV · perf stream กู้รายงานหลังโปรเซสตาย |
 | [SCREEN.md](./SCREEN.md) | Operator UI layout (3-page pager, session history) |
 | [CONVENTIONS.md](./CONVENTIONS.md) | How to write docs; Phase vs Flow vs Passage step |
 | [PRD.md](./PRD.md) | Product scope — **Plan B (active)** + v0.1 stills baseline |

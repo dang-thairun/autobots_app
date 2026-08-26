@@ -6,10 +6,35 @@ Also sync: `shared/.../AutobotsApp.kt` → `version` (KMP, docs, non-Android).
 
 ---
 
-## v0.1.5 (current)
+## v0.1.6 (current)
+
+**Theme:** เลือกเฟรมให้ตรงตัวคน · เห็นแสงทัน · รู้ว่าใครผ่านหน้ากล้องไปบ้าง
+**Phase:** B1 + B3 (upload ทำเสร็จบน 0.1.5 แล้วยิง production ผ่าน — ดู [RELEASE_0_1_5.md](./RELEASE_0_1_5.md#งาน-upload-b3-แบบเต็ม))
+
+รายละเอียดเต็ม: **[RELEASE_0_1_6.md](./RELEASE_0_1_6.md)**
+
+### เพิ่ม
+
+- **ตัวตรวจจับที่สาม — `foot_track_net` (Person) บน NPU** · ตัวเดียวที่รายงาน **ทุกคน** ในเฟรม ซึ่งเป็นเงื่อนไขที่ทำให้ per-runner tracking เป็นไปได้
+- **`SubjectTracker`** — จับคู่ detection ข้ามเฟรมด้วย IOU กับ *กล่องที่ทำนายไว้* แล้วตามด้วยระยะห่างจุดกึ่งกลาง · **หน่วยของ dedup เปลี่ยนจาก 1 วินาทีของนาฬิกา เป็น 1 วินาทีของคนคนนั้น**
+- **`FrameQuality`** — จัดอันดับเฟรมด้วยคะแนนรวม 5 ด้าน (sharpness `.40` · ขนาด `.20` · กลางเฟรม `.15` · confidence `.15` · ระยะห่างขอบ `.10`) แทนการตัดสินด้วยความคมอย่างเดียว
+- **`tracks.csv`** — 1 แถวต่อคน **รวมคนที่ไม่ได้รูป** · เป็นครั้งแรกที่ตอบได้ว่า *พลาดใครไปกี่คน*
+- **`photos.csv`** — คะแนนทั้ง 5 ด้านต่อรูปที่เก็บ ไว้ re-fit น้ำหนักกับหลักฐานจริง
+- **Capture Zone ลากเองบนภาพจริง** (`ZoneEditorPage`) · **เพดานชัตเตอร์ + exposure compensation** — งานวิ่งตี 4 เดิม AE ยืดชัตเตอร์จนตกด่าน sharpness ทั้ง session
+- **`perf_stream.jsonl`** — เขียนสดระหว่างรัน กู้รายงานได้แม้โปรเซสตาย
+- Preview ติดทันทีที่เข้าหน้า Live (เดิมต้องกด Start ก่อน) · realtime ratio ขึ้นบนจอและใน Session history · จำนวนคนบนการ์ด history
+
+### เปลี่ยน
+
+- ⚠️ **`ExtractionTarget` จาก enum เป็น 3 flags** (`usesFace` · `usesPose` · `usesPerson`) — สาม flag คือแปดคอมบิเนชัน การไล่เขียนค่าคงที่แปดตัวคือการลอกตารางความจริงมาแทนที่จะใช้ type · **เกตทุกตัวเป็น AND ไม่ใช่ OR**
+- ชื่อโฟลเดอร์อัลบั้มเป็น `v0_1_6_*` / `ext_v0_1_6_*`
+
+---
+
+## v0.1.5
 
 **Theme:** รื้อ navigation เป็นเมนู + เปิดทางเข้าใหม่ให้ pipeline ผ่าน **Network URL**
-**Phase:** B1 (ยังไม่ถึง B3 — 0.1.5 ทำแค่ขาเข้า ยังไม่มี upload)
+**Phase:** B1 ขาเข้า — **งาน upload (B3) ถูกทำเพิ่มบนบิลด์ 0.1.5 หลังตัดเวอร์ชัน** และยิง production ผ่านแล้ว ดู [RELEASE_0_1_5.md](./RELEASE_0_1_5.md#งาน-upload-b3-แบบเต็ม)
 
 รายละเอียดเต็ม: **[RELEASE_0_1_5.md](./RELEASE_0_1_5.md)**
 
@@ -246,7 +271,7 @@ Operator guide: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · Pipeline: [PIPELINE_FL
 
 | Topic | Detail |
 |-------|--------|
-| **4K extract recall** | 1080p field tests OK; 4K may report **No face** on chunks that visibly contain faces — likely sharpness threshold + decode path (tuning in B2) |
+| **4K extract recall** | 1080p field tests OK; 4K may report **No face** on chunks that visibly contain faces — likely sharpness threshold + decode path (tuning in B2) · **แก้แล้วใน v0.1.3–v0.1.5 · B2 ปิด 26/08/2026** |
 | **Legacy code** | `MlKitFaceAnalyzer`, `LeanBurstCapturer`, `PreviewCameraController`, `FaceOverlay` etc. remain for reference / future re-wire |
 | **Docs drift (remaining)** | None tracked — Phase 1–3 doc sync complete (v0.1 sections marked legacy where applicable) |
 
@@ -295,7 +320,7 @@ Download/AutoBots/{subfolder}/session_log.txt            ←  API 29+
 | [PRD.md](./PRD.md) | Plan B scope + acceptance criteria; v0.1 sections labeled legacy |
 | [CONTEXT.md](../CONTEXT.md) | Plan B glossary first; video-out-of-scope qualified |
 | [FIELD_SETUP.md](./FIELD_SETUP.md) | Plan B field checklist + v0.1 legacy section |
-| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | B1 shipped slices B1a–B1i; B2+ next |
+| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | B1 shipped slices B1a–B1i · สถานะ phase ปัจจุบันดูที่ไฟล์นั้น |
 | [CONVENTIONS.md](./CONVENTIONS.md) | PIPELINE_FLOW, OPERATOR_FLOW, Phase B1–B4 in tables |
 | [ROADMAP.md](./ROADMAP.md) | Pose experimental shipped; body pre-filter still future |
 
@@ -350,7 +375,10 @@ Download/AutoBots/{subfolder}/session_log.txt            ←  API 29+
 2. Edit `AutobotsApp.version` in `shared/.../AutobotsApp.kt` (same string)
 3. Add section to this file
 4. Update `docs/DOCS.md` phase table if a phase completed
-5. Rebuild: `./gradlew :androidApp:assembleDebug`
+5. Update the version claim in doc headers that carry one (`DOCS.md`, `ARCHITECTURE.md`,
+   `STRUCTURE.md`, `PLATFORM_APIS.md`, `CONTEXT.md`, `README.md`) — these drifted 3 releases
+   behind once already
+6. Rebuild: `./gradlew :androidApp:assembleDebug`
 
 **Do not use `.env`** — Android/KMP standard is `gradle.properties` + optional `AutobotsApp` for shared code.
 

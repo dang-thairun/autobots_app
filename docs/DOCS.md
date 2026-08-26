@@ -1,7 +1,7 @@
 # AutoBots Sports Camera — Documentation
 
 Edge-AI sports camera on tripod-mounted Android.  
-**Current build (v0.1.5):** video chunk pipeline + offline face/pose extract → [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).
+**Current build (v0.1.6):** video chunk pipeline → offline Face/Pose/Person extract → per-track ranking → gallery → upload. Start at [OPERATOR_FLOW.md](./OPERATOR_FLOW.md).
 
 **Start here** → pick one guide below. Naming rules: [CONVENTIONS.md](./CONVENTIONS.md).
 
@@ -11,7 +11,8 @@ Edge-AI sports camera on tripod-mounted Android.
 
 | Doc | Purpose |
 |-----|---------|
-| [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) | **v0.1.2 operator flow** — ใช้งานจริง, live + import |
+| [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) | **Operator flow (v0.1.6)** — live · browse · network URL · upload |
+| [DESIGN_FLOW.md](./DESIGN_FLOW.md) | **ตอบ Flow Design v1 ทีละข้อ** — video pipeline 13 ขั้น · upload 6 สถานะ · backend 3 host · ตัวเลข perf ที่วัดแล้ว/ที่ยังไม่มี · เริ่มที่นี่ถ้าถือสเปค v1 อยู่ในมือ |
 | [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) | **Pipeline เทคนิค** — workers, thresholds, storage, session log |
 | [SEQUENCE_FLOW.md](./SEQUENCE_FLOW.md) | **Sequence diagram (Mermaid)** — Live/Browse/Network URL → chunk → Worker 2 → Gallery → upload queue → Runx + backpressure |
 | [RELEASE_0_1_3.md](./RELEASE_0_1_3.md) | **v0.1.3** — เหตุผล/ตัวเลขเบื้องหลังการแก้ Worker 2 (perf + yield) |
@@ -22,7 +23,7 @@ Edge-AI sports camera on tripod-mounted Android.
 | [CONVENTIONS.md](./CONVENTIONS.md) | How to write docs; Phase vs Flow vs Passage step |
 | [PRD.md](./PRD.md) | Product scope — **Plan B (active)** + v0.1 stills baseline |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Plan B runtime + Design Flows (v0.1 legacy marked) |
-| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | B1 shipped + B2–B4 next; legacy P9/P10 |
+| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | B1–B3 + B5 shipped · **B4 คือสิ่งเดียวที่ยังค้าง** · legacy P9/P10 |
 | [FIELD_SETUP.md](./FIELD_SETUP.md) | Field checklist — Plan B + v0.1 legacy |
 | [PLATFORM_APIS.md](./PLATFORM_APIS.md) | CV + camera + native APIs (Plan B active + v0.1 legacy) |
 | [STRUCTURE.md](./STRUCTURE.md) | Repo layout, packages, Plan B pipeline modules |
@@ -31,7 +32,7 @@ Edge-AI sports camera on tripod-mounted Android.
 | [CHANGELOG.md](./CHANGELOG.md) | Release notes (v0.1.2, …) |
 | [REPORT_GUIDELINE.md](./REPORT_GUIDELINE.md) | How to write a version summary report · ไทย: [REPORT_GUIDELINE_TH.md](./REPORT_GUIDELINE_TH.md) |
 | [../reports/](../reports/) | Version reports — test inputs, results, score (`reports/vX.Y.Z/report.md`) |
-| [PHASES.md](./PHASES.md) | **แผน B3 · upload pipeline** — Room queue → WorkManager → presigned R2 · slice B3a–B3g |
+| [PHASES.md](./PHASES.md) | **บันทึกการตัดสินใจของ upload pipeline** — ไม่ใช่แผนงานแล้ว · เหตุผลเบื้องหลัง 6 สถานะ · สัญญากับแพลตฟอร์ม (§10) · **โค้ด 19 ไฟล์อ้างถึงหัวข้อในนี้** |
 | [ROADMAP.md](./ROADMAP.md) | Unscheduled ideas past B4 |
 | [../CONTEXT.md](../CONTEXT.md) | Ubiquitous language — ศัพท์เชิงธุรกิจ (Passage, Kept Frame) |
 | [GLOSSARY_TH.md](./GLOSSARY_TH.md) | **ศัพท์เทคนิค/การวัดผลอธิบายภาษาไทย** — DVFS, TC-XX, realtimeRatio, YUV, backpressure, `@Volatile` · เริ่มที่นี่ถ้าอ่านรายงานแล้วสะดุดศัพท์ |
@@ -42,13 +43,14 @@ Doc maintenance: [CONVENTIONS.md](./CONVENTIONS.md) §7 · drift check: `./scrip
 
 ## Implementation phases
 
-### Plan B — video pipeline (active, v0.1.2)
+### Plan B — video pipeline (active, v0.1.6)
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | **B1** | Video chunk record (live) + import → offline Face/Pose extract → gallery; session history; `session_log.txt`; partial chunk on Stop | ✅ shipped in **v0.1.2** |
-| **B2** | 4K extract tuning (sharpness normalize, reject-reason logs, optional ACCURATE ML Kit) | 🔄 field issue |
-| **B3** | HTTP upload / remote gallery delivery | ⏳ |
+| **B2** | 4K extract tuning (OQ-01 — 4K รายงาน No face) | ✅ **ปิด 26/08/2026** · B2a/B2b ทำตามแผน · B2c ไม่ทำ (NPU แทน) · B2d แก้ด้วยเส้นทางอื่น — [IMPLEMENTATION.md](./IMPLEMENTATION.md) |
+| **B5** | Frame ranking + per-runner tracking (`FrameQuality`, `SubjectTracker`, `tracks.csv`) | ✅ shipped in **v0.1.6** |
+| **B3** | HTTP upload / remote gallery delivery — Room queue → WorkManager → GraphQL presign → GCS | ✅ shipped on **v0.1.5** · B3a–B3f · [PHASES.md](./PHASES.md) |
 | **B4** | Re-wire or retire v0.1 stills path (`LeanBurstCapturer`, live overlay) | ⏳ |
 
 Slice detail: [CHANGELOG.md § v0.1.2](./CHANGELOG.md) · Operator: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · Pipeline: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md).
@@ -71,14 +73,14 @@ Slice detail: [CHANGELOG.md § v0.1.2](./CHANGELOG.md) · Operator: [OPERATOR_FL
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| P9 | Fixed Focus + sustained AE + EV | 🔄 partial in **v0.1** code; not active in v0.1.2 shell |
+| P9 | Fixed Focus + sustained AE + EV | 🔄 partial in **v0.1** code; not active in the current shell |
 | P10 | Capture Zone Fire + Early Arm | 🔄 P10a/b in v0.1; c/d pending |
 
 Slice detail: [IMPLEMENTATION.md](./IMPLEMENTATION.md).
 
 ---
 
-## Quick pipeline (v0.1.2 — Plan B)
+## Quick pipeline (Plan B)
 
 ```
 Live: VideoChunkRecorder  ─┐

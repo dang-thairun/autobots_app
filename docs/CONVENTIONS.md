@@ -9,7 +9,7 @@ How we write and organize Markdown for AutoBots Sports Camera.
 | File | Question it answers | Audience |
 |------|---------------------|----------|
 | [`DOCS.md`](./DOCS.md) | Where do I start? | Everyone |
-| [`OPERATOR_FLOW.md`](./OPERATOR_FLOW.md) | How does the operator use v0.1.2? | Operator / field |
+| [`OPERATOR_FLOW.md`](./OPERATOR_FLOW.md) | How does the operator use the current build? | Operator / field |
 | [`PIPELINE_FLOW.md`](./PIPELINE_FLOW.md) | How does Plan B pipeline work? | Engineering |
 | [`PRD.md`](./PRD.md) | What must the product do? | Product + engineering |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | How does the system work? | Engineering |

@@ -2,7 +2,8 @@
 
 System design for AutoBots Sports Camera — modules, runtime pipelines, and **Design Flows**.
 
-**Active operator build (v0.1.2):** Plan B video chunk pipeline — see [PIPELINE_FLOW.md](./PIPELINE_FLOW.md).  
+**Active operator build (v0.1.6):** Plan B video chunk pipeline — see [PIPELINE_FLOW.md](./PIPELINE_FLOW.md).
+**Upload shipped in v0.1.5** — see [SEQUENCE_FLOW.md §2](./SEQUENCE_FLOW.md) · spec-by-spec comparison: [DESIGN_FLOW.md](./DESIGN_FLOW.md).  
 **Legacy (v0.1 stills):** Passage / Burst / Passage Gate — code retained, not wired in current shell.
 
 Domain: [CONTEXT.md](../CONTEXT.md) · Requirements: [PRD.md](./PRD.md) · Phases: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
@@ -18,7 +19,7 @@ Domain: [CONTEXT.md](../CONTEXT.md) · Requirements: [PRD.md](./PRD.md) · Phase
 
 ---
 
-## 2. Runtime pipeline — Plan B (active, v0.1.2)
+## 2. Runtime pipeline — Plan B (active, v0.1.6)
 
 Two inputs merge before Worker 2:
 
@@ -34,17 +35,20 @@ Two inputs merge before Worker 2:
                    videoQueue (cap 8)
                           ▼
               VideoFrameProcessor
-              sample 120 ms → ML Kit Face/Pose
-              → Laplacian sharpness → dedup 1/sec
+              sample 120 ms → Face / Pose / Person (AND)
+              → zone + size gate → Laplacian sharpness
+              → FrameQuality score → dedup 1 s per track
                           ▼
               WriteQueue → LocalDeliveryWriter
                           ├─ JPEG → DCIM/AutoBots/{subfolder}/
-                          └─ session_log.txt → Download/AutoBots/{subfolder}/
+                          ├─ session_log.txt · photos.csv · tracks.csv
+                          │    perf_report.json → Download/AutoBots/{subfolder}/
+                          └─ onDelivered(uri) → upload queue (Room) → UploadWorker
 ```
 
 **Backpressure:** recorder pauses when `videoQueue` is full (8 chunks).
 
-**Operator UI:** Layer 1 = `CameraPreviewPane`; Layer 2 pager = Controls | Clean preview | Session history.
+**Operator UI:** Home menu (v0.1.5) → Live capture · Import preview · Session history · Upload queue · Settings. See [SCREEN.md](./SCREEN.md).
 
 Detail: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · Operator: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md)
 
@@ -56,10 +60,12 @@ Detail: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · Operator: [OPERATOR_FLOW.md](.
 | Import | `ImportedVideoSplitter` | Remux split without re-encode |
 | Orchestration | `CapturePipelineCoordinator` | Queues, session dirs, lifecycle |
 | Extract | `VideoFrameSampler`, `VideoFrameProcessor` | HW decode, ML Kit, sharpness, dedup |
-| Detect | `OfflineFaceDetector`, `OfflinePoseDetector` | Bitmap inference (not live analysis) |
+| Detect | `OfflineFaceDetector`, `OfflinePoseDetector`, `PersonFootDetector` | Bitmap inference (not live analysis); LiteRT on NPU for face/person |
+| Rank | `SubjectTracker`, `FrameQuality` | Who is who across frames; one 0..1 score per frame |
 | Delivery | `WriteQueue`, `LocalDeliveryWriter`, `SessionAlbumNaming` | Gallery JPEG + session log |
 | Load | `DeviceLoadReader` | Thermal + RAM (display only) |
 | Remote | `AutobotsServer` | HTTP/WebSocket Start/Stop on `:8080` |
+| Upload | `UploadRepository`, `UploadWorker`, `RunxUploadTransport` | Room queue (6 states) → WorkManager → GraphQL presign → GCS → complete |
 
 ### Plan B defaults (source of truth: `StreamResolution.kt`)
 
@@ -71,14 +77,18 @@ Detail: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · Operator: [OPERATOR_FLOW.md](.
 | Sharpness min | FHD **80** · UHD **65** | `FaceSharpnessScorer` |
 | Dedup window | **1 s** | Best sharpness per second |
 | Min free storage (live) | **2 GB** | `VideoPreviewController.MIN_FREE_STORAGE_MB` |
-| Gallery folder (live) | `yyyyMMdd_HHmmss` | `SessionAlbumNaming.liveFolder` |
-| Gallery folder (import) | `ext_DDMMYYYY_HHMM` | `SessionAlbumNaming.importFolder` |
+| Gallery folder (live) | `v0_1_6_yyyyMMdd_HHmmss` | `SessionAlbumNaming.liveFolder` |
+| Gallery folder (import) | `ext_v0_1_6_DDMMYYYY_HHMM` | `SessionAlbumNaming.importFolder` |
+| Detect bitmap width | **640 px** | `VideoFrameProcessor.ProcessProfile` |
+| Keep per dedup window | **3** | per **track**, not per clock second |
+| Upload retry cap | **8** attempts | `UploadRepository.MAX_ATTEMPTS` |
+| Upload backoff | 30 s ×2 → 30 min | per row, survives reboot |
 
 ---
 
 ## 3. Runtime pipeline — v0.1 stills (legacy)
 
-> **Not active** in v0.1.2 operator shell. Retained for B4 re-wire or retirement.
+> **Not active** in the current operator shell. Retained for B4 re-wire or retirement.
 
 ```
 [Camera Sensor]
@@ -161,13 +171,22 @@ Plan B adds no new numbered Flow yet — behavior is documented in [PIPELINE_FLO
 
 ---
 
-### Flow 5 — Local delivery = success
+### Flow 5 — Local delivery = success · upload is a copy on top
 
-**Rule:** Session success = Kept Photos on device (`DCIM/AutoBots`). Cloud upload is out of scope.
+**Rule:** Session success is still **Kept Photos on device** (`DCIM/AutoBots`). Upload runs *after*
+that and never gates it — a session with no network is a successful session.
 
-**Why:** Field network is unreliable; operator retrieves files locally.
+**Why:** Field network is unreliable. Making delivery depend on it would turn a bad signal into
+lost photos, and the operator can always retrieve files by cable.
 
-**In code:** `LocalDeliveryWriter`, MediaStore. **[both paths]**
+**Revised in v0.1.5** — cloud upload is **no longer out of scope**; it shipped and runs in
+production. The rule above survived the change because upload was built as a separate path that
+starts at `WriteQueue.onDelivered(uri)`, after the photo is already safe on disk. Nothing in
+capture → extract → deliver knows a bucket exists.
+
+**Local files are never deleted after upload** — upload is a *copy*, not a *move*. No toggle.
+
+**In code:** `LocalDeliveryWriter`, MediaStore · then `UploadRepository`, `UploadWorker`. **[both paths]**
 
 ---
 
@@ -189,11 +208,19 @@ Plan B adds no new numbered Flow yet — behavior is documented in [PIPELINE_FLO
 
 ---
 
-### Flow 8 — No thermal auto-throttle (MVP)
+### Flow 8 — No thermal auto-throttle (still true, but the reason no longer is)
 
 **Rule:** Show load readout; do not automatically reduce capture or analysis rate.
 
-**Why:** Operator decides when to pause; silent throttle would miss runners.
+**Why (original):** Operator decides when to pause; silent throttle would miss runners.
+
+**⚠️ That reasoning does not survive Plan B.** It was argued against a *real-time* pipeline, where
+slowing detection means a runner passes unphotographed. Plan B has no detection rate to slow — the
+video is already recorded. Stretching the sample interval or pausing the upload worker misses
+**nobody**; it only lengthens the backlog.
+
+So the status of this Flow should read **"not done yet"**, not **"deliberately not done"**.
+Tracked in [ROADMAP.md](./ROADMAP.md).
 
 **In code:** `DeviceLoadReader` — display only. **[both paths]**
 

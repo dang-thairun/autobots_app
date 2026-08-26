@@ -2,14 +2,14 @@
 
 Edge-AI sports camera for marathon and running-event photography on a tripod-mounted Android phone.
 
-**Active build (v0.1.2):** Plan B — video chunk pipeline → offline extract → still JPEG gallery.  
-See **§ Plan B (v0.1.2)** below. Sections §3–5 without a label describe the **v0.1 stills MVP baseline** (retained for domain vocabulary and possible B4 re-wire).
+**Active build (v0.1.6):** Plan B — video chunk pipeline → offline extract → still JPEG gallery → upload.  
+See **§ Plan B** below. Sections §3–5 without a label describe the **v0.1 stills MVP baseline** (retained for domain vocabulary and possible B4 re-wire).
 
 Operator guide: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · Pipeline: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
 
 ---
 
-## Plan B — v0.1.2 (active)
+## Plan B — active (v0.1.6)
 
 ### Objective
 
@@ -45,8 +45,7 @@ Automatically produce **still JPEGs** of runners from **continuous video** (live
 |------|--------|
 | Live face overlay on preview | Preview only while recording |
 | Passage Gate / Capture Zone / Lean Burst | v0.1 path not wired in shell |
-| Cloud upload | Local retrieval only (B3 future) |
-| Thermal auto-throttle | Readout only |
+| Thermal auto-throttle | Readout only — see Flow 8 in [ARCHITECTURE.md](./ARCHITECTURE.md) |
 | iOS operator app | Deferred |
 
 ### Plan B acceptance criteria
@@ -150,7 +149,9 @@ To align development and product design, the following terminology must be stric
 ### Out of Scope (MVP)
 * **Frame Scoring**: No ranking or quality-based discarding (all burst shots are kept).
 * **Thermal Auto-Throttle**: No automatic shutdown/throttling; readout only.
-* **Cloud/Remote Delivery**: No upload logic or network sync; local retrieval only.
+* ~~**Cloud/Remote Delivery**~~: **shipped in v0.1.5** — Room queue → WorkManager → GraphQL presign
+  → GCS → complete. Local delivery is still the success condition; upload is a copy layered on top
+  and never deletes the local file. See [SEQUENCE_FLOW.md §2](./SEQUENCE_FLOW.md).
 * **Video Recording**: Video capture is fully excluded *(v0.1 only — Plan B uses video internally)*.
 * **iOS Support**: iOS target compilation is deferred.
 

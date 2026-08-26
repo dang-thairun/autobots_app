@@ -1,67 +1,76 @@
-# AutoBots — Operator Flow (v0.1.2)
+# AutoBots — Operator Flow (v0.1.6)
 
-เอกสารนี้อธิบาย **flow การใช้งานจริง** ของ build ปัจจุบัน (Plan B: video chunk pipeline)  
-Sync กับ `AutobotsApp.version` = **0.1.2** · phase **B1**
+เอกสารนี้อธิบาย **flow การใช้งานจริง** ของ build ปัจจุบัน (Plan B: video chunk pipeline)
+Sync กับ `appVersionName` = **0.1.6**
 
-> เอกสารเก่า (P5 burst / face overlay / Observation grid) ยังอยู่ใน repo แต่ **ไม่ตรงกับ build นี้** — ใช้ไฟล์นี้เป็นหลักสำหรับ operator  
-> รายละเอียดเทคนิค: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · Layout UI: [SCREEN.md](./SCREEN.md)
+> เอกสารเก่า (P5 burst / face overlay / Observation grid) ยังอยู่ใน repo แต่ **ไม่ตรงกับ build นี้** — ใช้ไฟล์นี้เป็นหลักสำหรับ operator
+> รายละเอียดเทคนิค: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · Layout UI: [SCREEN.md](./SCREEN.md) · เทียบกับสเปคเดิม: [DESIGN_FLOW.md](./DESIGN_FLOW.md)
 
 ---
 
 ## สรุปสั้นๆ
 
-แอพเป็น **กล้องวิดีโอบน tripod** ที่มี **สองทางเข้า**:
+แอปเป็น **กล้องวิดีโอบน tripod** ที่มี **สามทางเข้า** และ **หนึ่งทางออก**:
 
 | ทางเข้า | ทำอะไร |
 |---------|--------|
-| **Live** — กด Start | อัดวิดีโอต่อเนื่องเป็น MP4 chunks |
-| **Import** — กด Import | เลือกไฟล์วิดีโอจากเครื่อง → แบ่ง chunk แล้วเข้า pipeline เดียวกัน |
+| **Live** | อัดวิดีโอต่อเนื่องเป็น MP4 chunks |
+| **Browse** | เลือกไฟล์ในเครื่อง → ดู metadata + ตัดช่วง → เข้า pipeline เดียวกัน |
+| **Network** | พิมพ์ URL หรือสแกน QR → สตรีมไฟล์เข้ามา |
 
-ทั้งสองทาง:
+ทุกทาง:
 
 1. **แบ่ง/อัด** เป็น chunk ตามขนาดไฟล์ (**50 MB** ทุก resolution)
-2. **แยกเฟรม** ทุก **120 ms** → ML Kit offline (Face หรือ Pose) → คัดเฉพาะเฟรมที่ชัด
-3. **บันทึกรูป** full-frame JPEG ลง `DCIM/AutoBots/{subfolder}/` + `session_log.txt` ลง `Download/AutoBots/{subfolder}/`
+2. **แยกเฟรม** ทุก **120 ms** → detector ที่เปิดไว้ (Face · Pose · Person) → zone + ขนาด → ความคม
+3. **ให้คะแนน** ทุกเฟรมที่ผ่าน แล้ว **จัดกลุ่มตามคน** เก็บดีที่สุด 3 เฟรมต่อ 1 วินาทีของคนคนนั้น
+4. **บันทึกรูป** full-frame JPEG ลง `DCIM/AutoBots/{subfolder}/` พร้อมไฟล์วัดผลลง `Download/AutoBots/{subfolder}/`
+5. **อัปโหลด** เป็นสำเนาขึ้นแพลตฟอร์มโดยอัตโนมัติ — **ไม่ลบไฟล์ในเครื่อง**
 
 **ไม่มี** live face overlay ขณะอัด · **ไม่มี** burst stills / Passage Gate ใน build นี้
 
 ---
 
-## สิ่งที่ใช้งานได้ (v0.1.2)
+## สิ่งที่ใช้งานได้ (v0.1.6)
 
 | ฟีเจอร์ | สถานะ |
 |--------|--------|
 | เลือก **1080p** / **4K** ก่อน Start (live) | ✅ |
-| เลือก **Face** / **Pose** ก่อน Start หรือ Import | ✅ (Pose = experimental) |
+| เลือก **Face · Pose · Person** — เปิดพร้อมกันได้ เกตเป็น **AND** | ✅ |
+| เลือก detector backend (ML Kit / LiteRT CPU · GPU · **NPU** = default) | ✅ |
+| **Capture Zone** ลากเองบนภาพจริง | ✅ |
+| **เพดานชัตเตอร์ + EV** — กันเบลอตอนแสงน้อย | ✅ |
+| Preview ติดทันทีที่เข้าหน้า Live (ไม่ต้องกด Start ก่อน) | ✅ |
 | อัดวิดีโอต่อเนื่อง + rotate chunk อัตโนมัติ (50 MB) | ✅ |
-| **Import video** จากเครื่อง (`OpenDocument`) | ✅ |
+| **Browse** ไฟล์ในเครื่อง + **ดู metadata และตัดช่วงก่อน extract** | ✅ |
+| **Network URL / QR** — สตรีมไฟล์เข้ามา | ✅ |
 | Stop กลาง chunk → partial chunk ยัง extract ได้ | ✅ |
-| Offline extraction (ML Kit + sharpness filter) | ✅ |
-| บันทึกรูปลง Gallery (`DCIM/AutoBots/…`) | ✅ |
-| `session_log.txt` ลง `Download/AutoBots/…` | ✅ |
-| **Session history** (session cards + expand chunks) | ✅ |
-| Stat chips (Ch / VQ / Face·Pose / K / Th / Disk) | ✅ |
-| Processing status card + throughput (live only) | ✅ |
-| Pause record เมื่อ video queue เต็ม | ✅ |
+| Offline extraction + **คะแนนรวม 5 ด้าน** (ไม่ใช่ความคมอย่างเดียว) | ✅ |
+| **Tracking ต่อคน** — dedup เป็นต่อคน ไม่ใช่ต่อวินาที | ✅ |
+| บันทึกรูปลง Gallery + `session_log.txt` · `photos.csv` · **`tracks.csv`** | ✅ |
+| **Upload อัตโนมัติขึ้นแพลตฟอร์ม** (Room queue + WorkManager + foreground service) | ✅ |
+| ตั้งค่า endpoint/token ด้วย **QR** + เลือก event จากรายการ | ✅ |
+| **Session history** + realtime ratio + จำนวนคน | ✅ |
+| กู้รายงานหลังโปรเซสตาย (`perf_stream.jsonl`) | ✅ |
 | HTTP server + WebSocket remote control | ✅ |
-| Thermal + RAM readout | ✅ |
+| Thermal + RAM readout | ✅ (**แสดงผลอย่างเดียว ไม่ลดงานให้อัตโนมัติ**) |
 | ดึงรูป/log กลับ Mac (`sync_gallery.sh`) | ✅ |
-| Upload รูปออก cloud / HTTP delivery | ❌ |
 | Live face box บน preview | ❌ |
+| ลบไฟล์ในเครื่องหลังอัปโหลด | ❌ **โดยตั้งใจ — ไม่มี toggle** |
 
 ---
 
 ## หน้าจอหลัก
 
-พื้นหลัง = **กล้องเต็มจอ** · overlay = **3 หน้า swipe** (จุด indicator ด้านล่าง) · **portrait only**
+**Home menu** (ตั้งแต่ v0.1.5) — ทีละหน้า ไม่ใช่ pager แล้ว · **portrait only**
+กล้องถูก bind **เฉพาะหน้า Live capture** เท่านั้น
 
-| หน้า | ชื่อ | ใช้ทำอะไร |
-|-----|------|-----------|
-| **0** | Controls | สถานะ, ตั้งค่า, Start/Stop, **Import**, Gallery |
-| **1** | Clean Preview | ดู preview เต็มจอ ไม่มี UI บัง |
-| **2** | Session history | รายการ session + chunk (`ChunkHistoryPage`) |
+| กลุ่ม | ปุ่ม | ไปไหน |
+|------|------|-------|
+| **CAPTURE** | ▶ Live · 📁 Browse · 🔗 Network | สามทางเข้าของ pipeline |
+| **REVIEW** | 🕘 History · 🖼 Gallery · ☁ Upload | ของที่ผลิตออกมาแล้ว |
 
-เมื่อ **ไม่อัด** → preview มืด แสดง `Stopped` หรือ `Processing chunks…`
+ปุ่ม Back ของระบบกลับ Home ได้จากทุกหน้า · ออกจากหน้า Live ขณะกำลังอัด = **หยุดอัดให้ก่อน**
+ตัวเลขบนปุ่ม Upload นับเฉพาะ **แถวที่ยังค้าง** ไม่ใช่ทั้งคิว
 
 รายละเอียด layout: [SCREEN.md](./SCREEN.md)
 
@@ -75,7 +84,10 @@ Sync กับ `AutobotsApp.version` = **0.1.2** · phase **B1**
 
 | ตั้งค่า | รายละเอียด |
 |---------|------------|
-| **Face / Pose** | `ExtractionTarget` — เปลี่ยนได้เฉพาะตอน **IDLE** |
+| **Face · Pose · Person** | `ExtractionTarget` — **สาม flag อิสระ เปิดพร้อมกันได้** · เกตเป็น **AND**: เปิดสองตัวแล้วผ่านตัวเดียวคือไม่ผ่าน · เปลี่ยนได้เฉพาะตอน **IDLE** |
+| **Backend** | ML Kit FAST/ACCURATE · `face_det_lite` CPU/GPU/**NPU** (default) · ตัวที่รันไม่ได้จะบอกเหตุผล |
+| **Capture Zone** | ลากกรอบเองบนภาพจริง — จุดกึ่งกลางของคนต้องอยู่ในกรอบนี้ |
+| **เพดานชัตเตอร์ · EV** | ตั้งก่อนอัด — ที่แสงน้อย AE จะยืดชัตเตอร์จนเบลอแล้วตกด่านความคมทั้ง session |
 | **1080p / 4K** | ใช้กับ **live capture** เท่านั้น — import auto-detect จากไฟล์ |
 
 | โหมด | Chunk rotate | Sample ตอน extract | Sharpness threshold |
@@ -104,15 +116,18 @@ Start
   → สร้าง session ใหม่ (reset counter / session history ใน UI)
   → เปิด Preview + VideoCapture
   → อัด chunk_001.mp4, chunk_002.mp4, … ต่อเนื่อง
-  → โฟลเดอร์ gallery: DCIM/AutoBots/yyyyMMdd_HHmmss/
+  → โฟลเดอร์ gallery: DCIM/AutoBots/v0_1_6_yyyyMMdd_HHmmss/
 ```
 
 ### สิ่งที่เห็นขณะอัด
 
 - บรรทัด **REC #N · ขนาด / 50 MB · วินาที · ~KB/s**
 - Progress bar แดง (ความคืบหน้าต่อ chunk ปัจจุบัน)
-- Chips อัปเดตสด: **Ch**, **VQ**, **Face/Pose**, **K**, **Th**, **Disk**
+- Chips อัปเดตสด: **Ch**, **VQ**, detector ที่เปิด, **K**, **realtime ratio**, **Th**, **Disk**
 - การ์ด extraction: throughput `Nx realtime · photo in ~Xs` (live เท่านั้น)
+
+> **`realtime ratio` คือตัวเลขที่ต้องดู** — ต่ำกว่า 1.0 คือถอดเฟรมทันกล้อง อัดยาวแค่ไหนก็ได้
+> สูงกว่า 1.0 คือคิวโตขึ้นเรื่อยๆ แล้วตัวอัดจะหยุดพักเอง
 
 ### Rotate chunk (อัตโนมัติ)
 
@@ -131,14 +146,30 @@ chunk_001.mp4 ครบ 50 MB
 
 ---
 
-## กด Import → ประมวลผลวิดีโอจากเครื่อง
+## กด Browse → ประมวลผลวิดีโอจากเครื่อง
 
 ```
-Import
+Browse
   → เปิด file picker (OpenDocument)
+  → Import Preview — เห็น ขนาด · resolution · ความยาว · fps · เวลาที่คาดว่าจะใช้
+       เลือก detector + backend · ตัดช่วงเวลา · แก้ Capture Zone ได้
+  → กด Extract
   → ImportedVideoSplitter remux แบ่ง chunk 50 MB (ไม่ re-encode)
   → แต่ละ chunk เข้า videoQueue → Worker 2 เหมือน live
-  → โฟลเดอร์ gallery: DCIM/AutoBots/ext_DDMMYYYY_HHMM/
+  → โฟลเดอร์ gallery: DCIM/AutoBots/ext_v0_1_6_DDMMYYYY_HHMM/
+```
+
+> ตั้งแต่ v0.1.5 การเลือกไฟล์**ไม่ extract ทันทีอีกแล้ว** — เดิมเป็น fire-and-forget แตะแล้วเริ่มเลย
+> ไม่มีจังหวะให้ดูก่อนว่าคลิปนี้ยาวแค่ไหนหรือจะเอาแค่ช่วงไหน
+
+### ทางเข้าที่สาม — Network URL
+
+```
+Network
+  → พิมพ์ URL หรือสแกน QR (รับเฉพาะ URL ของไฟล์วิดีโอตรงๆ)
+  → สตรีมด้วย byte-range เป็นค่าเริ่มต้น (ไม่ต้องโหลดครบก่อน)
+  → ดาวน์โหลดทั้งไฟล์เฉพาะเมื่อ CDN ปฏิเสธ MediaHTTPConnection
+  → เข้า Import Preview เหมือน Browse
 ```
 
 | รายการ | รายละเอียด |
@@ -166,6 +197,7 @@ Stop
 | Stop ≠ ยกเลิก processing | Worker 2/3 ทำงานต่อ |
 | Partial chunk | ขึ้นใน history พร้อม `(partial)` |
 | ปุ่ม Start | เป็น `Processing…` จนกว่า pipeline จะ drain เสร็จ |
+| Upload | เริ่มเอง ไม่ต้องรอ session จบ — รูปเข้าคิวทันทีที่ publish ลง MediaStore สำเร็จ |
 
 **ตัวอย่าง:** อัดครบ 50 MB → Chunk #1 → อัดต่อ → Stop ที่ 6/50 MB → Chunk #2 (partial) → **รวม 2 chunks**
 
@@ -184,18 +216,27 @@ Processing chunk_001 · 1/2 chunks · scan 72%
 ```
 MP4 chunk
   → MediaCodec decode เฟรมทุก 120 ms
-  → scale กว้าง 640px
-  → ML Kit Face (FAST) หรือ Pose (SINGLE_IMAGE)
-  → กรองขนาด + Laplacian sharpness (FHD ≥80, UHD ≥65)
-  → dedup 1 รูป / วินาที (เลือกเฟรมคมที่สุด)
-  → save JPEG full frame → cache/.../faces/
-  → WriteQueue → DCIM/AutoBots/{subfolder}/
+  → scale กว้าง 640px  (decode ครั้งเดียว ทุก detector ใช้ร่วมกัน)
+  → detector ที่เปิดไว้ — ต้องผ่าน ทุกตัว (AND)
+  → Capture Zone + ขนาดขั้นต่ำ + ต้องไม่ติดขอบเฟรม
+  → Laplacian sharpness บน crop 128×128 (FHD ≥80, UHD ≥65)
+  → ให้คะแนนรวม 5 ด้าน (FrameQuality)
+  → จัดกลุ่มตามคน (SubjectTracker) → เก็บดีที่สุด 3 เฟรม / 1 วินาทีของคนนั้น
+  → decode เฟรมเต็มความละเอียด → save JPEG q95
+  → WriteQueue → DCIM/AutoBots/{subfolder}/ → เข้าคิว upload
 ```
 
-| Target | เงื่อนไขผ่าน |
+| Detector | เงื่อนไขผ่าน |
 |--------|-------------|
-| **Face** | หน้าสูง ≥ 5% ความสูงเฟรม |
+| **Face** | หน้าสูง ≥ 3.5% (FHD) · 3.0% (4K) ของความสูงเฟรม |
 | **Pose** | ลำตัวสูง ≥ 25% (ไหล่+สะโพกครบ 4 จุด) |
+| **Person** | ตัวสูง ≥ 15% ของความสูงเฟรม |
+
+**คะแนนรวม 5 ด้าน** — ความคม `.40` · ขนาด `.20` · กลางเฟรม `.15` · confidence `.15` · ระยะห่างขอบ `.10`
+ทุกด้าน normalise เป็น 0..1 ก่อนถ่วงน้ำหนัก · บันทึกทุกค่าลง `photos.csv` เพื่อ re-fit น้ำหนักกับหลักฐานจริง
+
+> **dedup นับต่อคน ไม่ใช่ต่อวินาที** — สองคนวิ่งผ่านในวินาทีเดียวกันได้คนละ 3 รูป ไม่ใช่แบ่งกัน 3 รูป
+> ก่อน v0.1.6 คนหลังไม่ได้รูปเลยโดยที่ระบบรายงานว่าปกติ
 
 ### Stat chips ที่เกี่ยวข้อง
 
@@ -203,14 +244,16 @@ MP4 chunk
 |------|----------|
 | **Ch** | จำนวน chunk ที่ finalize แล้ว |
 | **VQ** | chunk รออยู่ใน queue extract |
-| **Face** / **Pose** | เฟรมที่ผ่าน filter ทั้ง session |
+| detector | เฟรมที่ผ่าน filter ทั้ง session |
 | **K** | รูปที่ส่งเข้า Gallery แล้ว |
+| **realtime** | เวลาประมวลผล ÷ ความยาวคลิป — **ต่ำกว่า 1.0 คือทันกล้อง** |
+| **Th** | ความร้อน — **แสดงผลอย่างเดียว แอปไม่ลดงานให้เอง** |
 
 ---
 
-## Session history (หน้า 2)
+## Session history
 
-Swipe ไปหน้าที่ 3 (จุดสุดท้าย) — แสดง **session cards** เรียงจากล่าสุด
+Home → 🕘 **History** — แสดง **session cards** เรียงจากล่าสุด
 
 ### Session card
 
@@ -218,9 +261,10 @@ Swipe ไปหน้าที่ 3 (จุดสุดท้าย) — แส�
 aa11.mp4 — Done
 Import · 4K · 3840×2160 · Face
 Video 5:30 · 1.2 GB
-8 chunks · 12 faces · 3m 45s
-Found 12 from 2500 frames (0%) · avg 31ms/frame · sample 120ms
-Gallery: DCIM/AutoBots/ext_07082026_1415
+8 chunks · 12 shots · 3m 45s
+~9 people · 7 photographed · 2 others
+Found 12 from 2500 frames (0%) · avg 31ms/frame · sample 120ms · 0.50x realtime
+Gallery: DCIM/AutoBots/ext_v0_1_6_07082026_1415
 [Show chunks ▼]
 ```
 
@@ -247,11 +291,17 @@ Gallery: DCIM/AutoBots/ext_07082026_1415
 |---------|---------|
 | JPEG รูป | `DCIM/AutoBots/{subfolder}/` |
 | Session log | `Download/AutoBots/{subfolder}/session_log.txt` (API 29+) |
+| คะแนนต่อรูป | `Download/AutoBots/{subfolder}/photos.csv` |
+| **1 แถวต่อคน รวมคนที่ไม่ได้รูป** | `Download/AutoBots/{subfolder}/tracks.csv` |
+| perf (debug build) | `Download/AutoBots/{subfolder}/perf_report.json` |
+
+> **ดู `tracks.csv` ก่อนสรุปว่า session ผ่าน** — จำนวนรูปที่เก็บได้บอกไม่ได้ว่ามีคนเดินผ่านหน้ากล้อง
+> แล้วไม่ได้รูปกี่คน ไฟล์นี้เป็นไฟล์เดียวที่บอกได้
 
 | โฟลเดอร์ | รูปแบบ | ใช้เมื่อ |
 |----------|--------|---------|
-| Live | `yyyyMMdd_HHmmss` | กด Start |
-| Import | `ext_DDMMYYYY_HHMM` | Import video |
+| Live | `v0_1_6_yyyyMMdd_HHmmss` | กด Start |
+| Import | `ext_v0_1_6_DDMMYYYY_HHMM` | Browse / Network |
 
 - ปุ่ม **Gallery (N)** — เปิดรูปล่าสุดใน system gallery (ใช้ได้เมื่อ `K` > 0)
 - รูปที่ deliver แล้วลบจาก cache
@@ -285,28 +335,35 @@ cache/autobots/{sessionId}/
   session_log.txt          ← mirror ใน cache
 
 DCIM/AutoBots/
-  yyyyMMdd_HHmmss/         ← live session
-  ext_DDMMYYYY_HHMM/       ← import session
+  v0_1_6_yyyyMMdd_HHmmss/       ← live session
+  ext_v0_1_6_DDMMYYYY_HHMM/     ← import session
     *.jpg
 
 Download/AutoBots/
   {subfolder}/
-    session_log.txt          ← API 29+
+    session_log.txt          ← API 29+ · อ่านด้วยตาเปล่าได้
+    photos.csv               ← คะแนน 5 ด้านต่อรูป
+    tracks.csv               ← 1 แถวต่อคน รวมคนที่ไม่ได้รูป
+    perf_report.json         ← debug build เท่านั้น
+    perf_stream.jsonl        ← เขียนสด กู้รายงานได้ถ้าโปรเซสตาย
 ```
 
 Video chunk **เก็บไว้** ใน cache (ยังไม่ลบอัตโนมัติ)
+**รูปที่อัปโหลดแล้วก็ไม่ถูกลบ** — upload คือการคัดลอก ไม่ใช่การย้าย และไม่มี toggle
 
 ---
 
 ## สถานะปุ่มหลัก
 
-| สถานะ | Start/Stop | Import |
-|-------|------------|--------|
-| IDLE | **Start** | **Import** |
-| กำลังอัด | **Stop** | disabled |
-| กำลัง processing | **Processing…** | disabled |
-| กำลัง import | disabled | **Importing…** |
-| หลัง drain เสร็จ | **Start** (session ใหม่) | **Import** |
+| สถานะ | Start/Stop | Browse / Network | History / Upload |
+|-------|------------|------------------|------------------|
+| IDLE | **Start** | เปิดได้ | เปิดได้ |
+| กำลังอัด | **Stop** | disabled | เปิดได้ |
+| กำลัง processing | **Processing…** | disabled | เปิดได้ |
+| กำลัง import | disabled | **Importing…** | เปิดได้ |
+| หลัง drain เสร็จ | **Start** (session ใหม่) | เปิดได้ | เปิดได้ |
+
+History กับ Upload เปิดได้เสมอ — เป็นหน้าอ่านอย่างเดียว และเป็นสิ่งที่ operator อยากดูระหว่างรอพอดี
 
 ---
 
@@ -315,18 +372,24 @@ Video chunk **เก็บไว้** ใน cache (ยังไม่ลบอ�
 ```
 [IDLE]
   │
-  ├─ เลือก Face/Pose + 1080p/4K (live)
+  ├─ เลือก detector + backend + zone + 1080p/4K (live)
   │
   ├─ [Start] ──► [Recording] ──► rotate 50 MB ──► extract queue ──┐
   │         │                          ▲                         │
   │         └── [Stop] → partial chunk ┘                         │
   │                                                              │
-  └─ [Import] ──► [Splitting] ──► chunks ──► extract queue ────┤
+  ├─ [Browse] ─► [Import Preview] ─► trim ─► chunks ──────────┤
+  │                                                              │
+  └─ [Network] ► [สตรีม URL] ────► [Import Preview] ──────────┤
                                                                  │
                                                                  ▼
                                                           [Processing]
                                                                  │
-                    scan 120ms → ML Kit → JPEG → Gallery + session_log
+       sample 120ms → detect (AND) → zone → sharpness → score
+              → track → dedup ต่อคน → JPEG → Gallery + CSVs
+                                                                 │
+                                                                 ▼
+                                                    [Upload queue] ──► platform
                                                                  │
                                                                  ▼
                                                               [IDLE]
@@ -336,11 +399,13 @@ Video chunk **เก็บไว้** ใน cache (ยังไม่ลบอ�
 
 ## ข้อจำกัด / สิ่งที่ควรรู้
 
-1. **4K extract** — อาจเจอหน้าน้อยกว่า 1080p ในบางเครื่อง (ISP NR + sharpness) — กำลัง tune (B2)
-2. **ไม่มี live feedback** ว่าเจอหน้าหรือไม่ขณะอัด — ดูผลจาก Session history / chip Face หลัง extract
-3. **ออกจากแอพ** (`onStop`) → Stop อัดอัตโนมัติ
+1. **4K extract** — เคยเจอหน้าน้อยกว่า 1080p ในบางเครื่อง · แก้แล้วด้วย threshold แยกตามความละเอียด + detector บน NPU (B2 ปิดแล้ว) · ถ้ายังเจอในสนาม ให้เก็บ `perf_report.json` มาด้วย
+2. **ไม่มี live feedback** ว่าเจอคนหรือไม่ขณะอัด — ดูผลจาก Session history หลัง extract
+3. **ออกจากแอพ** (`onStop`) → Stop อัดอัตโนมัติ · ออกจากหน้า Live ขณะอัดก็หยุดอัดให้เช่นกัน
 4. **Session ใหม่** ทุกครั้งที่กด Start — history ของ session ก่อนหน้าหายจาก UI (ไฟล์บนเครื่องยังอยู่)
-5. **Pose mode** — experimental; ใช้ทดสอบ field ไม่ใช่ production default
+5. **ความร้อนไม่ถูกจัดการให้อัตโนมัติ** — แอปรายงานอย่างเดียว การตัดสินใจพักเครื่องเป็นของ operator
+6. **ความละเอียดปลายทางคือเฟรมวิดีโอ** — 4K = 8.3 MP ไม่ใช่ความละเอียดสูงสุดของเซนเซอร์ ครอปได้จำกัดกว่าการถ่ายภาพนิ่ง
+7. **Token หมดอายุจะรู้ตอน complete** คือหลังไฟล์ถูกส่งขึ้นไปแล้ว — ทดสอบ upload หนึ่งรูปก่อนออกงานเสมอ
 
 ---
 
@@ -349,22 +414,28 @@ Video chunk **เก็บไว้** ใน cache (ยังไม่ลบอ�
 | ไฟล์ | เนื้อหา |
 |------|---------|
 | [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) | **Pipeline เทคนิค** — workers, thresholds, storage |
-| [SCREEN.md](./SCREEN.md) | Layout UI ปัจจุบัน (3 หน้า pager) |
-| [CHANGELOG.md](./CHANGELOG.md) | v0.1.2 release notes |
+| [SCREEN.md](./SCREEN.md) | Layout UI ปัจจุบัน (Home menu) |
+| [DESIGN_FLOW.md](./DESIGN_FLOW.md) | เทียบกับสเปค Flow Design v1 ทีละข้อ |
+| [SEQUENCE_FLOW.md](./SEQUENCE_FLOW.md) | Sequence diagram รวม upload |
+| [CHANGELOG.md](./CHANGELOG.md) | release notes |
 | [BUILD.md](./BUILD.md) | Build + install APK |
 | [SCRCPY.md](./SCRCPY.md) | Mirror หน้าจอมือถือบน Mac |
-| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | Plan B slices ถัดไป (B2–B4) |
+| [IMPLEMENTATION.md](./IMPLEMENTATION.md) | สถานะ phase ทั้งหมด · B4 คือสิ่งเดียวที่ยังค้าง |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Design Flows — **ส่วนใหญ่เป็น v0.1 stills legacy** |
 
-### ความต่าง v0.1 → v0.1.2 (สรุป)
+### ความต่าง v0.1 → ปัจจุบัน (สรุป)
 
-| | v0.1 | v0.1.2 |
+| | v0.1 | v0.1.6 |
 |---|------|--------|
 | โหมดหลัก | Stills burst + Passage Gate | Video chunk + offline extract |
-| ทางเข้า | Live เท่านั้น | Live + **Import video** |
-| Preview ขณะอัด | Face overlay + Arm/Fire | Preview อย่างเดียว |
+| ทางเข้า | Live เท่านั้น | Live + **Browse** + **Network URL** |
+| Preview ขณะอัด | Face overlay + Arm/Fire | Preview + Capture Zone |
 | Trigger ถ่ายรูป | Capture Zone + Early Arm | อัตโนมัติจากวิดีโอหลังอัด |
-| หน้า swipe ที่ 3 | Observation grid | **Session history** |
+| navigation | swipe 3 หน้า | **Home menu** ทีละหน้า |
+| ตรวจจับ | face อย่างเดียว | **face + pose + person** เกตเป็น AND |
+| เกณฑ์เลือกรูป | ลำดับชัตเตอร์ | **คะแนนรวม 5 ด้าน** จัดอันดับต่อคน |
+| ปลายทาง | เครื่องอย่างเดียว | เครื่อง **+ อัปโหลดขึ้นแพลตฟอร์ม** |
+| วัดว่าพลาดใคร | ไม่มีทางรู้ | **`tracks.csv`** |
 | Chunk / sample | — | **50 MB** · **120 ms** ทุก resolution |
 
 ---

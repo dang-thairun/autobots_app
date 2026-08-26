@@ -1,17 +1,25 @@
-# Phases — Upload Pipeline (B3)
+# Upload Pipeline — บันทึกการตัดสินใจ (B3)
 
-> แผนการทำ **upload ขาออก** ต่อจาก [RELEASE_0_1_5.md](./RELEASE_0_1_5.md) ซึ่งทำ ingest ขาเข้าไปแล้ว
-> Phase ระดับบนสุดอยู่ที่ [IMPLEMENTATION.md](./IMPLEMENTATION.md) — เอกสารนี้แตก **B3** ออกเป็น slice ที่ ship ได้ทีละอัน
+> **เอกสารนี้ไม่ใช่แผนงานอีกแล้ว** — B3 ทำเสร็จและยิง production ผ่านแล้ว (B3a–B3e ✅ · B3f-1 ✅ 20/08/2026)
+> สิ่งที่เหลืออยู่ในนี้คือ **เหตุผลว่าทำไมโค้ดถึงหน้าตาแบบนี้** และ **สัญญาที่ตกลงกับแพลตฟอร์ม**
+> ซึ่งเป็นของที่หาไม่ได้จากที่อื่น: [SEQUENCE_FLOW.md](./SEQUENCE_FLOW.md) บอกว่าระบบ*ทำงานยังไง*
+> เอกสารนี้บอกว่า*ทำไมถึงเลือกทางนั้น* และทางไหนที่ลองแล้วไม่เวิร์ค
 >
-> **สถานะ: B3a–B3e ✅ ยิงขึ้น production จริงผ่านแล้ว · B3f-1 foreground service ✅ ทดสอบพื้นหลังผ่านแล้ว · เหลือ field test บนเน็ตจริง** · ยังไม่มี Cloudflare R2 · ยังไม่มี backend
-> เอกสารนี้เขียนไว้เพื่อให้เริ่มได้โดยไม่ต้องรอ R2 — B3a–B3e ทั้งหมดทำและทดสอบจบได้ด้วย fake backend + Ktor server ในเครื่อง
+> **โค้ด 19 ไฟล์อ้างถึงหัวข้อในเอกสารนี้โดยตรง** (`docs/PHASES.md §2.1`, `§3`, `§9`, `§10`, `B3c` …)
+> — ถ้าจะย้ายหรือเปลี่ยนเลขหัวข้อ ต้องไล่แก้คอมเมนต์พวกนั้นด้วย
+>
+> **งานที่ยังเหลือจริง ๆ อยู่ที่ [IMPLEMENTATION.md](./IMPLEMENTATION.md)** — ที่นี่เก็บแค่ B3f ไว้เป็นลิสต์สิ่งที่ต้องเฝ้าตอนออกงาน
+>
+> ⚠️ **สมมติฐาน "Cloudflare R2 + backend ที่เราเขียนเอง" ถูกยกเลิกไปแล้ว** — ปลายทางจริงคือแพลตฟอร์ม
+> Runx (GraphQL presign → **Google Cloud Storage** → completion call) ที่มีอยู่แล้ว ไม่ได้เขียน backend เอง
+> เอกสารนี้ยังพูดถึง R2 อยู่หลายที่เพราะเป็นบันทึกการตัดสินใจ **ตามลำดับเวลา** — ที่ไหนขัดกัน ให้ §10 ชนะเสมอ
 >
 > **ขอบเขต: อัปโหลด JPEG ที่ extract แล้วเท่านั้น** — วิดีโอ chunk 50 MB ไม่อัปโหลด ([§2.4](#24-ขอบเขต--รูปเทานน))
 > **ไม่ลบไฟล์ในเครื่องไม่ว่ากรณีใด** — upload เป็นการ *คัดลอกขึ้นคลาวด์* ไม่ใช่การ *ย้าย* ([§2.5](#25--ไมลบไฟลในเครอง))
 
 ---
 
-## สรุปสำหรับผู้ตัดสินใจ
+## สรุปสำหรับผู้ตัดสินใจ (เขียนไว้ก่อนเริ่มงาน — เก็บไว้เป็นบันทึก)
 
 **ทำได้ และเสี่ยงต่ำกว่าที่คิด** เพราะ pipeline ปัจจุบันมี**จุดต่อเดียว**ที่ต้องแตะ — callback `onDelivered(uri)` ใน [WriteQueue.kt](../androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt) ที่ยิงหลังรูปถูก publish ลง MediaStore สำเร็จ ทุกอย่างที่เหลือเป็นโมดูลใหม่ที่ไม่มีใครในเส้นทาง capture → extract → deliver รู้จัก
 
@@ -22,7 +30,7 @@
 | **1** | **ไฟล์ที่จะอัป** | **`content://` URI ของ MediaStore** ไม่ใช่ path ในระบบไฟล์ — cache JPEG ถูกลบทันทีหลัง publish ([§2.1](#21--ไฟลอยทไหนตอนถงคว)) |
 | **2** | **สถานะในคิว** | **6 สถานะ** — เพิ่ม `UPLOADED` และ `ABANDONED` เข้ากับ 4 ตัวเดิม ([§3](#3-state-machine)) |
 | **3** | **presign / complete** | รับเป็น **array** ตั้งแต่ v1 ([§2.2](#22--ขนาดของ-round-trip)) |
-| **4** | **object key** | **deterministic** — `{deviceId}/{sessionId}/{fileName}` ([§2.3](#23--object-key-deterministic)) |
+| **4** | ~~**object key deterministic**~~ | ❌ **กลับคำแล้ว** — ยิงทดสอบกับ API จริงพบว่า server มินต์ UUID ต่อท้ายเสมอ · แอปจึงต้อง**เก็บ key ที่ตอบกลับมา** ลง `remoteKey`/`remoteUri` ([§2.3](#23--object-key-deterministic)) |
 | **5** | **WorkManager** | **หนึ่ง unique work ระบายทั้งคิว** ไม่ใช่หนึ่ง work ต่อไฟล์ ([§5](#5-สถาปตยกรรมทเสนอ)) |
 | **6** | **ขอบเขต** | **รูปที่ extract แล้วเท่านั้น** — วิดีโอ chunk ไม่อัปโหลด ([§2.4](#24-ขอบเขต--รปเทานน)) |
 | **7** | **ลบไฟล์หลังอัป** | **ไม่ลบ** — ตัดออกจากขอบเขตทั้งหมด ไม่มี toggle ([§2.5](#25--ไมลบไฟลในเครอง)) |
@@ -49,7 +57,10 @@
 | แบบแผน navigation | `OperatorDestination` enum จาก 0.1.5 — เพิ่ม destination ใหม่คือเพิ่ม enum + `when` branch |
 | identity ของ session | [PipelineSessionRecord.kt](../shared/src/commonMain/kotlin/com/autobots/camera/PipelineSessionRecord.kt) มี session id, ชื่ออัลบั้ม, backend, เวลา — พอสำหรับเป็น metadata ของ upload |
 
-### ยังไม่มี ❌
+### ยังไม่มี ❌ *(ณ ตอนเขียนแผน — ตอนนี้มีครบทุกข้อแล้ว ยกเว้นข้อสุดท้ายที่ถูกยกเลิก)*
+
+> เก็บตารางนี้ไว้เป็นบันทึกจุดตั้งต้น · **สถานะปัจจุบัน: Room + KSP ✅ · WorkManager ✅ ·
+> foreground service ✅ (B3f-1) · device identity ✅ (QR + login) · R2 ❌ ยกเลิก ใช้ Runx/GCS แทน**
 
 | | ผลกระทบ |
 |--|--|
@@ -104,9 +115,12 @@ POST /uploads/complete  { items: [ {objectKey, capturedAt, sessionId, ...}, ... 
 
 **ขนาด batch ที่เสนอ: 20–50 รายการต่อ presign** · ใหญ่กว่านั้นเสี่ยงว่า URL ชุดท้ายๆ หมดอายุก่อนจะได้ PUT ถ้าเครือข่ายช้า (ดูเรื่อง `expiresAtMs` ใน [§4](#4-contract-ทลอกไวกอนได-ยงไมตองมี-backend))
 
-### 2.3 ✅ Object key deterministic
+### 2.3 ❌ Object key deterministic — **กลับคำแล้ว**
 
-ถ้า backend สุ่ม UUID ใหม่ทุกครั้งที่ presign การ retry หลัง "ไม่รู้ว่าสำเร็จไหม" จะสร้าง object ซ้ำใน R2 ทุกครั้ง
+> **ข้อนี้ตัดสินไว้ผิด และของจริงหักล้างไปแล้ว** เก็บไว้ทั้งย่อหน้าเพราะเหตุผลข้างล่างยังถูกต้อง
+> — สิ่งที่ผิดคือสมมติฐานว่าเราเป็นคนเลือก key ได้ · ข้อสรุปที่ใช้จริงอยู่ท้ายหัวข้อ
+
+ถ้า backend สุ่ม UUID ใหม่ทุกครั้งที่ presign การ retry หลัง "ไม่รู้ว่าสำเร็จไหม" จะสร้าง object ซ้ำทุกครั้ง
 
 ```
 {deviceId}/{sessionId}/{fileName}
@@ -114,9 +128,21 @@ POST /uploads/complete  { items: [ {objectKey, capturedAt, sessionId, ...}, ... 
 
 > ⚠️ **ขึ้นกับ backend** — Runx `photoUpload` มีพารามิเตอร์ `$path: String` ในสกีมาแต่ client ปัจจุบันไม่ได้ส่ง · ถ้า `path` คือคีย์ของ object จริง ข้อนี้ใช้ได้ตามที่เขียน ถ้าไม่ใช่ ต้องเก็บคีย์ที่ server มินต์ลงแถวแทน ดู [§10](#10-transport-ทมของจรงแลว--runx-graphql)
 
-**ตัดสินแล้ว** — ทั้งสามค่ามีอยู่แล้วฝั่งแอป · Android เป็นคนเสนอ key, backend เป็นคนอนุมัติหรือปรับ prefix แต่**ห้ามสุ่มใหม่** · `/uploads/complete` ต้อง **idempotent ต่อ objectKey** (upsert ไม่ใช่ insert)
+**ผลจริงหลังยิงทดสอบ (ยกเลิกข้อสรุปเดิม):** `path` เป็น**โฟลเดอร์เท่านั้น** server ต่อ UUID เป็นชื่อไฟล์เสมอ
+→ **deterministic key ทำไม่ได้บนแพลตฟอร์มนี้**
 
-ผลที่ตามมาที่ต้องยอมรับ: อัปไฟล์เดิมซ้ำ = **เขียนทับ object เดิม** ไม่ใช่สร้างใบใหม่ ซึ่งเป็นสิ่งที่ต้องการ เพราะ `{sessionId}/{fileName}` ระบุรูปหนึ่งใบได้ไม่ซ้ำอยู่แล้ว
+สิ่งที่ทำแทน และเป็นสิ่งที่รันอยู่จริง:
+
+| | |
+|--|--|
+| แอปเก็บอะไร | `relativeKey` = `{sessionId}/{fileName}` — ใช้**กันแถวซ้ำในคิวของเราเอง** ไม่ใช่ชื่อ object |
+| server ตั้งชื่อ object | UUID · แอปเก็บค่าที่ตอบกลับมาไว้ที่ `remoteKey` / `remoteUri` |
+| ทำไมต้องเก็บ | ถ้าไม่เก็บ แถวที่ค้างสถานะ `Uploaded` จะปิดไม่ได้เลย — ไบต์อยู่ใน bucket โดยไม่มีใครเรียกชื่อมันถูก |
+| ราคาที่จ่าย | **requeue รูปเดิมสร้าง object ซ้ำเสมอ** รูปไม่หาย แต่มีของกำพร้าค้างบน bucket · ยังไม่มีทางแก้ฝั่งแอป |
+
+⚠️ **หมายเหตุที่ต้องตรวจกับโค้ด:** `RunxUploadTransport.presign` ส่งตัวแปร `path` ไปใน `variables` แต่ตัว
+mutation ประกาศพารามิเตอร์แค่ `$provider` กับ `$mimeType` — ตามสเปค GraphQL ตัวแปรที่ไม่ได้ประกาศจะถูกทิ้ง
+แปลว่าไฟล์อาจกองรวมที่รากของ bucket ไม่ได้แยกโฟลเดอร์ตามที่ตั้งใจ **ยังไม่ได้ตรวจกับ object จริง**
 
 ### 2.4 ✅ ขอบเขต — รูปเท่านั้น
 
@@ -254,296 +280,51 @@ VideoFrameProcessor ──▶ WriteQueue ──▶ MediaStore (DCIM/AutoBots)
 
 ---
 
-## 6. Slice plan
+## 6. Slice plan — **ทำเสร็จแล้วทั้งหมด**
 
-### B3a — โครงคิว (ไม่มีเน็ต) · ✅ เสร็จ · ทดสอบบนเครื่องแล้ว
+> รายละเอียดของแต่ละ slice ถูกตัดออกเมื่อ 26/08/2026 หลังงานทั้งก้อนขึ้น production แล้ว
+> ประวัติเต็ม (สิ่งที่ทำ · สิ่งที่ทดสอบ · สิ่งที่ยังไม่ได้ทดสอบในแต่ละรอบ) อยู่ใน git history ของไฟล์นี้
 
-**เพิ่มแล้ว:** KSP `2.0.21-1.0.28` + Room `2.6.1` ใน build (WorkManager ยังไม่ใส่ — รอ B3c ที่ได้ใช้จริง) · [UploadStatus.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadStatus.kt) · [UploadItem.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadItem.kt) · [UploadDao.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadDao.kt) · [UploadDatabase.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadDatabase.kt) · [UploadRepository.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadRepository.kt) · hook `onPublished` ใน [WriteQueue.kt](../androidApp/src/main/kotlin/com/autobots/camera/delivery/WriteQueue.kt) → `enqueueForUpload` ใน [CapturePipelineCoordinator.kt](../androidApp/src/main/kotlin/com/autobots/camera/pipeline/CapturePipelineCoordinator.kt)
-
-**ยืนยันแล้ว:** `assembleDebug` ผ่าน · KSP รันจริง (มี `UploadDao_Impl.java`) · schema ถูก export ที่ `androidApp/schemas/…/1.json` และ commit เข้า repo แล้ว
-
-**ทดสอบบนเครื่องแล้ว** — Xiaomi peridot (SM8635) · `run1mins.mp4` UHD 391.8 MB · import → Face/NPU · 8 chunks
-
-| ตรวจ | ผล |
-|--|--|
-| จำนวนแถวตรงกับของจริง | **15 แถว** = 15 ไฟล์ใน `DCIM/AutoBots/ext_v0_1_5_18082026_1637/` = `Photos kept: 15` ใน `session_log.txt` — ตรงกันสามทางอิสระ |
-| สถานะเริ่มต้น | ทั้ง 15 แถวเป็น `Pending` |
-| `relativeKey` ไม่ซ้ำ | 15 คีย์ต่างกัน 15 แถว · รูปแบบ `ext_v0_1_5_18082026_1637/face_c003_7200000.jpg` |
-| `contentUri` เป็น MediaStore | `content://media/external_primary/images/media/1000003012` ไม่ใช่ path — ตามที่ [§2.1](#21--ไฟลอยทไหนตอนถงคว) ตั้งใจ |
-| คงทนข้ามการปิดแอป | `am force-stop` แล้วเปิดใหม่ → ยังครบ 15 แถว ไม่มี crash ไม่มี migration error |
-| ไม่กระทบของเดิม | QNN probe ยังทำงาน · session log ยังเขียนครบ · ratio/ผลการ extract ไม่เปลี่ยน |
-
-**ยังไม่ถูกทดสอบ:** `resetInterrupted()` — สร้างแถวสถานะ `Uploading` ไม่ได้จนกว่าจะมี worker · ปิดใน **B3c** พร้อมกับการทดสอบ kill กลางทาง
-
-**สิ่งที่ตัดสินระหว่างเขียน:**
-
-- **`sessionId` = ชื่ออัลบั้ม** (`ext_v0_1_5_18082026_1430`) ไม่ใช่ `CapturePipelineCoordinator.sessionId` ซึ่งเป็นค่าต่อ *instance* ไม่ใช่ต่อ *การรัน* · ชื่ออัลบั้มคือที่ที่รูปอยู่จริง จึงย้อนกลับไปหาสิ่งที่ผู้ใช้เห็นได้เสมอ
-- **เก็บ `relativeKey` = `{sessionId}/{fileName}` ไม่เก็บ deviceId** — deviceId ตั้งค่าใหม่ได้ ถ้าฝังลงแถวไว้ การเปลี่ยนเครื่อง/ออก token ใหม่จะทำให้คีย์ทั้งคิวใช้ไม่ได้ · transport เติม prefix ตอน presign
-- **unique index บน `relativeKey` + `OnConflictStrategy.IGNORE`** ทำให้ `enqueue` idempotent — extract ซ้ำในอัลบั้มเดิมไม่สร้างแถวซ้ำ และไม่รีเซ็ตแถวที่ `Success` ไปแล้ว
-
-**ความเสี่ยง:** ไม่ได้อยู่ที่ CMake/NDK อย่างที่เคยเขียนไว้ — อยู่ที่ **lockstep ระหว่าง Kotlin กับ KSP** และเป็นภาระถาวร ไม่ใช่ครั้งเดียว · วิธีลดความเสี่ยงและทางเลือกที่ไม่ใช้ KSP อยู่ที่ [§9](#9-เรอง-ksp--ทางเลอกของ-room)
-
-**เก็บ Room ไว้ใน `androidApp` เท่านั้น ห้ามใส่ใน `shared`** — `shared` เป็น KMP module และ KSP บน KMP เป็นคนละเรื่องที่ยากกว่ามาก · คิว upload เป็นเรื่องของ Android ล้วน ไม่มีเหตุให้ข้ามไป common
-
----
-
-### B3b — UI ของคิว (อ่านอย่างเดียว) · ✅ เสร็จ · ทดสอบบนเครื่องแล้ว
-
-**เพิ่มแล้ว:** `OperatorDestination.UploadQueue` · [UploadQueuePage.kt](../androidApp/src/main/kotlin/com/autobots/ui/UploadQueuePage.kt) · แถวเมนู **Upload** บน Home พร้อมจำนวน · `uploadCounts` / `uploadItems` / `retryFailedUploads()` ใน [OperatorViewModel.kt](../androidApp/src/main/kotlin/com/autobots/ui/OperatorViewModel.kt)
-
-**เบี่ยงจากแผนหนึ่งข้อ:** ไม่ได้เพิ่มบรรทัดใน `ProcessingStatusCard` — ใส่จำนวนไว้ในป้ายปุ่มแทน (`Upload (45)`) ตามแบบเดียวกับ `Gallery (1204)` ที่มีอยู่แล้ว ได้ผลเท่ากันโดยไม่ต้องแตะการ์ดที่ live/import ใช้ร่วมกัน
-
-**ทำตามกติกาของ [§9](#9-เรอง-ksp--ทางเลอกของ-room):**
-
-- badge อ่านจาก `observeCounts()` (`GROUP BY status`) **ไม่ใช่** จากรายการแถว
-- หน้า queue อ่าน `observePage(limit = 200)` มีขอบเขตเสมอ
-- ทั้งคู่เป็น `stateIn(WhileSubscribed(5s))` — ออกจากหน้าแล้วเข้าใหม่ไม่รื้อ query ใหม่
-- `badgeLabel` นับเฉพาะ `outstanding` — คิวที่อัปครบ 5,000 ใบแล้วไม่ต้องขึ้นตัวเลขให้กวนใจ
-
-**ทดสอบบนเครื่องแล้ว:** ปุ่ม `Upload (45)` ตรงกับ 45 แถวใน DB · การ์ดสรุป `45 waiting to upload` / `0 done · 45 total` · ชิปกรองขึ้นเฉพาะ `Pending 45` (สถานะที่ไม่มีของไม่โผล่) · แต่ละแถวแสดงชื่อไฟล์ · session · ขนาด · เวลา ครบ · ปุ่ม Retry ไม่โผล่เพราะยังไม่มีแถวไหน failed
-
-**ปุ่ม Upload ย้ายไปอยู่ใต้ Gallery** — Gallery คือ "ส่งถึงเครื่องแล้ว" Upload คือ "ส่งต่อขึ้นคลาวด์" เรียงตามลำดับของงานจริง
-
-**Pause / Stop เลื่อนไป B3c** — ตอนนี้ยังไม่มี worker ให้พัก ปุ่มจะเป็นสวิตช์ที่ไม่มีใครอ่าน · ตัดสินแล้วว่าทำ **Pause/Resume อย่างเดียว ไม่มี Stop**: รูปหนึ่งใบ ~0.8–1.7 MB ใช้เวลาไม่กี่วินาที การ "หยุดรับงานใหม่ ปล่อยใบที่ค้างให้จบ" จึงหยุดได้จริงอยู่แล้ว ส่วน Stop ที่ตัดกลางคันทิ้งไบต์ที่ส่งไปแล้วและอาจทิ้ง object ครึ่งใบไว้ — จ่ายแพงกว่าเพื่อประหยัดไม่กี่วินาที
-
-**เพิ่มระหว่างทาง: debug deep link** — เครื่องทดสอบ (HyperOS 3.0 / Android 16) ปฏิเสธ `adb shell input` แม้เปิด *USB debugging (Security settings)* แล้ว จึงใส่ทางลัดเฉพาะ debug build:
-
-```bash
-adb shell am start -n com.autobots.camera/com.autobots.MainActivity --es dest upload
-#   dest: upload | history | network | live
-```
-
-ปิดตายใน release ด้วย `BuildConfig.DEBUG` · แก้ปัญหา *ไปให้ถึงหน้า* ได้ แต่ยังกดปุ่มในหน้านั้นไม่ได้ — ถ้า B3c ต้องกด Pause/Retry ซ้ำๆ ควรทำ instrumentation test
-
-**ทำไมมาก่อน worker:** เพราะ UI ที่อ่าน `Flow` จาก Room ทำให้ทุก slice หลังจากนี้**ดีบักได้ด้วยตา** ไม่ต้องพึ่ง `adb logcat`
-
----
-
-### B3c — ⭐ Worker + Fake backend · ✅ เสร็จ · ทดสอบบนเครื่องแล้ว
-
-**เพิ่ม:** `UploadTransport` interface · `FakeUploadTransport` (presign ปลอม → เขียนลง `filesDir/fake_r2/` → complete ปลอม พร้อม option ให้ล้มแบบสุ่มได้) · `UploadWorker` · state machine เต็มตาม §3 · backoff สองชั้น · `Constraints(NetworkType.CONNECTED, requiresBatteryNotLow = true)` ตาม [§2.6](#26--เครอขาย)
-
-**ทดสอบบนเครื่องแล้ว** — Xiaomi peridot · คิวจริง 45 แถว (import 15 + live 30)
-
-| การทดสอบ | ผล |
-|--|--|
-| **migration v1 → v2** | 45 แถวเดิมรอดครบ ไม่ถูก drop — `MIGRATION_1_2` ทำงาน ไม่ได้ตกไปที่ตาข่าย destructive |
-| **drain ปกติ** | 45 → `Success` · sink มี object 45 ชิ้น · manifest 45 บรรทัด **ไม่ซ้ำสักคีย์** · ไม่มี `.part` ตกค้าง |
-| ⭐ **`Uploaded` → `Success`** | ฉีดให้ complete ล้ม 5 ครั้งแรก → 5 แถวค้างที่ `Uploaded` พร้อม `remoteKey`/`remoteUri` (ไม่ใช่ `Failed`) · รอบถัดมา **COMPLETE 5 ครั้ง PUT 0 ครั้ง** |
-| ⭐ **kill กลางทาง** | หน่วง PUT 400 ms แล้ว `am force-stop` ระหว่าง drain → เหลือ `Uploading` ค้าง 1 แถว · เปิดใหม่ → `Requeued 1 row(s) interrupted mid-upload` → จบที่ 45 `Success` · manifest ยัง **45 คีย์ไม่ซ้ำ** |
-
-**บั๊กที่เจอตอนเขียนและแก้ก่อนทดสอบ** — เดิม `complete` ที่ล้มหลัง PUT สำเร็จจะถูก `markFailed` ลดสถานะเป็น `Failed` ซึ่งทำให้ retry **ส่งไฟล์ทั้งก้อนซ้ำ** ลบล้างเหตุผลทั้งหมดที่มีสถานะ `Uploaded` · แก้เป็น `markFailed(bytesUploaded = true)` ที่คงสถานะ `Uploaded` ไว้พร้อม backoff และแก้ `retryAllFailed` ให้ส่งแถวที่มี `remoteKey` กลับไป `Uploaded` ไม่ใช่ `Pending`
-
-| **Pause / Resume** | กด Pause ตอนคิวว่าง → `shared_prefs` เก็บ `paused=true` · ยัด 45 แถวกลับเข้าคิว → **0 PUT · 0 COMPLETE · worker ไม่รันเลย** แม้เปิดแอปใหม่ · กด Resume → ระบายครบ 45 ทันที |
-| **object key deterministic** | drain ไฟล์ชุดเดิมสามรอบ → manifest 135 บรรทัด แต่ **45 คีย์ไม่ซ้ำ และ object 45 ชิ้น** — ส่งซ้ำเขียนทับ ไม่สร้างใบใหม่ ([§2.3](#23--object-key-deterministic)) |
-
-**ยังไม่ได้ทดสอบ:** `Unauthorized` → พักทั้งคิว — ต้องมี backend จริงถึงจะเกิด ปิดใน B3e/B3f
-
-**ป้ายสถานะบนจอ = ชื่อสถานะจริง** — ตอนแรกใช้คำที่อ่านง่ายกว่า (`Committing` / `Done` / `Given up`) แล้วพบว่าเทียบกับ log หรือ `SELECT status` ไม่ได้ · คนที่อ่านคิวนี้ตอนนี้คือคนที่กำลังดีบักมัน จึงใช้ชื่อสถานะตรงๆ · `Uploaded` ที่อยู่ข้าง `Success` ดูขัดตาจนกว่าจะรู้ว่ามันคนละเรื่อง ซึ่งความต่างนั้นคือหัวใจของ state machine จึงควรโชว์ ไม่ใช่กลบ
-
-**เครื่องมือ debug ที่เพิ่มมา** — ทั้งหมดปิดตายใน release ด้วย `BuildConfig.DEBUG`:
-
-```bash
-adb shell am start -n com.autobots.camera/com.autobots.MainActivity \
-    --es dest upload \
-    --ei failComplete 5     # ให้ complete ล้ม N ครั้งแรก (นับถอย ไม่ใช่สุ่ม)
-    --ei failPut 3          # ให้ PUT ล้ม N ครั้งแรก
-    --ei delayMs 400        # หน่วงทุก PUT เพื่อให้แทรกการฆ่าโปรเซสได้
-    --ez requeueAll true    # รีเซ็ตทุกแถวกลับ Pending เพื่อรัน drain ซ้ำ
-```
-
-**นี่คือ slice ที่ใหญ่ที่สุดและเป็นตัวที่ทำให้ "เตรียมพร้อมไว้ก่อน" มีความหมายจริง** — จบข้อนี้แล้วสิ่งที่เหลือคือเปลี่ยน implementation ของ interface เดียว
-
----
-
-### B3d — ตั้งค่า endpoint + identity · ✅ เสร็จ · ทดสอบบนเครื่องแล้ว
-
-**เพิ่ม:** `OperatorDestination.UploadSettings` · ที่เก็บค่าคงทน (DataStore) สำหรับ `backendBaseUrl` / `deviceId` / `token` — **ถ้าใช้ Runx ([§10](#10-transport-ทมของจรงแลว--runx-graphql)) คือ `platform` / `token` / `eventId`** · **สแกน QR เพื่อกรอกทั้งชุด** โดยใช้ `QrScanPreview` เดิม · ปุ่ม *Test connection*
-
-**รูปแบบ QR ที่เสนอ** — JSON บรรทัดเดียว ให้หลังบ้านออก QR ให้เครื่องแต่ละตัว:
-
-```json
-{"url":"https://api.example.com","deviceId":"cam-07","token":"..."}
-```
-
-ถ้าภายหลังเปลี่ยนไปใช้ login ในแอป กระทบแค่หน้านี้ — คิว worker และ transport ไม่รู้จักที่มาของค่าอยู่แล้ว
-
-**ทำแล้ว:** [UploadConfig.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadConfig.kt) · [UploadSettingsPage.kt](../androidApp/src/main/kotlin/com/autobots/ui/UploadSettingsPage.kt) · เข้าจากปุ่ม **Settings** บนหน้า Upload
-
-5 ค่า ตรงกับ contract ของ Runx ใน [§10](#10-transport-ทมของจรงแลว--runx-graphql): `graphqlUrl` · `completeUrl` · `platform` · `token` · `eventId`
-
-**ทดสอบบนเครื่องแล้ว:**
-
-| ตรวจ | ผล |
-|--|--|
-| provisioning ทั้งชุด | ป้อน JSON ผ่านเส้นทางเดียวกับ QR → 5 ค่าลง `shared_prefs` ครบ |
-| รอดข้ามการรีสตาร์ต | force-stop แล้วเปิดใหม่ ค่ายังอยู่และแสดงบนจอครบ |
-| **QR บางส่วน** | ส่งแค่ `{"eventId":"…"}` → เปลี่ยนเฉพาะ event · URL/token/platform คงเดิม |
-| **QR ที่ไม่ใช่ของเรา** | ส่งสตริงที่ไม่ใช่ JSON → **ไม่แตะ config เดิมเลย** · หน้าจอขึ้นว่าไม่ใช่ upload configuration |
-| การบดบัง token | บรรทัด "Token in use" แสดง `tok_…5678 (20 chars)` ไม่ใช่ค่าเต็ม |
-
-**สามข้อที่เบี่ยงจากแผนเดิม โดยตั้งใจ:**
-
-1. **`SharedPreferences` ไม่ใช่ DataStore** — แผนเขียนว่า DataStore แต่พอถึงจริงมันเก็บ boolean หนึ่งตัวกับสตริงสั้นห้าตัว อ่านโดย worker ที่อ่าน prefs แบบ synchronous ระหว่างไฟล์อยู่แล้ว · DataStore ให้ async กับ typed schema ที่ไม่มีใครต้องการที่นี่ แลกกับการมี**ที่เก็บค่าสองที่**อยู่ข้างกัน เพราะ flag pause อยู่ใน prefs ไปแล้ว
-2. **ไม่มีปุ่ม *Test connection*** — ยังไม่มี transport จริงให้ทดสอบ ปุ่มที่กดแล้วไม่ได้ยิงอะไรจริงคือปุ่มที่โกหก · ตอนนี้ validate รูปแบบ URL แบบ inline แทน และเลื่อน probe จริงไป **B3e** ที่ยิง `photoUpload` ได้
-3. **worker ยังใช้ fake transport ไม่ว่าจะตั้งค่าหรือไม่** — กติกา "ไม่ได้ตั้งค่า → worker ไม่ทำงาน" จะมีความหมายก็ต่อเมื่อมีของจริงให้ทำ · ตอนนี้ `isComplete` ขับแค่ข้อความบนจอ ส่วนการเลือก transport ตามค่า config เป็นงานของ B3e
-
-**ค่าเริ่มต้นจาก `.env`** — บิลด์หนึ่งตัวสามารถมี backend ตั้งไว้แล้วได้ ([BUILD.md §0](./BUILD.md)) · Gradle อ่าน `.env` ตอน configure แล้วยัดเข้า `BuildConfig` · แอปคัดลอกเข้า settings **เฉพาะรอบแรกที่ยังไม่มีอะไรเก็บไว้เลย**
-
-| ตรวจบนเครื่องแล้ว | ผล |
-|--|--|
-| `.env` มีค่า + ล้างข้อมูลแอป | 5 ค่าถูก seed ลง prefs ครบตั้งแต่เปิดครั้งแรก |
-| แก้ค่าในแอปแล้วรีสตาร์ต | **ไม่ถูก .env เขียนทับ** — `OPERATOR_EDIT` ยังอยู่ |
-| `.env` ว่าง + ล้างข้อมูลแอป | ไม่มีไฟล์ prefs ถูกสร้างเลย ช่องว่างให้ผู้ใช้กรอก |
-
-กติกา "seed เฉพาะตอนไม่มีอะไรเก็บไว้เลย" รักษาสองสัญญาพร้อมกัน: เครื่องที่แฟลชจากบิลด์ที่ตั้งค่าไว้ใช้ได้ทันที และค่าที่ผู้ใช้แก้เองในสนามไม่ถูกย้อนกลับเงียบๆ · ผลพลอยได้คือ *Clear configuration* = กลับไปใช้ค่าของบิลด์
-
-> ⚠️ `.env` อยู่ใน `.gitignore` แล้ว และ **ค่าที่ baked เข้า APK อ่านออกได้** — บิลด์ที่ไม่ได้คุมปลายทางเองควรเว้น token ว่างแล้วใช้ QR แทน
-
-**เครื่องมือ debug เพิ่ม** — ป้อน payload เดียวกับที่ QR จะให้ ผ่านโค้ด `mergeFromQr` ตัวเดียวกัน:
-
-```bash
-adb shell "am start -n com.autobots.camera/com.autobots.MainActivity \
-    --es dest uploadsettings --es config '{\"eventId\":\"…\"}'"
-```
-
----
-
-### B3e — Login · event picker · transport จริง
-
-#### B3e-1 — เข้าสู่ระบบและเลือก event ✅
-
-**เพิ่มแล้ว:** [RunxAuthClient.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/RunxAuthClient.kt) (`authAdminUser` + `eventItems`) · [UploadSession.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadSession.kt) · ส่วน *Sign in* และ dropdown เลือก event ใน [UploadSettingsPage.kt](../androidApp/src/main/kotlin/com/autobots/ui/UploadSettingsPage.kt)
-
-**กติกาที่ล็อก**
-
-| | |
-|--|--|
-| **token ไม่ลงดิสก์เลย** | อายุ 7 วัน เก็บได้ก็จริง แต่ไม่เก็บ — เครื่องภาคสนามถูกทิ้งไว้ในกระเป๋าระหว่างงาน · ต้อง login ใหม่ทุกครั้งที่เปิดแอป |
-| **ติ๊ก "จำ username/password" ได้** | ปิดไว้เป็นค่าเริ่มต้น · เป็นสิ่งที่ทำให้ "login ใหม่ทุกครั้ง" เหลือแค่แตะปุ่มเดียว ไม่ใช่การกลับไปหาออฟฟิศ · **ไม่ auto login** ตามที่ตกลงไว้ |
-| **prefs ถูกกันออกจาก backup** | [backup_rules.xml](../androidApp/src/main/res/xml/backup_rules.xml) + [data_extraction_rules.xml](../androidApp/src/main/res/xml/data_extraction_rules.xml) · `allowBackup=true` ทั้งแอป ถ้าไม่กัน รหัสผ่านจะไหลออกทาง `adb backup`/cloud restore |
-| **หน้าแรกมีการ์ด Upload** | บอก user · event · progress bar · จำนวนที่ขึ้นแล้ว/ที่ยอมแพ้ · หน้าคิวบอกครบอยู่แล้วแต่ไม่มีใครเปิดตอนกำลังถ่าย |
-| **หน้า Upload บอกว่า "ใครส่งเข้างานไหน"** | ทั้งสองค่าถูกตั้งจากอีกหน้าหนึ่งและผิดได้ง่ายทั้งคู่ · ทั้ง session ลงงานของเมื่อวานได้โดยไม่มีอะไรดูผิดปกติเลย และหน้าคิวคือหน้าที่คนเฝ้าจริงตอนถ่าย · ยังไม่ login หรือยังไม่เลือกงาน = สีเหลืองเตือน |
-| **eventId อยู่ในค่าที่คงทน** | มันคือ "งานของวันนี้" ไม่ใช่ credential — ต้องรอดจากการรีสตาร์ตเหมือนคิว · เก็บ `eventTitle` คู่ไว้ด้วยเพื่อให้เครื่องที่เปิดแบบออฟไลน์ยังบอกได้ว่าตั้งไว้ที่งานไหน |
-| **ตามหน้า (paging) จนครบ** | โค้ด Python อ่านแค่หน้าแรก · ที่นี่วนตาม `pageInfo.pageCount` (เพดาน 10 หน้า) และ**ประกาศบนจอเมื่อโดนตัด** — event ที่หายไปจาก dropdown เงียบๆ คือความล้มเหลวที่แย่ที่สุดของหน้านี้ |
-| **dropdown คือหน้าตาหลัก ไม่ใช่ช่องค้นหา** | list โหลดเองหลัง login และมีครบทุกงานที่บัญชีนั้นเห็น · ช่องกรองด้วยชื่อโผล่**เฉพาะตอนที่ list ยาวเกินเพดาน** เท่านั้น — นอกจากกรณีนั้นมันคือช่องที่ขอให้คนพิมพ์งานที่ dropdown ทำให้แล้ว |
-| **build default ใช้ครั้งเดียวต่อโปรเซส** | `UploadSettings` ถูกสร้างหลายที่ (ViewModel · worker · MainActivity) ถ้าไม่กัน ทุกการสร้างจะเอา URL จาก `.env` มาทับใหม่ กลายเป็น "ทับตอนไหนก็ได้" แทน "ทับตอนเปิดแอป" และลบค่าที่เพิ่งแก้ไปเมื่อ 2 วินาทีก่อนจาก background thread ได้ |
-| **query เหลือ 5 field** | ของเดิมขอ ~40 field รวม `bankAccount`/`creditBalance` · payload ใหญ่บน 4G และ**ทั้ง query พังถ้าบัญชีไม่มีสิทธิ์อ่าน field ใด field หนึ่ง** |
-
-**ทดสอบบนเครื่องแล้ว** ด้วย mock GraphQL server ผ่าน `adb reverse` — รหัสผ่านผิด (error ใน HTTP 200) · login สำเร็จ + ดึง 12 event ครบ 3 หน้า · เลือกจาก dropdown แล้ว `eventId`/`eventTitle` ลง prefs · ติ๊กจำแล้วรีสตาร์ต ฟอร์มเติมให้แต่**ไม่ login เอง** · token ถูกปฏิเสธ → เด้งกลับหน้า login โดย event ที่เลือกไว้ยังอยู่
-
-**เสร็จแล้วใน B3e-2:** worker อ่าน token จาก `UploadSession` และเลือก transport ตามสถานะจริง
-
-#### B3e-2 — Transport จริง ✅
-
-**เพิ่มแล้ว:** [RunxUploadTransport.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/RunxUploadTransport.kt) — presign (GraphQL) → PUT (signed URL) → complete (form POST) ใช้ `HttpURLConnection` ตัวเดียวกับ `RunxAuthClient` ไม่ต้องดึง ktor client เข้ามา
-
-**กติกาที่ล็อก**
-
-| | |
-|--|--|
-| **ไม่ได้ตั้งค่า / ยังไม่ login = worker ไม่ทำงาน** | คืน `Result.success()` แบบไม่ทำอะไร ไม่ใช่ fallback ไป fake sink · ของเดิมจะรายงานว่า "อัปแล้ว" ทั้งที่ไฟล์นอนอยู่ในโฟลเดอร์บนเครื่อง · ทั้ง login และ save config เรียก `ensureScheduled` ให้เอง |
-| **fake transport ต้องเปิดเอง** | `--es fake on` เท่านั้น · ปิดเป็นค่าเริ่มต้นเพราะ "อัปโหลดที่แอบเขียนลงเครื่องเงียบๆ" แย่กว่า "ไม่อัปโหลด" |
-| **เลือก transport ครั้งเดียวต่อรอบ** | drain รอบเดียวจะสลับ backend หรือสลับตัวตนกลางทางไม่ได้ |
-| **อ่านไฟล์เข้า memory ก่อน PUT** | `Content-Length` ตรงเป๊ะ · ถ้าใช้ `sizeBytes` จากแถวคิวมันคือการเดาขนาดไฟล์ที่ MediaStore เป็นเจ้าของ และ signed PUT ที่ length ไม่ตรงจะพังแบบอ่านไม่ออก · ทีละใบ ไม่กี่ MB |
-| **ส่ง `$path` เป็นโฟลเดอร์** | ยิงถาม API จริงแล้ว (ดู §10 ข้อ 2): ทุก segment ถูกเก็บไว้ครบ แต่ **server ยังต่อชื่อไฟล์ UUID ของตัวเองท้ายเสมอ** · `path` จึงจัดระเบียบ bucket ได้ แต่ทำ deterministic key ไม่ได้ · ส่งเป็น `<eventId>/<sessionId>` เพื่อให้ตรวจสอบย้อนหลังได้ว่า session หนึ่งผลิตอะไรบ้าง |
-| **`key` = คีย์เต็มของ object** | ทุก segment หลังชื่อ bucket ใน `downloadUrl` · ถ้าไม่ส่ง `path` มันยุบเหลือชื่อไฟล์เปล่าซึ่งเท่ากับที่ Python ส่งพอดี — เป็นการขยาย ไม่ใช่การเปลี่ยน · endpoint จริงรับทั้งสองแบบ (ทดสอบแล้ว) |
-| **4xx = permanent · 5xx/timeout = retryable · 401/403 = พักทั้งคิว** | ยกเว้น 408/429 ที่ถือเป็น retryable |
-
-> ⚠️ **ผลของการให้ server มินต์ key: requeue = object ซ้ำ** · แถวที่ถูกส่งกลับไป `Pending` จะ presign ใหม่ ได้ key ใหม่ ไฟล์เดิมจึงขึ้นไปเป็น object ที่สอง · เส้นทาง `Uploaded → Success` **ไม่ซ้ำ** เพราะใช้ key ที่เก็บไว้ · นี่คือเหตุผลที่ [§2.3](#23--object-key-deterministic) อยากได้ deterministic key และทำให้**คำถามข้อ 2 สำคัญกว่าที่คิดไว้ตอนแรก**
-
-**ทดสอบบนเครื่องแล้ว** ด้วย mock backend เต็มรูปแบบ (GraphQL + PUT + `/success`) ผ่าน `adb reverse`:
-
-| | ผล |
-|--|--|
-| ยังไม่ login | `Not signed in — standing by` · ไม่มี request ออก ไม่มีไฟล์ถูกเขียน |
-| import วิดีโอจริง 1 นาที 4K | 15 ใบ → **SIGN 15 · PUT 15 · complete 15** เรียงถูกลำดับทุกใบ |
-| header บน PUT | `Content-Type: image/jpeg` ตรงกับที่ sign · `User-Agent: autobots-android/0.1.5` |
-| ฟิลด์ที่ `/success` | `eventId` · `key` (จาก `downloadUrl`) · `name` (ชื่อไฟล์เดิม) · `uri` + `Authorization: Bearer` |
-| complete พัง 1 ครั้ง (500) แล้ว requeue ทั้งคิว | **PUT 30 ไม่ใช่ 31** — แถวที่ complete พังอยู่ที่ `Uploaded` แล้วยิงแค่ complete ซ้ำ ไม่ส่งไฟล์ใหม่ |
-
-**ยิงกับ backend ของจริงแล้ว ✅** (`api.photo.thai.run` · event `test-upload`) — login ด้วย username/password จริงได้ JWT 1379 ตัวอักษร · `eventItems` คืน 1 งานตรงกับ `UPLOAD_EVENT_ID` · import คลิป 1 นาที 4K → **15 ใบ PUT 15 · COMPLETE 15 · fail 0** ประมาณ 1 วินาทีต่อใบ (ไฟล์ ~1.6 MB) · key ที่ server มินต์เป็น UUID `.jpeg`
-
-**ยังไม่ได้ทดสอบกับของจริง:** `Unauthorized` → พักทั้งคิว (ต้องรอ token หมดอายุจริง 7 วัน หรือให้ backend ปฏิเสธ)
-
-**ทดสอบกับ backend จริงไม่ได้ ก็ทดสอบกับ Ktor server ในแอปได้** — โปรเจกต์รัน `embeddedServer` อยู่แล้วที่พอร์ต 8080 ([AutobotsServer.kt](../androidApp/src/main/kotlin/com/autobots/camera/network/AutobotsServer.kt)) เพิ่ม route `/uploads/presign` + `/uploads/complete` แบบ stub เข้าไปชั่วคราว แล้วชี้แอปมาที่ตัวเองผ่านหน้าตั้งค่าใน B3d ได้เลย
-
-**เสร็จเมื่อ:** วงจรครบผ่าน HTTP จริง (แม้จะเป็น loopback) · error 4xx/5xx แยกเป็น `ABANDONED`/`FAILED` ถูกต้อง
-
----
-
-> **B3c ต้องทำ schema v2 ด้วย** ถ้าเลือก Runx — เพิ่ม `remoteKey` / `remoteUri` แบบ nullable ลง `UploadItem` มิฉะนั้นสถานะ `UPLOADED` จะ retry ไม่ได้ เหตุผลเต็มอยู่ที่ [§10](#10-transport-ทมของจรงแลว--runx-graphql)
-
-### B3f-0 — ทดสอบพื้นหลัง 🔴 **ไม่ผ่าน** (20/08/2026)
-
-คำถามที่ค้างมาตั้งแต่ [§2.6](#26--เครอขาย) — "คิวจะรอดไหมตอนไม่มีใครดู" — ตอบแล้ว **ไม่รอด**
-
-| สถานการณ์ | ผล |
-|--|--|
-| จอดับ · เสียบสายชาร์จ | ✅ ผ่าน · 15 ใบครบ จบหลังจอดับ 12 วินาที |
-| เครื่องนิ่งจนเข้า Doze (`battery unplug` + `deviceidle force-idle`) | 🔴 **ไม่ผ่าน · 7 นาทีได้แค่ 6 จาก 15 ใบแล้วหยุดสนิท** |
-
-log ของรอบที่ไม่ผ่าน เล่าเรื่องพังสองชั้นซ้อนกัน:
-
-```
-15:18:51  Work […UploadWorker] was cancelled
-15:19:40  Retryable failure: PUT failed … ETIMEDOUT
-15:20:30  Work […UploadWorker] was cancelled
-15:23:31  Not signed in — standing by      ← โปรเซสใหม่ (pid 21267 → 24104)
-```
-
-| ชั้น | อาการ | แก้ด้วย |
+| Slice | งาน | ผล |
 |--|--|--|
-| **1 · Doze** | WorkManager ถูกยกเลิกซ้ำๆ · เน็ตถูกตัด (**แม้แต่ loopback ก็ ETIMEDOUT**) | foreground service |
-| **2 · โปรเซสถูกฆ่า** | token อยู่ใน memory เท่านั้น ([UploadSession]) → หายไปพร้อมโปรเซส · worker ตื่นมาก็ยืนเฉย | foreground service (ลดโอกาสตาย) + auto re-login จากรหัสที่ติ๊กจำไว้ |
+| **B3a** | โครงคิว Room + KSP · `UploadStatus` · `UploadItem` · `UploadDao` · hook `onPublished` | ✅ |
+| **B3b** | หน้าคิวแบบอ่านอย่างเดียว | ✅ |
+| **B3c** | ⭐ `UploadWorker` + `FakeUploadTransport` · WorkManager · Pause/Resume | ✅ |
+| **B3d** | ตั้งค่า endpoint + identity ด้วย QR | ✅ |
+| **B3e-1** | Login + event picker | ✅ |
+| **B3e-2** | `RunxUploadTransport` ของจริง → **ยิง production ผ่าน** | ✅ |
+| **B3f-0** | ทดสอบพื้นหลัง | 🔴 **ไม่ผ่าน** 20/08 — คิวค้างสนิทใน deep idle · เป็นหลักฐานว่าต้องมี FGS |
+| **B3f-1** | Foreground service (`dataSync`) | ✅ **ผ่าน** 20/08 ในเงื่อนไขที่โหดกว่าเดิม |
 
-**ข้อสรุป:** เงื่อนไขที่ทำให้ Doze ทำงานคือ "วางเครื่องนิ่งไว้นานๆ" ซึ่งเป็น**ท่ามาตรฐานของกล้องบนขาตั้ง** ไม่ใช่กรณีขอบ · foreground service เลิกเป็นทางเลือกแล้ว
-
----
-
-### B3f-1 — Foreground service ✅ **ผ่าน** (20/08/2026)
-
-**เพิ่ม:** [UploadNotification.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadNotification.kt) · `setForeground()` ใน [UploadWorker.kt](../androidApp/src/main/kotlin/com/autobots/camera/upload/UploadWorker.kt) · permission + `foregroundServiceType="dataSync"` · auto re-login จากรหัสที่ติ๊กจำไว้
-
-**ไม่ได้เขียน Service ใหม่** — WorkManager ให้ worker ยกระดับตัวเองได้ผ่าน `setForeground()` · Service แยกแปลว่ามีวงจรชีวิตที่สองที่ต้องซิงก์กับคิว ซึ่งเป็นแหล่งบั๊กที่ไม่จำเป็น · **ยกระดับไม่สำเร็จก็ไม่ตายทั้งรอบ** — log warning แล้วทำงานต่อแบบเดิม
-
-**ผลทดสอบ** (เงื่อนไขเดียวกับ B3f-0 แต่โหดกว่า — บังคับ deep idle **ทันที** ที่เปิด auto-upload ไม่ให้อัปไปก่อนแม้แต่ใบเดียว):
-
-| | B3f-0 (ไม่มี FGS) | **B3f-1 (มี FGS)** |
-|--|--|--|
-| ผลลัพธ์ | 6 จาก 15 ใบ แล้วหยุดสนิท | **16 จาก 16 ใบ ใน 4 นาที 30 วินาที** |
-| `was cancelled` ระหว่าง idle | 3 ครั้ง | **0** |
-| โปรเซส | ถูกฆ่า (pid 21267 → 24104) | **รอดทั้งรอบ (pid 28696 ตลอด)** |
-| `mState` | IDLE | IDLE ตลอดเช่นกัน |
-
-ระบบยืนยันเองใน log: `Background started FGS: Allowed … SystemForegroundService … code:PROC_STATE_FGS`
-
-**ตัวเลขต้องอยู่ใน title** — HyperOS ตัด `contentText` ทิ้งทั้งบรรทัดเมื่อการแจ้งเตือนมี progress bar เหลือแต่แถบเปล่าๆ ที่บอกว่า "ยุ่งอยู่" แต่ไม่บอกว่าใกล้เสร็จหรือเพิ่งเริ่ม · `title` กับ `subText` รอดจาก layout นั้น จึงย้ายจำนวนและ % ไปไว้ที่ title และเอาชื่อ event ไว้ที่ subText → `Uploading 2/4 · 50% • Notif test`
-
-> ⚠️ **FGS กันโปรเซสตายเฉพาะตอนที่มีงานเดินอยู่** · ระหว่างรอบ (คิวว่าง แอปปิด) โปรเซสยังถูกฆ่าได้ตามปกติ และ token ที่อยู่ใน memory ก็หายไปด้วย · **auto re-login จึงไม่ใช่ของแถม** — ถ้าไม่ติ๊ก "จำ username/password" worker ที่ถูกปลุกมาในโปรเซสใหม่จะขึ้น `Not signed in — standing by` แล้วคิวค้างอยู่ดี (เห็นเองระหว่างเก็บกวาดหลังทดสอบ)
+**บทเรียนที่ควรอยู่ต่อ:** B3c ถูกสร้างและพิสูจน์กับ `FakeUploadTransport` ก่อนมี backend จริง —
+คิว, worker และ 6 สถานะทั้งหมดจึงถูกทดสอบจบก่อนที่ใครจะรู้ว่าปลายทางคือ R2 หรือ Runx
+ตอนเปลี่ยนใจจาก R2 เป็น Runx จริง ๆ จึงแก้แค่ `UploadTransport` ตัวเดียว
 
 ---
 
-### B3f — R2 + backend จริง (**บล็อกอยู่ · รอ infra**)
+### B3f — field test ของจริง (**ยังไม่ได้ทำ**)
 
-ตั้งค่า bucket · SigV4 presign ฝั่ง backend · field test บนเครือข่ายจริง · เก็บตัวเลข throughput/ความล้มเหลวเป็นรายงานเวอร์ชัน
+> **ขอบเขตเปลี่ยนไปจากที่วางไว้** — เดิมข้อนี้คือ "ตั้ง bucket R2 + เขียน SigV4 presign ฝั่ง backend"
+> งานนั้น**หายไปทั้งก้อน** เพราะใช้แพลตฟอร์ม Runx ที่มี presign ให้อยู่แล้ว
+> สิ่งที่เหลือคือส่วนที่เดาจากโต๊ะทำงานไม่ได้: **เน็ตจริงและเวลาจริง**
 
-**สิ่งที่ต้องเฝ้าในการทดสอบภาคสนามครั้งแรก:** อัตราการล้มของ PUT บน 4G · เวลาที่ใช้ต่อรูปเทียบกับขนาด · แบตที่หายไประหว่างระบาย 134 ไฟล์ · ความร้อน (pipeline ตัวนี้ทำงานบนเครื่องที่เพิ่ง extract UHD มา) · **คิวค้างเพราะระบบตัดงานเบื้องหลังหรือไม่** — ถ้าค้าง นั่นคือหลักฐานว่าต้องมี foreground service ([§2.6](#26--เครอขาย))
+**สิ่งที่ต้องเฝ้าในการทดสอบภาคสนามครั้งแรก:** อัตราการล้มของ PUT บน 4G · เวลาที่ใช้ต่อรูปเทียบกับขนาด ·
+แบตที่หายไประหว่างระบายทั้งคิว · ความร้อน (worker ตัวนี้ทำงานบนเครื่องที่เพิ่ง extract UHD มา) ·
+**เพดาน `dataSync` 6 ชม./วัน (Android 14+)** ชนเมื่อไหร่ · และ `path` ถูกส่งถึง server จริงหรือไม่ ([§2.3](#23--object-key-deterministic))
+
+เก็บตัวเลข throughput / ความล้มเหลวเป็นรายงานเวอร์ชันตาม [REPORT_GUIDELINE.md](./REPORT_GUIDELINE.md)
 
 ---
 
-### B3g — หลังจากนั้น (ยังไม่วางแผนละเอียด)
+### B3g — ยังไม่วางแผนละเอียด
 
-> **วิดีโอ chunk ถูกตัดออกจากขอบเขตแล้ว** ([§2.4](#24-ขอบเขต--รปเทานน)) ไม่อยู่ในลิสต์นี้และไม่มีแผนรองรับ — ถ้าวันหนึ่งต้องการ ต้องออกแบบ multipart ใหม่ ไม่ใช่ต่อยอดจากที่ทำไว้
-
-> **การลบไฟล์ในเครื่องถูกตัดออกทั้งหมด** ([§2.5](#25--ไมลบไฟลในเครอง)) · **Wi-Fi-only toggle ถูกตัดออก** ([§2.6](#26--เครอขาย)) — ทั้งสองอย่างไม่อยู่ในลิสต์นี้แล้ว
+> **วิดีโอ chunk ถูกตัดออกจากขอบเขตแล้ว** ([§2.4](#24-ขอบเขต--รูปเทานน)) · **การลบไฟล์ในเครื่องถูกตัดออกทั้งหมด**
+> ([§2.5](#25--ไมลบไฟลในเครอง)) · **Wi-Fi-only toggle ถูกตัดออก** ([§2.6](#26--เครอขาย))
 
 | หัวข้อ | ทำไมแยกออกมา |
 |--|--|
-| **Foreground service** | ทำเมื่อ field test พิสูจน์ว่าจำเป็นเท่านั้น · ต้องเพิ่ม permission + merge `foregroundServiceType="dataSync"` ([§1](#ยงไมม-)) |
-| **ลบแถวที่ `ABANDONED` ออกจากคิว** | ลบ*แถวในคิว* ไม่ใช่ลบรูป · ต้องมี UI ให้คนตัดสินใจ ไม่ควรลบเงียบ |
-
----
+| **ลบแถวที่ `Abandoned` ออกจากคิว** | ลบ*แถวในคิว* ไม่ใช่ลบรูป · ต้องมี UI ให้คนตัดสินใจ ไม่ควรลบเงียบ |
+| **ของกำพร้าบน bucket จาก requeue** | ผลพวงจาก [§2.3](#23--object-key-deterministic) · แก้ฝั่งแอปไม่ได้ ต้องคุยกับเจ้าของแพลตฟอร์ม |
 
 ## 7. UI — เชื่อมกับของที่ 0.1.5 ทำไว้
 
@@ -580,13 +361,17 @@ log ของรอบที่ไม่ผ่าน เล่าเรื่อ
 
 ## 8. สถานะการตัดสินใจ
 
-**ไม่มีคำถามที่บล็อกอยู่แล้ว — เริ่ม B3a ได้ทันที**
+**งานเขียนโค้ดของ B3 จบแล้ว** — ข้อ 1–9 ถูกใช้จริงทั้งหมด ยกเว้นข้อ 4 ที่ถูกหักล้างและกลับคำ (§2.3)
 
-การออกแบบทั้งหมดถูกล็อกไว้ใน [สรุปสำหรับผู้ตัดสินใจ](#สรปสำหรบผตดสนใจ) ข้อ 1–9 · เหลือเรื่องเดียวที่ยัง**ไม่ต้อง**ตอบตอนนี้ และตั้งใจเลื่อนไปให้ข้อมูลจริงเป็นคนตอบ:
+เรื่องที่ยังเปิดอยู่ และตั้งใจให้**ข้อมูลจริง**เป็นคนตอบ ไม่ใช่การเดา:
 
-| เรื่อง | ทำไมเลื่อนได้ | ใครเป็นคนตอบ |
+| เรื่อง | สถานะ | ใครเป็นคนตอบ |
 |--|--|--|
-| **ต้องมี foreground service ไหม** | ขึ้นกับว่าระบบตัดงานเบื้องหลังจริงหรือเปล่า ซึ่งเดาจากโค้ดไม่ได้ · ระหว่างนี้ `requiresBatteryNotLow = true` ทำให้พฤติกรรมปลอดภัยไว้ก่อน | **field test ใน B3f** — ถ้าคิวค้างโดยไม่มี error นั่นคือคำตอบ |
+| ~~ต้องมี foreground service ไหม~~ | ✅ **ตอบแล้ว: ต้องมี** — B3f-0 คิวค้างสนิทใน deep idle · B3f-1 แก้แล้ว | field test |
+| อัตราการล้มของ PUT บน 4G | ❌ ยังไม่มีตัวเลข — ที่วัดมาทั้งหมดอยู่บน Wi-Fi/loopback | **B3f** |
+| งานยาว 4 ชม. (ร้อน · แบต · Doze ซ้ำๆ) | ❌ ที่ผ่านคือ Doze ที่บังคับเอง 4 นาทีครึ่ง | **B3f** |
+| เพดาน `dataSync` 6 ชม./วัน | ❌ ยังไม่รู้ว่าชนเมื่อไหร่ | **B3f** |
+| `path` ถูกส่งถึง server จริงไหม | ❌ mutation ไม่ได้ประกาศ `$path` — ต้องดู object จริงบน bucket | ตรวจ bucket |
 
 **ที่เก็บของการตัดสินใจ:** เอกสารนี้เป็นแหล่งอ้างอิงเดียว · ถ้าข้อไหนเปลี่ยนระหว่างทาง แก้ที่นี่ก่อนแก้โค้ด เพราะข้อ 1–4 มีผลต่อ contract ที่ backend ต้องทำตาม
 

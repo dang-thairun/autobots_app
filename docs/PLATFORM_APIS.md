@@ -4,7 +4,7 @@ Inventory of **computer vision**, **camera**, and related **Android platform** A
 
 - Pipeline behavior: [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
 - File locations: [STRUCTURE.md](./STRUCTURE.md)
-- Operator build: **v0.1.2 Plan B** — active path is **video chunk + offline extract**
+- Operator build: **v0.1.6 Plan B** — active path is **video chunk + offline extract + upload**
 
 **Versions** (`gradle/libs.versions.toml`): CameraX **1.4.1** · ML Kit Face **16.1.7** · ML Kit Pose **18.0.0-beta5** · Ktor **2.3.12**
 
@@ -12,7 +12,7 @@ Inventory of **computer vision**, **camera**, and related **Android platform** A
 
 ## Quick map
 
-### Active — Plan B (v0.1.2 operator shell)
+### Active — Plan B (v0.1.6 operator shell)
 
 | Area | Library / API | Wrapper | Role |
 |------|---------------|---------|------|
@@ -20,14 +20,24 @@ Inventory of **computer vision**, **camera**, and related **Android platform** A
 | Video import split | `MediaExtractor` + `MediaMuxer` | `ImportedVideoSplitter` | Remux to 50 MB chunks (no re-encode) |
 | Frame decode | `MediaCodec` (HW preferred) | `VideoFrameSampler` | Sample every 120 ms from MP4 |
 | Face detect (offline) | ML Kit Face | `OfflineFaceDetector` | Bitmap inference on decoded frames |
-| Pose detect (offline) | ML Kit Pose | `OfflinePoseDetector` | Experimental extract target |
-| Sharpness | CPU Laplacian (app) | `FaceSharpnessScorer` | FHD ≥80 · UHD ≥65 |
+| Face detect (offline) | **LiteRT / TFLite** `face_det_lite` w8a8 | `FaceDetLiteDetector` | 640×480 grayscale tensor, tiled · default backend is NPU |
+| Person detect (offline) | **LiteRT / TFLite** `foot_track_net` w8a8 | `PersonFootDetector` | 640×480 letterboxed · the only detector that reports **everyone** in frame |
+| Pose detect (offline) | ML Kit Pose | `OfflinePoseDetector` | Is the body usably in shot |
+| NPU delegate | **QNN** (Qualcomm) | `QnnDelegate` | Falls back to GPU then CPU; what actually ran is recorded in `perf_report.json` |
+| Sharpness | CPU Laplacian (app) | `FaceSharpnessScorer` | On a 128×128 normalised ROI · FHD ≥80 · UHD ≥65 |
+| Frame ranking | KMP logic | `FrameQuality`, `SubjectTracker` | 5-term score; dedup window is per person |
 | Gallery JPEG | MediaStore Images | `LocalDeliveryWriter.publish()` | `DCIM/AutoBots/{subfolder}/` |
 | Session log | MediaStore Downloads (API 29+) | `LocalDeliveryWriter.publishText()` | `Download/AutoBots/{subfolder}/session_log.txt` |
 | Async delivery | Kotlin `Channel` | `WriteQueue` | Bounded drain to MediaStore |
 | Device load | `PowerManager` + `ActivityManager` | `DeviceLoadReader` | Thermal + RAM (display only) |
 | Remote control | Ktor CIO + WebSockets | `AutobotsServer` | Start/Stop, state on `:8080` |
 | File import picker | `ActivityResultContracts.OpenDocument` | `MainActivity` | User picks video file |
+| Upload queue | **Room** (+ KSP) | `UploadDatabase`, `UploadDao` | Durable queue, 6 states, per-row backoff that survives reboot |
+| Upload scheduling | **WorkManager** | `UploadScheduler`, `UploadWorker` | One unique job drains the whole queue |
+| Foreground service | `FOREGROUND_SERVICE_DATA_SYNC` | WorkManager `setForeground()` | Keeps network + CPU during Doze · Android 14+ caps `dataSync` at 6 h/day |
+| Presign / complete | `HttpURLConnection` + GraphQL | `RunxUploadTransport`, `RunxAuthClient` | Two JSON POSTs did not justify a client library |
+| Object storage | Google Cloud Storage signed PUT | `RunxUploadTransport.put` | `Content-Type` must match what the URL was signed for |
+| QR provisioning | ML Kit Barcode | `QrScanPreview` | Endpoint + token without typing |
 
 ### Legacy — v0.1 stills (code retained, not wired in shell)
 
@@ -197,7 +207,7 @@ Display only — does not throttle capture (Flow 11).
 | Surface | Role |
 |---------|------|
 | `WS /ws/control` | Start/Stop, resolution change, state JSON push |
-| `WS /ws/preview` | Reserved — **no frames** in v0.1.2 |
+| `WS /ws/preview` | Reserved — **no frames** yet |
 | `GET /photos/{id}` | Serve JPEG from MediaStore |
 
 Legacy note: server may still reference analysis-frame hooks from v0.1; operator path does not stream live ML Kit frames.

@@ -5,222 +5,107 @@ Code: `androidApp/.../ui/OperatorShellScreen.kt`, `CameraPreviewPane.kt`, `Chunk
 
 ---
 
-## Two layers
+## Home menu — the shell (v0.1.5)
 
-The screen stacks **camera preview** (fixed) under **swipeable overlay pages**.
+Up to v0.1.4 the shell was a **3-page `HorizontalPager`** stacked over a permanently bound camera
+preview. v0.1.5 replaced it with a **Home menu** and one destination at a time. The camera is now
+bound **only on the Live capture page**, which is the reason the change was worth making: a shell
+that keeps the preview alive holds the camera open on every screen, including the ones that have
+nothing to do with capture.
+
+```
+                     ┌──────────────────┐
+                     │       Home       │
+                     └────────┬─────────┘
+        ┌─────────────────────┼─────────────────────┐
+        │  CAPTURE            │            REVIEW   │
+   ┌────┴────┐ ┌────────┐ ┌───┴────┐   ┌────────┐ ┌─┴──────┐ ┌────────┐
+   │ ▶ Live  │ │📁Browse│ │🔗Network│   │🕘History│ │🖼Gallery│ │☁ Upload│
+   └─────────┘ └────┬───┘ └────────┘   └────────┘ └────────┘ └───┬────┘
+                    │                                            │
+              ┌─────┴──────┐                              ┌───────┴──────┐
+              │ImportPreview│──── Edit zone ──▶│ZoneEditor│ │UploadSettings│
+              └────────────┘                              └──────────────┘
+```
+
+**`OperatorDestination`** (source of truth: `OperatorShellScreen.kt`):
+`Home` · `LiveCapture` · `SessionHistory` · `ImportPreview` · `ZoneEditor` · `NetworkUrl` ·
+`UploadQueue` · `UploadSettings`
+
+Six tiles, two captioned groups — because the destinations answer two different questions:
+**what should the phone ingest next**, and **what has it already produced**.
+
+| Group | Tile | Goes to | Badge |
+|-------|------|---------|-------|
+| CAPTURE | ▶ **Live** | `LiveCapture` — the only page that binds the camera | — |
+| CAPTURE | 📁 **Browse** | system file picker → `ImportPreview` | — |
+| CAPTURE | 🔗 **Network** | `NetworkUrl` — stream a clip by URL or QR | — |
+| REVIEW | 🕘 **History** | `SessionHistory` | number of sessions |
+| REVIEW | 🖼 **Gallery** | system gallery at `DCIM/AutoBots` | kept photo count |
+| REVIEW | ☁ **Upload** | `UploadQueue` | **outstanding rows only** |
+
+The upload badge deliberately counts only what is still owed — a queue holding 5,000 already-uploaded
+photos is not news, and a badge that shows it trains the operator to ignore the badge.
+
+**Disabled while the pipeline is busy** (`isImporting || isProcessing || isDownloading`):
+Live, Browse, Network, Gallery. History and Upload stay reachable — they are read-only and are exactly
+what an operator wants to look at while waiting.
+
+**Back button** returns to Home from anywhere. Leaving `LiveCapture` while recording **stops the
+recording first** — a session must never keep rolling on a screen that no longer shows it.
+
+---
+
+## Live capture page
+
+Two layers: camera preview underneath, status and controls on top.
 
 ```
 ┌─────────────────────────────────────────┐
-│  LAYER 2 — HorizontalPager (swipe ↔)   │
+│  ← Back                                 │
 │  ┌───────────────────────────────────┐  │
-│  │ Page 0 / 1 / 2 (see below)        │  │
-│  │         (semi-transparent cards)   │  │
+│  │ Status chips                      │  │
+│  │ Ch · VQ · K · realtime · thermal  │  │
 │  └───────────────────────────────────┘  │
-│              ● ○ ○   page dots          │
-├─────────────────────────────────────────┤
-│  LAYER 1 — CameraPreviewPane (fixed)    │
+│                                         │
+│         CameraX PreviewView             │
+│         + Capture Zone overlay          │
+│         + VideoChunkRecorder            │
+│                                         │
 │  ┌───────────────────────────────────┐  │
-│  │  CameraX PreviewView              │  │
-│  │  + VideoChunkRecorder (live only) │  │
+│  │ Resolution · Detectors · Backend  │  │
+│  │ Shutter ceiling · EV              │  │
 │  └───────────────────────────────────┘  │
+│            [ Start / Stop ]             │
 └─────────────────────────────────────────┘
 ```
 
-**Layer 1 scrim** (เมื่อไม่ได้ live preview):
+**Preview binds on entering the page, not on Start** (v0.1.6). Aiming the tripod and drawing the
+capture zone no longer requires recording first.
 
-| สถานะ | ข้อความ |
-|--------|---------|
-| กำลัง capture | ไม่มี scrim — เห็น preview สด |
-| หยุด capture แต่ยัง process queue | **Processing chunks…** |
-| หยุดทั้งหมด | **Stopped** |
+| State | Scrim |
+|-------|-------|
+| Recording | none — live preview |
+| Stopped, queue still draining | **Processing chunks…** |
+| Fully stopped | **Stopped** |
 
-> แอปล็อค **portrait only** (`screenOrientation=portrait`)
+Settings are **IDLE-only** — resolution, detectors and backend cannot change mid-session, because a
+session log that describes two different configurations describes neither.
 
----
-
-## Pager pages (swipe left / right)
-
-| Index | Name | What you see |
-|-------|------|----------------|
-| **0** | Controls | Status card (top) + extraction card + buttons (bottom) |
-| **1** | Clean preview | Fully transparent — preview only |
-| **2** | Session history | รายการ session + chunk (`ChunkHistoryPage`) |
-
-```
-     Page 0              Page 1              Page 2
-  (Controls)         (Clean preview)      (Session history)
-
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ ┌──────────┐ │   │              │   │ Session      │
-│ │ Status   │ │   │   preview    │   │ history      │
-│ │ chips    │ │   │   only       │   │ ┌──────────┐ │
-│ └──────────┘ │   │              │   │ │ session  │ │
-│              │   │  (no overlay)│   │ │ card     │ │
-│   preview    │   │              │   │ └──────────┘ │
-│   shows      │   │              │   │ ┌──────────┐ │
-│   through    │   │              │   │ │ chunk    │ │
-│              │   │              │   │ │ cards    │ │
-│ ┌──────────┐ │   │              │   │ └──────────┘ │
-│ │ Face     │ │   │              │   │              │
-│ │ extract  │ │   │              │   │              │
-│ │ card     │ │   │              │   │              │
-│ ┌──────────┐ │   │              │   │              │
-│ │Start│Imp│Gal│   │              │   │              │
-│ └──────────┘ │   │              │   │              │
-│    ● ○ ○     │   │    ○ ● ○     │   │    ○ ○ ●     │
-└──────────────┘   └──────────────┘   └──────────────┘
-```
+> Portrait only (`screenOrientation=portrait`).
 
 ---
 
-## Page 0 — Controls (detail)
+## Other destinations
 
-```
-┌─────────────────────────────────────────┐
-│ ┌─ Compact status ─────────────────────┐ │
-│ │ AutoBots v0.1.2 · IDLE   1080p·Face·IP │ │
-│ │ REC #3 · 12 MB / 50 MB · 28s  [bar]  │ │  ← เมื่อกำลัง capture
-│ │ [Ch][VQ][Fc][K][Th][Disk]            │ │
-│ │ RAM 4.2G/11G (free 3.1G)             │ │
-│ │ Video pipeline · Show/Hide           │ │
-│ │ ── expanded ─────────────────────    │ │
-│ │ Record chunks → extract…             │ │
-│ │ [ Face ] [ Pose ]                    │ │
-│ │ [ 1080p ] [ 4K ]                     │ │
-│ └──────────────────────────────────────┘ │
-│                                         │
-│            (preview space)              │
-│                                         │
-│ ┌─ Face / Pose extraction ───────────┐ │
-│ │ Face extraction                    │ │
-│ │ Processing chunk_003 · 3/5 chunks  │ │
-│ │ 1.02x realtime · photo in ~2.1s    │ │  ← live only
-│ │ [━━━━━━━━━━━━░░░░] progress        │ │
-│ │ 60% overall · faces found 12       │ │
-│ └──────────────────────────────────────┘ │
-│ ┌────────┐ ┌────────┐ ┌────────────┐  │
-│ │ Start/ │ │ Import │ │ Gallery(N) │  │
-│ │ Stop   │ │        │ │            │  │
-│ └────────┘ └────────┘ └────────────┘  │
-│              ● ○ ○                      │
-└─────────────────────────────────────────┘
-```
-
-### Status chips (`CompactStatusCard`)
-
-| Chip | ความหมาย |
-|------|----------|
-| **Ch** | จำนวน video chunk ที่อัดเสร็จ |
-| **VQ** | Video queue — chunk รอ Worker 2 |
-| **Fc** / **Ps** | จำนวนเฟรมที่ผ่าน filter (Face / Pose) |
-| **K** | รูปที่ส่งเข้า Gallery แล้ว |
-| **Th** | Thermal |
-| **Disk** | พื้นที่ว่าง (MB) |
-
-แตะ chip เพื่อดู tooltip สั้นๆ ด้านล่าง
-
-### Extraction card (`ProcessingStatusCard`)
-
-| สถานะ | บรรทัดหลัก |
-|--------|------------|
-| Idle | `No processing` |
-| Import | `Importing {name} · splitting N%` |
-| Processing | `Processing {chunk} · X/Y chunks · scan N%` |
-| Done (idle) | `Idle · faces found N` |
-
-- Progress bar: import % หรือ overall processing %
-- **Throughput line** (`Nx realtime`) แสดงเฉพาะ **live capture** — ซ่อนเมื่อมี import session ใน history
-- ไม่แสดง `VQ` ซ้ำใน processing line (มีใน chip แล้ว)
-
-### ปุ่มหลัก
-
-| ปุ่ม | สถานะ | การทำงาน |
-|------|--------|----------|
-| **Start** | idle + permission | เริ่ม live capture |
-| **Stop** | กำลัง capture | หยุดอัด (process ต่อจน queue หมด) |
-| **Processing…** | หลัง stop แต่ยัง process | disabled label |
-| **Allow & Start** | ไม่มี camera permission | ขอ permission |
-| **Import** | pipeline ว่าง | เปิด file picker (`OpenDocument`) |
-| **Importing…** | กำลัง split | disabled |
-| **Gallery (N)** | มีรูปใน gallery | เปิดรูปล่าสุดในแอป Gallery |
-
-### Video pipeline (expand)
-
-- **Face / Pose** — `ExtractionTarget` (เปลี่ยนได้ก่อน Start/Import เท่านั้น)
-- **1080p / 4K** — `StreamResolution` สำหรับ live capture  
-  (import ใช้ auto-detect จากไฟล์ ไม่อิงค่า UI)
-
----
-
-## Page 1 — Clean preview
-
-- `Box` โปร่งใสเต็มจอ — เห็น preview ล้วนๆ ไม่มี card บัง
-- ไม่มี face overlay / AF grid ใน shell ปัจจุบัน
-
----
-
-## Page 2 — Session history (`ChunkHistoryPage`)
-
-แสดง `PipelineSessionRecord` เรียงจาก session ล่าสุด
-
-### Session card
-
-```
-┌─ aa11.mp4 ─────────────── Done ─┐
-│ Import · 4K · 3840×2160 · Face   │
-│ Video 5:30 · 1.2 GB              │
-│ 8 chunks · 12 faces · 3m 45s     │
-│ Found 12 from 2500 frames (0%)   │
-│   · avg 31ms/frame · sample 120ms│
-│ Gallery: DCIM/AutoBots/ext_…     │
-│ [Show chunks ▼]                  │
-│   Chunk #4 · 45.123 s            │
-│   Found 3 from 375 frames …      │
-└──────────────────────────────────┘
-```
-
-| รายการ | หมายเหตุ |
-|--------|----------|
-| Import sessions | แสดงเฉพาะ chunk ที่ `facesKept > 0` เมื่อ expand |
-| Live sessions | แสดงทุก chunk |
-| Chunk expand | รายชื่อ JPEG + ขนาดไฟล์ |
-
----
-
-## Component map
-
-| UI piece | Composable / file | Role |
-|----------|-------------------|------|
-| Shell + pager | `OperatorShellScreen` | 3 overlay pages + dots |
-| Live camera + record | `CameraPreviewPane` | PreviewView, `VideoChunkRecorder` bind |
-| Status + pipeline settings | `CompactStatusCard` | Chips, recording line, Face/Pose, 1080p/4K |
-| Extraction progress | `ProcessingStatusCard` | Import/process progress, throughput |
-| Session list | `ChunkHistoryPage` | Session + chunk history |
-| State | `OperatorViewModel` | Pipeline stats, import, session history |
-| Coordinator | `CapturePipelineCoordinator` | Workers, gallery delivery |
-
-**ไม่ได้ใช้ใน shell ปัจจุบัน** (ยังมีไฟล์ใน repo): `FaceOverlay.kt`, `AfGridOverlay.kt` — จาก MVP burst/zone รุ่นเก่า
-
----
-
-## Primary actions
-
-| Control | Action |
-|---------|--------|
-| **Start / Stop** | Live capture — อัด MP4 chunks → extract → Gallery |
-| **Import** | เลือกวิดีโอจากเครื่อง → split → pipeline เดียวกับ live |
-| **Gallery** | เปิดรูปล่าสุดใน system gallery |
-| **Video pipeline · Show** | Face/Pose + 1080p/4K |
-| **Swipe pager** | Controls ↔ Clean preview ↔ Session history |
-
-ไม่มี manual shutter — live mode อัดวิดีโอต่อเนื่อง; รูปมาจาก offline extract หลัง chunk เสร็จ
-
----
-
-## Remote / HTTP
-
-- Status card แสดง `IP host:8080` (`AutobotsServer`)
-- Remote start/stop + status ผ่าน WebSocket — **ไม่มี screen mirror** (ใช้ scrcpy ดู UI แยก)
+| Page | Code | What it is for |
+|------|------|----------------|
+| **Import preview** | `ImportPreviewPage.kt` | Inspect a clip before spending time on it: size, resolution, length, fps, estimated extract time. Choose detectors + backend, **trim a range**, then Extract. Replaced fire-and-forget importing in v0.1.5 |
+| **Network URL** | `NetworkUrlPage.kt` | Third ingest path — type a URL or scan a QR. Streams by byte-range; downloads whole only when the CDN refuses `MediaHTTPConnection` |
+| **Zone editor** | `ZoneEditorPage.kt` | Draw the capture zone **on the real image** rather than on a grid abstraction. Back discards the edit |
+| **Session history** | `ChunkHistoryPage.kt` | One card per session: kept photos, people counts, realtime ratio, expandable per-chunk detail |
+| **Upload queue** | `UploadQueuePage.kt` | Per-row state, retry, pause. Six states — see [SEQUENCE_FLOW.md §2](./SEQUENCE_FLOW.md) |
+| **Upload settings** | `UploadSettingsPage.kt`, `QrScanPreview.kt` | Sign in, pick the event from a list, provision endpoint + token by QR |
 
 ---
 

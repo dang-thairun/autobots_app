@@ -172,7 +172,7 @@ Copy this into `reports/vX.Y.Z/report.md` and fill in.
 | OQ-01 | | | | | Open |
 
 ## 5. How it works
-<diagram> — detail in [PIPELINE_FLOW.md](../../docs/PIPELINE_FLOW.md)
+<diagram> — detail in [PIPELINE_FLOW.md](./PIPELINE_FLOW.md)
 
 ## 6. Test setup
 | Item | Value |

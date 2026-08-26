@@ -4,50 +4,84 @@ Tripod and operator checklist for AutoBots on site.
 
 | Build | Guide |
 |-------|--------|
-| **v0.1.2 Plan B (current)** | [§ Plan B below](#plan-b--v012-current) + [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) |
+| **Plan B (current, v0.1.6)** | [§ Plan B below](#plan-b--current-v016) + [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) |
 | **v0.1 stills (legacy)** | [§ v0.1 stills below](#v01-stills--legacy) — not active in current operator shell |
 
 Phases: [IMPLEMENTATION.md](./IMPLEMENTATION.md) · Rules: [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ---
 
-## Plan B — v0.1.2 (current)
+## Plan B — current (v0.1.6)
 
-### Before the event
+### Setup — once per device, before you leave
+
+Done indoors on Wi-Fi, not at 4 a.m. in a car park.
+
+1. **Upload settings** → scan the event **QR** (endpoint + token), sign in, **pick the event** from
+   the list. Nothing here should ever be typed by hand.
+2. Send **one test photo** all the way through and confirm it appears on the platform. A token that
+   is wrong fails at the **completion** call — *after* a whole JPEG has been uploaded — so this is
+   not something to discover on mobile data.
+3. Check free storage: **≥ 2 GB** to start, and more for a long session.
+
+### Before the event — on site
 
 1. **Tripod** — stable legs; phone height aimed at runner chest–head in the lane.
-2. **Aim** — subject approaches camera; keep lane centered in frame.
-3. **Storage** — ensure ≥ **2 GB** free (Disk chip); more for long sessions.
-4. **Mode** — expand **Video pipeline**: choose **Face** (default) or **Pose** (experimental); **1080p** vs **4K** for live capture.
-5. **Test** — short Start → Stop; check Session history and Gallery for JPEGs before the race.
+2. **Aim** — subject approaches camera; keep the lane centred. Preview is live as soon as you open
+   the Live page, so you can aim without recording.
+3. **Capture Zone** — draw it on the real image (Edit zone). This is where a runner has to be for a
+   frame to count, so put it where you actually want them composed.
+4. **Detectors** — Face · Pose · Person. **All the gates are AND**: turning on a second detector
+   makes the filter stricter, not more forgiving. Start with Face, add Person when you want everyone
+   in frame to be tracked.
+5. **Resolution** — 1080p or 4K.
+6. **Light** — at dawn, set a **shutter ceiling** before the race. Left alone, auto-exposure stretches
+   the shutter until every runner is a smear and the whole session fails the sharpness gate with
+   nothing to show for it. Nudge **EV** if faces are backlit.
+7. **Test** — a short Start → Stop, then check Session history and the Gallery **before** the race.
+
+> Settings are **IDLE-only** — you cannot change resolution, detectors or backend mid-session.
 
 ### During the event
 
-- **Live:** tap **Start**; monitor **Ch**, **VQ**, **K** chips; Stop when segment ends.
-- If **VQ** fills → recorder auto-pauses until extract catches up (normal under heavy load).
-- **Import:** use for pre-recorded footage; same extract path, folder `ext_DDMMYYYY_HHMM`.
-- Re-check **Disk** chip if storage is tight.
+- **Live:** tap **Start**; watch the chips — **Ch** (chunks) · **VQ** (video queue) · **K** (kept) ·
+  **realtime ratio** · **thermal**.
+- **`realtime ratio` is the number that matters.** Below 1.0 means extraction is keeping up with the
+  camera and you can record indefinitely. Above 1.0 means the queue is growing and the recorder will
+  eventually pause itself.
+- If **VQ** fills → the recorder auto-pauses until extract catches up. Normal under heavy load.
+- **Thermal is display-only** — the app will *not* slow itself down. If it climbs and stays high, that
+  is your decision to make, not the app's.
+- **Upload runs on its own.** It needs no attention and does not block anything. The badge on the
+  Upload tile counts only what is still owed.
+- Screen can be off; the upload worker holds a foreground service.
 
 ### After / retrieve files
 
-- JPEGs: `DCIM/AutoBots/{subfolder}/` — e.g. `ext_v0_1_3_11082026_1228/`
-- Session log: `Download/AutoBots/{subfolder}/session_log.txt`
-- Pull to Mac: `./sync_gallery.sh` (repo root)
-- Mirror UI on laptop: [SCRCPY.md](./SCRCPY.md)
+- JPEGs: `DCIM/AutoBots/{subfolder}/` — e.g. `v0_1_6_26082026_1228/`
+- Session artefacts: `Download/AutoBots/{subfolder}/`
+  — `session_log.txt` (readable on the phone) · `photos.csv` · **`tracks.csv`** · `perf_report.json`
+- **Check `tracks.csv` before calling a session good.** Kept count alone cannot tell you how many
+  people walked past and got nothing; this is the only file that can.
+- Confirm the Upload queue has drained before wiping anything — and note that **nothing is ever
+  deleted locally by the app**, so a full card stays full until you clear it yourself.
+- Pull to Mac: `./sync_gallery.sh` (repo root) · Mirror UI: [SCRCPY.md](./SCRCPY.md)
 
-### What you set vs what the app does (Plan B)
+### What you set vs what the app does
 
 | You (setup) | App (runtime) |
 |-------------|----------------|
-| Tripod aim, height, lane | Record or import video chunks |
-| Face/Pose, 1080p/4K (live) | Sample 120 ms → ML Kit → sharpness → dedup |
-| — | Write JPEGs + session log |
+| Tripod aim, height, lane | Record MP4 chunks (rotate at 50 MB) |
+| Capture Zone, detectors, 1080p/4K | Sample 120 ms → detect → zone + size gate → sharpness |
+| Shutter ceiling, EV | Track each person → score → keep best 3 per track-second |
+| Event + token (once, indoors) | Write JPEGs + CSVs, then upload as a background copy |
+| Decide when it is too hot | Report thermal — but never throttle itself |
 
 ---
 
 ## v0.1 stills — legacy
 
-> **Not wired** in v0.1.2 operator shell. Retained for reference if B4 re-wires burst capture.
+> **Not wired** in the current operator shell. Retained for reference if B4 re-wires burst capture.
 
 ### Before the race
 

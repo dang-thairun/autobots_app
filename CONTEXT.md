@@ -2,11 +2,11 @@
 
 Edge-AI sports camera for marathon / running-event photography on a tripod-mounted Android phone.
 
-**v0.1.2 (Plan B)** terms are listed first. **v0.1 stills** terms follow — still used in legacy code and Design Flows.
+**Plan B** terms are listed first (current build **v0.1.6**). **v0.1 stills** terms follow — still used in legacy code and Design Flows.
 
 ---
 
-## Plan B — v0.1.2 (active operator build)
+## Plan B — active operator build (v0.1.6)
 
 **Pipeline Session** (or **Session**):
 One live capture run or one video import run from Start/Import through extract drain and `session_log.txt` write. Aggregated as `PipelineSessionRecord` in UI history.
@@ -17,11 +17,15 @@ A segment of MP4 produced by `VideoChunkRecorder` (live) or `ImportedVideoSplitt
 _Avoid_: calling chunks "photos", treating chunk count as final face count
 
 **Extraction Target**:
-Offline detect mode for Worker 2: **Face** (default) or **Pose** (experimental). Selected before Start/Import only.
-_Avoid_: "detection mode" without naming Face vs Pose
+Which detectors Worker 2 runs. Since v0.1.6 it is **three independent flags**, not one mode:
+**Face** · **Pose** · **Person** (`foot_track_net`). Any combination may be on, and the gates are
+**AND** — a frame must satisfy every enabled detector. Selected before Start/Import only.
+_Avoid_: calling it a single mode · treating `FaceAndPose` as an enum value (it was one until 0.1.6)
+· assuming the gates are OR
 
 **Kept Frame / Extracted Image**:
-A sampled video frame that passed ML Kit + sharpness + dedup and was written as a full-frame JPEG to gallery. Counted in chip **K** and session `facesKept`.
+A sampled video frame that passed every enabled detector, the zone and size gates, sharpness, and
+per-track dedup — then was written as a full-frame JPEG to gallery. Counted in chip **K** and session `facesKept`.
 _Avoid_: every decoded frame, every detected face before filter
 
 **Sample Interval**:
@@ -38,7 +42,7 @@ _Avoid_: assuming log lives only in DCIM
 
 **Album Subfolder**:
 Per-session directory under `DCIM/AutoBots/`, carrying the app version in its **name** rather than an
-extra directory level. Import: `ext_v0_1_3_DDMMYYYY_HHMM`. Live: `v0_1_3_yyyyMMdd_HHmmss`.
+extra directory level. Import: `ext_v0_1_6_DDMMYYYY_HHMM`. Live: `v0_1_6_yyyyMMdd_HHmmss`.
 The tag comes from `appVersionName` with `.` replaced by `_`, so a field run can always be traced to
 the build that produced it.
 _Avoid_: flat `DCIM/AutoBots` with no subfolder · quoting a path without the version tag · nesting the
@@ -51,6 +55,24 @@ _Avoid_: "upload", treating import as a different product
 **Still Photo Product** (Plan B):
 Operator-deliverable output remains **still JPEGs** in gallery. MP4 recording is an **internal** capture strategy, not a user-facing video product.
 _Avoid_: "video recording is out of scope" without this qualifier (that phrase was v0.1-only)
+
+**Subject Track** (v0.1.6):
+One person followed across sampled frames by `SubjectTracker`, carrying an id, centre, velocity and
+predicted box. **Dedup windows are per track, not per clock second** — two runners passing in the same
+second get their own keep budget instead of sharing one.
+_Avoid_: assuming one second of footage is one runner (that was the pre-0.1.6 assumption, and it
+silently lost the second person)
+
+**Frame Quality** (v0.1.6):
+The single 0..1 score that ranks frames inside a track's dedup window: sharpness 0.40 · subject size
+0.20 · centre 0.15 · confidence 0.15 · edge margin 0.10, each normalised before weighting. Recorded
+per kept photo in `photos.csv` so the weights can be re-fitted against evidence.
+_Avoid_: ranking on sharpness alone (that was the rule up to 0.1.6) · treating the weights as measured
+
+**Track Report** (`tracks.csv`):
+One row per person seen in a session, **including people who produced no photo**. The only artefact
+that measures what the pipeline *missed* rather than what it kept.
+_Avoid_: judging a session by kept count alone
 
 ---
 
@@ -121,16 +143,20 @@ Smile and pose (and related score weights) may remain as feature flags defaultin
 _Avoid_: enabling smile/pose on the default capture path
 
 **Still Photo Product**:
-The operator-facing deliverable is still JPEGs. In v0.1, no video was recorded at all. In Plan B (v0.1.2), video MP4 is internal only.
+The operator-facing deliverable is still JPEGs. In v0.1, no video was recorded at all. In Plan B, video MP4 is internal only.
 _Avoid_: VideoCapture as a gallery product, clip, highlight reel
 
 **Local Delivery**:
-MVP success ends when Kept Photos are written to on-device storage (e.g. DCIM/AutoBots). Operators retrieve files later by cable or file copy — no upload in the MVP path.
-_Avoid_: cloud sync, event server, in-app share as MVP delivery
+Session success ends when Kept Photos are written to on-device storage (e.g. DCIM/AutoBots). This is
+still the definition of a successful session — **Remote Delivery runs after it and never gates it**.
+_Avoid_: treating a session with no network as failed · cloud sync as the success condition
 
-**Future Remote Delivery**:
-A later phase may upload Kept Photos to an event/cloud backend. That is a separate delivery path, not required for MVP Passage success.
-_Avoid_: treating upload as part of current Passage Outcome
+**Remote Delivery** (shipped v0.1.5 — was "Future Remote Delivery"):
+Kept Photos are copied to the event platform after local delivery: a Room queue, one WorkManager job,
+GraphQL presign, PUT to Google Cloud Storage, then a completion call that commits the metadata.
+**Local files are never deleted** — upload is a *copy*, not a *move*, and there is no toggle for it.
+_Avoid_: calling it "future" · treating upload as part of Passage Outcome · assuming Cloudflare R2
+(the platform uses GCS) · assuming we wrote the backend (we did not)
 
 **Android-First Runtime**:
 MVP ships and is validated on Android. Shared domain/pipeline contracts may live in a KMP common layer, but iOS is not an MVP delivery target.
@@ -149,8 +175,10 @@ An operator-selectable setting that chooses Standard vs Max-Sensor Capture Mode.
 _Avoid_: hard-coding a single capture mode, bundling mode switch into Passage logic
 
 **Thermal Throttling**:
-Out of MVP scope. The first shippable path prioritizes correct Passage capture over adaptive thermal backoff; thermal management may return after MVP.
-_Avoid_: requiring ThermalGuard for MVP Passage success
+Not implemented — readout only. The original reason ("throttling would miss runners") was argued for
+the real-time v0.1 path and **does not apply to Plan B**, where the video is already recorded and
+slowing extraction costs backlog rather than people. Status is *"not done yet"*, not *"decided against"*.
+_Avoid_: requiring ThermalGuard for session success · quoting the v0.1 reasoning as if it still holds
 
 **Operator Preview**:
 The on-device live view and basic status the operator uses while aiming the tripod (capture mode, armed/fired state, kept-photo count). Required in MVP — not a headless-only product for first setup.

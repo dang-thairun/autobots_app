@@ -1,6 +1,6 @@
 # Screen mirror ด้วย scrcpy (Mac ↔ Android)
 
-ใช้ดูและควบคุมหน้าจอมือถือที่รัน **AutoBots** บน Mac — ไม่ต้องแก้แอพ (แอพ v0.1.2 ยังไม่มี in-app screen mirror)
+ใช้ดูและควบคุมหน้าจอมือถือที่รัน **AutoBots** บน Mac — ไม่ต้องแก้แอพ (แอปยังไม่มี in-app screen mirror)
 
 อ้างอิง: [OPERATOR_FLOW.md](./OPERATOR_FLOW.md) · [BUILD.md](./BUILD.md)
 

@@ -118,16 +118,20 @@ data class PipelineSessionRecord(
      *    whether five tracks were five humans, since a runner crossing a chunk boundary counts
      *    twice and nothing here re-identifies anyone. Hedging the noun points at the wrong
      *    thing.
-     *  - **"subjects" against "others", not "people" against "others"**, because the others are
-     *    people too — spectators behind the barrier, marshals, crew. "N people · M others"
-     *    reads as though the M were not, which is both wrong and the first thing a reader
-     *    trips over.
+     *  - **"people", not "runners"**. Nothing in the pipeline is specific to running; the same
+     *    rig points at a cycling stage or a parade without a line of code changing, and
+     *    "runners" would have quietly become wrong the first time it did.
      *
-     *    "Runners" was the obvious word and is the wrong one: nothing in the pipeline is
-     *    specific to running, and the same rig points at a cycling stage or a parade without a
-     *    line of code changing. "Subject" is also the vocabulary the code already speaks —
-     *    `SubjectFaceDetector`, `SubjectTracker`, `subjectRatio`, `noSubject` — so the screen
-     *    and the source now name the same thing the same way.
+     *    Not "subjects" either, though that is what the code calls them and what this property
+     *    returns. "Subject" states precisely why only five of fifty-four count — it is the one
+     *    the camera is pointed at — but it has to be known before it can be read, and this line
+     *    is read every day by the operator rather than by whoever wrote the tracker. "People"
+     *    needs no translation. The cost is that it does not explain the subset on its own, and
+     *    the third figure is what covers that: five of a tracked fifty-four, forty-nine others.
+     *
+     *    The internals keep the `Subject` vocabulary — [SubjectCount], `likelySubject`,
+     *    `SubjectTracker` — because there the precision is worth more than the plainness. The
+     *    split is deliberate, not an oversight.
      *  - **"others" rather than "bystanders"**, because that group is not only bystanders. It
      *    also holds runners too distant to measure and anyone seen for a single frame. Naming
      *    it precisely would claim more than the data supports.
@@ -138,7 +142,7 @@ data class PipelineSessionRecord(
      */
     val subjectLine: String?
         get() = subjectCount?.let {
-            "~${it.subjects} subjects · ${it.captured} photographed · ${it.others} others"
+            "~${it.subjects} people · ${it.captured} photographed · ${it.others} others"
         }
 
     val headlineSummary: String

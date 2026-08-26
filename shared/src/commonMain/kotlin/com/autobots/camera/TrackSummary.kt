@@ -94,10 +94,40 @@ data class TrackSummary(
     val movedThrough: Boolean
         get() = displacement >= MOVED_THROUGH_DISPLACEMENT
 
+    /**
+     * Moved through **and** was near enough for the movement to have been a run.
+     *
+     * [movedThrough] alone counts the crowd. Measured on the asicsmeta finish chute: the four
+     * tracks it called "L→R" against forty going the other way were not runners doubling back,
+     * they were **spectators behind the barrier taking a couple of steps** — all of them in the
+     * top tenth of the frame at [meanHeight] 0.13–0.19, moving 0.085–0.156, just over the
+     * displacement bar. Every track that actually produced a photograph measured 0.32–0.81.
+     *
+     * Nothing sat between the two groups, so [RUNNER_MIN_HEIGHT] is set in the middle of an
+     * empty gap rather than on a slope — but it is **one camera angle's gap**. A wider lens or
+     * a lane further from the kerb would put real runners lower, and this would then discard
+     * them silently. [movedThrough] is still reported alongside so the raw figure stays
+     * visible, and `tracks.csv` keeps `meanHeight` per row so the cut can be re-drawn.
+     *
+     * **Being photographed counts as having moved through.** [movedThrough] measures
+     * displacement, and displacement needs two sightings — so a track seen in a single sampled
+     * frame scores exactly zero however obviously it was a runner. That is not a rare corner:
+     * a runner close to the lens crosses the frame in well under the 120 ms sample interval, so
+     * one frame is all there ever was. On the same clip this excluded **9 of the 33 tracks the
+     * pipeline had photographs of** — a count reporting 40 people while the album held pictures
+     * of 49, with the evidence sitting right there. A frame that cleared the face, size,
+     * sharpness and person gates is better evidence of a runner than any displacement figure.
+     */
+    val likelyRunner: Boolean
+        get() = meanHeight >= RUNNER_MIN_HEIGHT && (movedThrough || captured)
+
     companion object {
         private const val PI_F = 3.1415927f
 
         /** @see movedThrough */
         const val MOVED_THROUGH_DISPLACEMENT = 0.10f
+
+        /** @see likelyRunner */
+        const val RUNNER_MIN_HEIGHT = 0.25f
     }
 }

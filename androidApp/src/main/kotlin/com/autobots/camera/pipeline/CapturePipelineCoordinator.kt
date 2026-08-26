@@ -6,6 +6,7 @@ import android.util.Log
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.FrameQuality
+import com.autobots.camera.PeopleCount
 import com.autobots.camera.TrackSummary
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.ExtractionTarget
@@ -927,6 +928,20 @@ class CapturePipelineCoordinator(
      * direction, how fast — are one filter and one count in a spreadsheet. JSON would only earn
      * its nesting if the per-frame path of each track were kept, which it is not.
      */
+    /**
+     * Null unless the person detector ran — see [PipelineSessionRecord.peopleCount].
+     */
+    private fun peopleCount(): PeopleCount? {
+        if (!extractionTarget.usesPerson) return null
+        val rows = synchronized(trackRows) { ArrayList(trackRows) }
+        if (rows.isEmpty()) return null
+        return PeopleCount(
+            runners = rows.count { it.second.likelyRunner },
+            passages = rows.size,
+            captured = rows.count { it.second.likelyRunner && it.second.captured },
+        )
+    }
+
     private fun writeTrackIndex(session: PipelineSessionRecord) {
         val rows = synchronized(trackRows) { ArrayList(trackRows) }
         if (rows.isEmpty()) return
@@ -935,7 +950,8 @@ class CapturePipelineCoordinator(
         val text = buildString {
             appendLine("# ${session.displayName} · ${session.extractionTarget.label} · ${detectorBackend.slug}")
             appendLine(
-                "# passages=${rows.size} movedThrough=$movedThrough captured=$captured " +
+                "# passages=${rows.size} movedThrough=$movedThrough " +
+                    "likelyRunner=${rows.count { it.second.likelyRunner }} captured=$captured " +
                     "chunks=${rows.map { it.first }.distinct().size}",
             )
             // Said here rather than left to be rediscovered: this is an upper bound.
@@ -946,7 +962,7 @@ class CapturePipelineCoordinator(
             appendLine(
                 "chunk,track,firstUs,lastUs,durationUs,frames,firstX,firstY,lastX,lastY," +
                     "velX,velY,speed,directionDeg,direction,displacement,closestToCentre," +
-                    "meanHeight,captured,photos",
+                    "meanHeight,movedThrough,likelyRunner,captured,photos",
             )
             rows.sortedWith(compareBy({ it.first }, { it.second.firstSeenUs })).forEach { (chunk, t) ->
                 appendLine(
@@ -962,6 +978,8 @@ class CapturePipelineCoordinator(
                         String.format(Locale.US, "%.1f", t.directionDegrees),
                         t.directionLabel,
                         f(t.displacement), f(t.closestToCentre), f(t.meanHeight),
+                        if (t.movedThrough) "1" else "0",
+                        if (t.likelyRunner) "1" else "0",
                         if (t.captured) "1" else "0",
                         t.photos.toString(),
                     ).joinToString(","),
@@ -1213,6 +1231,7 @@ class CapturePipelineCoordinator(
             facesSkipped = facesSkippedTotal,
             errorMessage = meta.errorMessage,
             albumFolderName = meta.albumFolderName,
+            peopleCount = peopleCount(),
             chunks = chunks,
         )
     }

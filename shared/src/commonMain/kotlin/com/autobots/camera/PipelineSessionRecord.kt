@@ -54,6 +54,15 @@ data class PipelineSessionRecord(
     val facesSkipped: Int = 0,
     val errorMessage: String? = null,
     val albumFolderName: String = "",
+    /**
+     * People counted this session — null unless the person detector ran.
+     *
+     * Deliberately not filled in for a Face-only session. Tracking still happens there, but
+     * over face boxes, and a face is lost the moment a runner looks down or away; the count
+     * that came out would be a fraction of the truth while looking exactly as authoritative.
+     * Better to show nothing than a number that cannot be believed.
+     */
+    val peopleCount: PeopleCount? = null,
     val chunks: List<ChunkRecord> = emptyList(),
 ) {
     val galleryPath: String
@@ -98,6 +107,18 @@ data class PipelineSessionRecord(
     val detectorLine: String
         get() = "${extractionTarget.label} · ${detectorBackend.hardwareLabel} · " +
             detectorBackend.modelTag(extractionTarget)
+
+    /**
+     * How many people went past, for the history card.
+     *
+     * Both figures, always. The headline number is the filtered one because it is the one that
+     * answers the question, but the raw passage count is what it was filtered *from*, and
+     * hiding it would leave no way to notice the filter going wrong on a new camera angle.
+     */
+    val peopleLine: String?
+        get() = peopleCount?.let {
+            "${it.runners} people · ${it.passages} passages · ${it.captured} photographed"
+        }
 
     val headlineSummary: String
         get() = buildString {
@@ -225,6 +246,7 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
     appendLine("Photos skipped: $facesSkipped")
     detectionSummary?.let { appendLine(it) }
     appendLine(headlineSummary)
+    peopleLine?.let { appendLine(it) }
     if (totalDurationMs > 0) appendLine(timingSummary)
     splitDurationMs.takeIf { it > 0 }?.let {
         val active = (it - splitBlockedMs).coerceAtLeast(0L)
@@ -324,3 +346,18 @@ fun formatVideoDurationMs(ms: Long): String {
         "${sec}s"
     }
 }
+
+/**
+ * The three numbers behind "how many people went past", kept together.
+ *
+ * They are reported as a set on purpose: [runners] alone reads as attendance, which it is not.
+ * See [TrackSummary] for the three reasons a passage is not a person.
+ */
+data class PeopleCount(
+    /** Passages that moved through and were close enough to have been running. */
+    val runners: Int,
+    /** Every distinct thing the tracker followed, bystanders included. */
+    val passages: Int,
+    /** Of [runners], how many came away with at least one photograph. */
+    val captured: Int,
+)

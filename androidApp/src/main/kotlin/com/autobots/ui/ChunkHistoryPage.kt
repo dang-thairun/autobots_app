@@ -192,6 +192,15 @@ private fun SessionRecordCard(
             style = MaterialTheme.typography.labelMedium,
         )
 
+        // Only present when the person detector ran — see PipelineSessionRecord.peopleCount.
+        session.peopleLine?.let { people ->
+            Text(
+                text = people,
+                color = Color(0xFF69F0AE),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
         session.detectionSummary?.let { detection ->
             Text(
                 text = detection,

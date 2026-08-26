@@ -109,15 +109,30 @@ data class PipelineSessionRecord(
             detectorBackend.modelTag(extractionTarget)
 
     /**
-     * How many people went past, for the history card.
+     * How many runners went past, for the history card.
      *
-     * Both figures, always. The headline number is the filtered one because it is the one that
-     * answers the question, but the raw passage count is what it was filtered *from*, and
-     * hiding it would leave no way to notice the filter going wrong on a new camera angle.
+     * Three words chosen against three earlier attempts, all of which misled:
+     *
+     *  - **`~` rather than "likely"**, because the doubt is about the *number*, not about
+     *    whether they are people. The detector is right that they are; what is uncertain is
+     *    whether five tracks were five humans, since a runner crossing a chunk boundary counts
+     *    twice and nothing here re-identifies anyone. Hedging the noun points at the wrong
+     *    thing.
+     *  - **"runners" against "others", not "people" against "others"**, because the others are
+     *    people too — spectators behind the barrier, marshals, crew. "N people · M others"
+     *    reads as though the M were not, which is both wrong and the first thing a reader
+     *    trips over.
+     *  - **"others" rather than "bystanders"**, because that group is not only bystanders. It
+     *    also holds runners too distant to measure and anyone seen for a single frame. Naming
+     *    it precisely would claim more than the data supports.
+     *
+     * The raw total stays on screen: it is what the count was filtered *from*, and without it
+     * there is no way to notice the filter misfiring on a camera angle it was never measured
+     * against.
      */
     val peopleLine: String?
         get() = peopleCount?.let {
-            "${it.runners} people · ${it.passages} passages · ${it.captured} photographed"
+            "~${it.runners} runners · ${it.captured} photographed · ${it.others} others"
         }
 
     val headlineSummary: String
@@ -360,4 +375,7 @@ data class PeopleCount(
     val passages: Int,
     /** Of [runners], how many came away with at least one photograph. */
     val captured: Int,
-)
+) {
+    /** Everything tracked that was not counted as a runner — the crowd, and the far away. */
+    val others: Int get() = (passages - runners).coerceAtLeast(0)
+}

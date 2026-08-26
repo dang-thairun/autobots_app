@@ -300,6 +300,7 @@ class CapturePipelineCoordinator(
                             photo.quality.confidence
                                 ?.let { String.format(Locale.US, "%.4f", it) } ?: "",
                             String.format(Locale.US, "%.4f", photo.quality.framing),
+                            photo.trackId.toString(),
                         ).joinToString(",")
                     }
                     facesKept += result.kept
@@ -902,7 +903,7 @@ class CapturePipelineCoordinator(
             )
             appendLine(
                 "file,chunk,ptsUs,score,scoreLogit,sharpness,subjectRatio," +
-                    "quality,qSharpness,qSize,qCentre,qConfidence,qFraming",
+                    "quality,qSharpness,qSize,qCentre,qConfidence,qFraming,track",
             )
             rows.forEach { appendLine(it) }
         }

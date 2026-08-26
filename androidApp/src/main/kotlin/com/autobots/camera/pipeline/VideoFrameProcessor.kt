@@ -10,6 +10,8 @@ import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.FrameQuality
 import com.autobots.camera.StreamResolution
+import com.autobots.camera.SubjectTracker
+import com.autobots.camera.TrackedBox
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.detection.OfflineFaceDetector
@@ -49,6 +51,12 @@ data class SavedPhoto(
     val score: Float?,
     /** What actually decided this frame outranked the others in its window. */
     val quality: FrameQuality.Score,
+    /**
+     * Which runner this is, within the chunk. Ids restart per chunk and mean nothing across
+     * them — but two photos of one runner sharing an id is the check that the per-track
+     * windowing did what it claims, and it cannot be made after the fact.
+     */
+    val trackId: Int,
 )
 
 data class VideoProcessResult(
@@ -244,6 +252,7 @@ class VideoFrameProcessor(
                     subjectRatio = it.subjectRatio,
                     score = it.score,
                     quality = it.quality,
+                    trackId = it.trackId,
                 )
             },
             framesSampled = scannedFrames,
@@ -372,6 +381,8 @@ class VideoFrameProcessor(
                         subjectRatio = candidate.subjectRatio,
                         score = candidate.score,
                         quality = candidate.quality,
+                        trackBoxes = candidate.trackBoxes,
+                        subjectIndex = candidate.subjectIndex,
                     ),
                 )
             } catch (t: Throwable) {
@@ -389,50 +400,83 @@ class VideoFrameProcessor(
     /**
      * Dedup, applied once per chunk instead of once per streaming frame.
      *
-     * Windows are anchored on the first candidate and closed after [DEDUP_WINDOW_US], keeping
-     * the [MAX_KEEP_PER_WINDOW] **best**. Because the input is sorted by PTS first, the
-     * outcome is independent of the order workers happened to finish in.
+     * Two questions, in order: **who is in each frame**, then **which of their frames to keep**.
      *
-     * "Best" meant *sharpest* through 0.1.6, and only sharpest — every other measurement the
-     * pipeline had already paid for was discarded at exactly the moment it chose. It now means
-     * [FrameQuality.Score.total], which folds in subject size, composition, detector
-     * confidence and edge clearance alongside sharpness. See [FrameQuality] for why each term
-     * is normalised and why the weights are recorded per photo rather than trusted.
+     * *Who* is [SubjectTracker], run over the whole chunk in PTS order once every worker has
+     * finished. Offline is the easy case — every detection is already in hand — and it is the
+     * reason the parallel, out-of-order detect workers cost nothing here.
+     *
+     * *Which* is a window of [DEDUP_WINDOW_US] keeping the [MAX_KEEP_PER_WINDOW] **best**, and
+     * the two things that phrase means have both changed:
+     *
+     *  - The window used to be a second **of the clock**, which quietly assumed a second of
+     *    footage is one runner. Two runners in the same second shared one budget of three, so
+     *    all three keepers could be the nearer of them and the other was never photographed —
+     *    while every counter reported a healthy yield. It is now a second **of one runner's
+     *    frames**, and they get three each.
+     *  - "Best" meant *sharpest*, and only sharpest, through 0.1.6. It now means
+     *    [FrameQuality.Score.total] — subject size, composition, detector confidence and edge
+     *    clearance alongside sharpness. See [FrameQuality] for why each term is normalised and
+     *    why the weights are recorded per photo rather than trusted.
      */
     private fun selectKeepers(
         candidates: List<SavedCandidate>,
         skipped: AtomicInteger,
     ): List<SavedCandidate> {
         val byPts = synchronized(candidates) { ArrayList(candidates) }.sortedBy { it.timestampUs }
-        val keepers = mutableListOf<SavedCandidate>()
-        val window = mutableListOf<SavedCandidate>()
-        var windowStartUs = -1L
+        if (byPts.isEmpty()) return emptyList()
 
-        fun closeWindow() {
-            if (window.isEmpty()) return
-            for ((index, entry) in window.sortedByDescending { it.quality.total }.withIndex()) {
-                if (index < MAX_KEEP_PER_WINDOW) {
-                    keepers.add(entry)
-                } else {
-                    skipped.incrementAndGet()
-                    entry.file.delete()
+        // Identity first, selection second. The tracker has to see the frames in capture order
+        // and it has to see *every* observed box, not only the subject's, or a runner loses
+        // their id in the frames where someone else was the subject.
+        val tracker = SubjectTracker()
+        val trackOf = HashMap<Long, Int>(byPts.size)
+        for (candidate in byPts) {
+            val ids = tracker.assign(candidate.timestampUs, candidate.trackBoxes)
+            tracker.commit(candidate.timestampUs, candidate.trackBoxes, ids)
+            ids.getOrNull(candidate.subjectIndex)?.let {
+                trackOf[candidate.timestampUs] = it
+                candidate.trackId = it
+            }
+        }
+
+        // One budget per runner, not one per second. A window is still [DEDUP_WINDOW_US] long,
+        // but it is now a window *of that runner's frames*, so two people going past together
+        // get [MAX_KEEP_PER_WINDOW] photos each instead of sharing three between them.
+        val keepers = HashSet<Long>()
+        for ((_, frames) in byPts.groupBy { trackOf[it.timestampUs] ?: UNTRACKED }) {
+            var windowStartUs = -1L
+            val window = mutableListOf<SavedCandidate>()
+
+            fun closeWindow() {
+                if (window.isEmpty()) return
+                window.sortedByDescending { it.quality.total }
+                    .take(MAX_KEEP_PER_WINDOW)
+                    .forEach { keepers.add(it.timestampUs) }
+                window.clear()
+            }
+
+            for (entry in frames) {
+                if (windowStartUs < 0 || entry.timestampUs - windowStartUs >= DEDUP_WINDOW_US) {
+                    closeWindow()
+                    windowStartUs = entry.timestampUs
                 }
+                window.add(entry)
             }
-            window.clear()
+            closeWindow()
         }
 
+        val kept = byPts.filter { it.timestampUs in keepers }
         for (entry in byPts) {
-            if (windowStartUs < 0 || entry.timestampUs - windowStartUs >= DEDUP_WINDOW_US) {
-                closeWindow()
-                windowStartUs = entry.timestampUs
+            if (entry.timestampUs !in keepers) {
+                skipped.incrementAndGet()
+                entry.file.delete()
             }
-            window.add(entry)
         }
-        closeWindow()
         // Deliver in capture order, not in the quality order the windows ranked them by.
         // Sorting on the file name would be wrong: PTS values have differing digit counts,
         // so "..._1200000.jpg" sorts before "..._960000.jpg" lexicographically.
-        return keepers.sortedBy { it.timestampUs }
+        return kept
     }
 
     /**
@@ -461,6 +505,8 @@ class VideoFrameProcessor(
         var faceScore: Float? = null
         var torsoBox: Rect? = null
         var personBox: Rect? = null
+        /** Everything the person detector saw in the zone this frame — the tracker's input. */
+        var observed: List<Rect> = emptyList()
         var subjectRatio = 0f
         var reject: String? = null
 
@@ -524,20 +570,28 @@ class VideoFrameProcessor(
                 // for a runner whose body is nowhere in shot, which is the reverse of the
                 // check. With no face, the largest person in the zone is the subject.
                 val anchor = faceBox
-                val relevant = when {
-                    anchor != null -> people.filter { it.bounds.contains(anchor.centerX(), anchor.centerY()) }
-                    zone != null -> people.filter {
+                // Everyone in the lane, kept whole — this list is what the tracker sees, and it
+                // has to include the people this frame is *not* being kept for. A runner keeps
+                // their identity across the frames where someone else is the subject only if
+                // they are still being observed in those frames.
+                val inZone = zone?.let { z ->
+                    people.filter {
                         val b = it.bounds
-                        zone!!.containsCentre(b.left, b.top, b.right, b.bottom, detectWidth, detectHeight)
+                        z.containsCentre(b.left, b.top, b.right, b.bottom, detectWidth, detectHeight)
                     }
-                    else -> people
+                } ?: people
+                observed = inZone.map { it.bounds }
+                val relevant = if (anchor != null) {
+                    inZone.filter { it.bounds.contains(anchor.centerX(), anchor.centerY()) }
+                } else {
+                    inZone
                 }
                 val largest = relevant.maxByOrNull { it.bounds.height() }
                 if (largest == null) {
                     // Not "the model is broken" — in the combined mode it means the face that
                     // passed has no body under it that the detector can resolve, which is
                     // exactly the frame this gate exists to drop.
-                    if (people.isNotEmpty() && anchor == null && zone != null) {
+                    if (people.isNotEmpty() && anchor == null && zone != null && inZone.isEmpty()) {
                         rejects.outOfZone.incrementAndGet()
                         reject = "out_of_zone"
                     } else {
@@ -682,9 +736,27 @@ class VideoFrameProcessor(
             edgeMargin = edgeMargin,
         )
 
+        // Who the tracker should follow this frame. With a person detector running that is
+        // everyone in the zone, and the subject is one of them; otherwise the only box the
+        // frame has is the subject's own. Normalised, so a track means the same thing whatever
+        // the detect bitmap happened to be.
+        val trackRects = observed.ifEmpty { listOf(subjectBox) }
+        val subjectIndex = trackRects.indexOf(personBox ?: subjectBox).coerceAtLeast(0)
+        val trackBoxes = trackRects.map { it.normalisedIn(detectWidth, detectHeight) }
+
         logFrame(timestampUs, "candidate", sharpness, subjectRatio, faceScore)
-        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio, faceScore, quality)
+        return FrameCandidate(
+            timestampUs, upright, sharpness, subjectRatio, faceScore, quality,
+            trackBoxes, subjectIndex,
+        )
     }
+
+    private fun Rect.normalisedIn(width: Int, height: Int): TrackedBox = TrackedBox(
+        left = if (width > 0) left.toFloat() / width else 0f,
+        top = if (height > 0) top.toFloat() / height else 0f,
+        right = if (width > 0) right.toFloat() / width else 0f,
+        bottom = if (height > 0) bottom.toFloat() / height else 0f,
+    )
 
     /**
      * Whether a box sits clear of the frame edges.
@@ -992,6 +1064,10 @@ class VideoFrameProcessor(
         /** Detector confidence for the face this frame was kept for; null on ML Kit. */
         val score: Float?,
         val quality: FrameQuality.Score,
+        /** Everyone observed this frame, for [SubjectTracker]. */
+        val trackBoxes: List<TrackedBox>,
+        /** Which of [trackBoxes] is the subject this frame was kept for. */
+        val subjectIndex: Int,
     )
 
     /** A candidate already on disk, waiting to be ranked against the rest of its window. */
@@ -1002,6 +1078,9 @@ class VideoFrameProcessor(
         val subjectRatio: Float,
         val score: Float?,
         val quality: FrameQuality.Score,
+        val trackBoxes: List<TrackedBox>,
+        val subjectIndex: Int,
+        var trackId: Int = UNTRACKED,
     )
 
     /** Atomic because every detect worker reports into the same tally. */
@@ -1049,6 +1128,9 @@ class VideoFrameProcessor(
     companion object {
         private const val TAG = "VideoFrameProcessor"
         private const val DEDUP_WINDOW_US = 1_000_000L
+
+        /** Bucket for candidates the tracker could not give an id to — windowed by clock. */
+        private const val UNTRACKED = 0
 
         /**
          * Detect workers running alongside the decoder.

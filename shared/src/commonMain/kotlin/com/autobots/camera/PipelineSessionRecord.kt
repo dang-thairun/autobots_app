@@ -89,18 +89,15 @@ data class PipelineSessionRecord(
         get() = videoDimensionsLabel?.let { "${resolution.label} · $it" } ?: resolution.label
 
     /**
-     * What detected frames this session. Pose always runs ML Kit pose-detection;
-     * Face uses [detectorBackend] (ML Kit / GPU / NPU) and that backend's model.
+     * What detected frames this session.
+     *
+     * Only Face follows [detectorBackend]; Pose is always ML Kit on the CPU and Person is
+     * always `foot_track_net`. The hardware label is therefore reported once, for the whole
+     * session, and the model list says which of them the backend actually applies to.
      */
     val detectorLine: String
-        get() = when (extractionTarget) {
-            ExtractionTarget.Pose -> "Pose · ML Kit · pose-detection"
-            ExtractionTarget.Face ->
-                "Face · ${detectorBackend.hardwareLabel} · ${detectorBackend.modelName}"
-            ExtractionTarget.FaceAndPose ->
-                "Face + Pose · ${detectorBackend.hardwareLabel} · " +
-                    "${detectorBackend.modelName} + pose-detection"
-        }
+        get() = "${extractionTarget.label} · ${detectorBackend.hardwareLabel} · " +
+            detectorBackend.modelTag(extractionTarget)
 
     val headlineSummary: String
         get() = buildString {

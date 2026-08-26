@@ -58,8 +58,17 @@ import com.autobots.camera.ExtractionTarget
 /** Miniature of the frame in the card — big enough to recognise the lane, no bigger. */
 private val ZonePreviewHeight = 150.dp
 
-/** One switch per detector. [ExtractionTarget.FaceAndPose] is both switches on, not a row. */
-private val DetectionRows = listOf(ExtractionTarget.Face, ExtractionTarget.Pose)
+/**
+ * One switch per detector, and the combinations are the switches — not extra rows.
+ *
+ * Each entry names the single flag its row owns, so the row list and
+ * [ExtractionTarget]'s flags stay one-to-one as detectors are added.
+ */
+private val DetectionRows = listOf(
+    ExtractionTarget.Face,
+    ExtractionTarget.Pose,
+    ExtractionTarget.Person,
+)
 
 /** Tall enough for the three-line values (label + 3 × 11.sp) and no taller. */
 private val StatChipHeight = 54.dp
@@ -112,12 +121,12 @@ fun ImportPreviewPage(
     var poseOn by remember(pending?.uri, state.extractionTarget) {
         mutableStateOf(state.extractionTarget.usesPose)
     }
-    val enabledTarget: ExtractionTarget? = when {
-        faceOn && poseOn -> ExtractionTarget.FaceAndPose
-        faceOn -> ExtractionTarget.Face
-        poseOn -> ExtractionTarget.Pose
-        else -> null
+    var personOn by remember(pending?.uri, state.extractionTarget) {
+        mutableStateOf(state.extractionTarget.usesPerson)
     }
+    val enabledTarget: ExtractionTarget? =
+        ExtractionTarget(usesFace = faceOn, usesPose = poseOn, usesPerson = personOn)
+            .takeIf { !it.isEmpty }
     var expandedTarget by remember(pending?.uri) {
         mutableStateOf<ExtractionTarget?>(null)
     }
@@ -345,6 +354,7 @@ fun ImportPreviewPage(
                         }
                         val checked = when (option) {
                             ExtractionTarget.Pose -> poseOn
+                            ExtractionTarget.Person -> personOn
                             else -> faceOn
                         }
                         val scored = option == ExtractionTarget.Face && backend.usesLiteRt
@@ -364,6 +374,7 @@ fun ImportPreviewPage(
                             onCheckedChange = { on ->
                                 when (option) {
                                     ExtractionTarget.Pose -> poseOn = on
+                                    ExtractionTarget.Person -> personOn = on
                                     else -> faceOn = on
                                 }
                                 if (!on && expandedTarget == option) expandedTarget = null

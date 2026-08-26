@@ -969,7 +969,7 @@ class CapturePipelineCoordinator(
             // Config that the numbers must be read against.
             put("resolutionLabel", session.resolution.label)
             put("resolution", session.resolution.name)
-            put("extractionTarget", session.extractionTarget.name)
+            put("extractionTarget", session.extractionTarget.slug)
             put("detectorBackend", detectorBackend.slug)
             put("sampleIntervalMs", session.resolution.frameSampleIntervalMs)
             put("chunkTargetBytes", session.resolution.chunkTargetBytes)

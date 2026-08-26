@@ -404,11 +404,11 @@ internal fun estimateImportWallMs(
     }
     // Pose is ML Kit on the CPU whatever the backend. In the combined mode it runs only on
     // frames the face gate already passed, so it costs a fraction of a full pose pass.
-    val poseMul = when (target) {
-        ExtractionTarget.Pose -> 1.3
-        ExtractionTarget.FaceAndPose -> 1.5
-        ExtractionTarget.Face -> 1.0
-    }
+    // Person is foot_track_net on the same NPU as face and costs about what face costs;
+    // running both is close to two passes rather than one.
+    var poseMul = 1.0
+    if (target.usesPose) poseMul *= if (target.usesFace) 1.5 else 1.3
+    if (target.usesPerson) poseMul *= if (target.enabledCount > 1) 1.8 else 1.1
     val rotated = rotationDegrees == 90 || rotationDegrees == 270
     val longEdge = maxOf(
         if (rotated) height else width,

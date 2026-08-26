@@ -1338,12 +1338,7 @@ private fun CompactStatusCard(
             StatChip(
                 label = state.extractionTarget.statLabel,
                 value = "${state.facesKept}",
-                tooltip = when (state.extractionTarget) {
-                    ExtractionTarget.Face -> "เฟรมที่คัดได้ — มีหน้าและชัดพอ"
-                    ExtractionTarget.Pose -> "เฟรมที่คัดได้ — มีท่าทางและชัดพอ"
-                    ExtractionTarget.FaceAndPose ->
-                        "เฟรมที่คัดได้ — มีทั้งหน้าและลำตัวครบ และชัดพอ"
-                },
+                tooltip = extractionTooltip(state.extractionTarget),
                 highlight = state.facesKept > 0,
                 active = activeTooltip,
                 onTooltip = { activeTooltip = it },
@@ -1425,7 +1420,7 @@ private fun CompactStatusCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ExtractionTarget.entries.forEach { target ->
+                    ExtractionTarget.PRESETS.forEach { target ->
                         FilterChip(
                             selected = state.extractionTarget == target,
                             onClick = { onExtractionTarget(target) },
@@ -1578,4 +1573,16 @@ private fun OperatorShellPreview() {
             onClearUploadConfig = {},
         )
     }
+}
+
+/** What the kept-count chip means, in the operator's language. */
+private fun extractionTooltip(target: ExtractionTarget): String = buildString {
+    append("เฟรมที่คัดได้ — ")
+    val parts = buildList {
+        if (target.usesFace) add("มีหน้า")
+        if (target.usesPose) add("ลำตัวครบ")
+        if (target.usesPerson) add("เจอตัวคน")
+    }
+    append(if (parts.isEmpty()) "ยังไม่ได้เลือกตัวตรวจจับ" else parts.joinToString(" และ "))
+    if (parts.isNotEmpty()) append(" และชัดพอ")
 }

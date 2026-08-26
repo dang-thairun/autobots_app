@@ -15,6 +15,7 @@ import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.detection.OfflineFaceDetector
 import com.autobots.camera.detection.SubjectFaceDetector
 import com.autobots.camera.detection.OfflinePoseDetector
+import com.autobots.camera.detection.PersonFootDetector
 import com.autobots.camera.detection.PoseDetectionResult
 import com.autobots.camera.perf.CamPerf
 import com.autobots.camera.perf.DvfsProbe
@@ -280,8 +281,21 @@ class VideoFrameProcessor(
      * What actually ran, as opposed to what was asked for — see [PerfReport.ChunkDiag.detector].
      * Read from the first worker; they are all built the same way.
      */
-    private fun detectorDiagnostics(): Map<String, Any> =
-        mapOf("backend" to backend.slug) + (detectors.firstOrNull()?.face?.diagnostics ?: emptyMap())
+    private fun detectorDiagnostics(): Map<String, Any> {
+        val set = detectors.firstOrNull()
+        // Only ask a detector that this target actually runs: the fields are lazy, and reading
+        // one here would load a model the session never used and report it as if it had.
+        val face = if (target.usesFace) set?.face?.diagnostics.orEmpty() else emptyMap()
+        val person = if (target.usesPerson) {
+            set?.person?.diagnostics
+                ?.mapKeys { (k, _) -> "person_$k" }
+                // Distinguishable from "never asked": the gate ran and had nothing to run with.
+                ?: mapOf("person_unavailable" to true)
+        } else {
+            emptyMap()
+        }
+        return mapOf("backend" to backend.slug, "target" to target.slug) + face + person
+    }
 
     /**
      * Detect workers each need their own ML Kit clients, and loading those models is not
@@ -446,6 +460,7 @@ class VideoFrameProcessor(
         var faceBox: Rect? = null
         var faceScore: Float? = null
         var torsoBox: Rect? = null
+        var personBox: Rect? = null
         var subjectRatio = 0f
         var reject: String? = null
 
@@ -490,6 +505,61 @@ class VideoFrameProcessor(
                     } else {
                         faceBox = largest.bounds
                         faceScore = largest.score
+                    }
+                }
+            }
+
+            if (reject == null && target.usesPerson) {
+                val people = try {
+                    CamPerf.timed(perf, "detect_person") {
+                        set.person?.detect(detectBmp).orEmpty()
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Person detect failed at ${timestampUs}us", t)
+                    emptyList()
+                }
+                // With a face already chosen, the person gate is a *confirmation* of that
+                // face, not a second independent search: the box has to be the body belonging
+                // to it. Otherwise a spectator elsewhere in the frame would satisfy the gate
+                // for a runner whose body is nowhere in shot, which is the reverse of the
+                // check. With no face, the largest person in the zone is the subject.
+                val anchor = faceBox
+                val relevant = when {
+                    anchor != null -> people.filter { it.bounds.contains(anchor.centerX(), anchor.centerY()) }
+                    zone != null -> people.filter {
+                        val b = it.bounds
+                        zone!!.containsCentre(b.left, b.top, b.right, b.bottom, detectWidth, detectHeight)
+                    }
+                    else -> people
+                }
+                val largest = relevant.maxByOrNull { it.bounds.height() }
+                if (largest == null) {
+                    // Not "the model is broken" — in the combined mode it means the face that
+                    // passed has no body under it that the detector can resolve, which is
+                    // exactly the frame this gate exists to drop.
+                    if (people.isNotEmpty() && anchor == null && zone != null) {
+                        rejects.outOfZone.incrementAndGet()
+                        reject = "out_of_zone"
+                    } else {
+                        rejects.noSubject.incrementAndGet()
+                        reject = "no_subject"
+                    }
+                } else {
+                    val personRatio = largest.bounds.height().toFloat() / detectHeight
+                    if (!target.usesFace) subjectRatio = personRatio
+                    if (personRatio < MIN_PERSON_HEIGHT_RATIO) {
+                        rejects.tooSmall.incrementAndGet()
+                        reject = "too_small"
+                    } else if (target.enabledCount > 1 &&
+                        !isFullyFramed(largest.bounds, detectWidth, detectHeight)
+                    ) {
+                        // The whole reason to spend a person detector on a face session: the
+                        // face can sit comfortably inside the frame while the body under it is
+                        // cut off at the edge. Only the body box can see that.
+                        rejects.cropped.incrementAndGet()
+                        reject = "cropped"
+                    } else {
+                        personBox = largest.bounds
                     }
                 }
             }
@@ -546,7 +616,7 @@ class VideoFrameProcessor(
         // highest-frequency region in the frame and the one a buyer judges; scoring the union
         // with the torso would dilute it with flat fabric and invalidate every MIN_SHARPNESS
         // value tuned so far.
-        val subjectBox = faceBox ?: torsoBox ?: return null
+        val subjectBox = faceBox ?: torsoBox ?: personBox ?: return null
 
         // Only here, past the detect-space gates, does the frame earn a full-resolution decode.
         val upright = uprightFullFrame(frame) ?: run {
@@ -585,7 +655,11 @@ class VideoFrameProcessor(
         // Edge clearance uses the **widest** box available — framing is a fact about the body,
         // not the head. A face can sit comfortably inside the frame while the legs below it are
         // cut off, which is precisely the shot this term exists to rank down.
-        val framingBox = torsoBox ?: subjectBox
+        //
+        // In a Face-only session there is no body box and this term is a constant 1.0 for every
+        // frame, contributing nothing to the ranking. That is not a bug but it is a limit, and
+        // it is the strongest practical argument for turning the person gate on.
+        val framingBox = personBox ?: torsoBox ?: subjectBox
         val edgeMargin = FrameQuality.edgeMarginOf(
             framingBox.left.toFloat(), framingBox.top.toFloat(),
             framingBox.right.toFloat(), framingBox.bottom.toFloat(),
@@ -595,7 +669,11 @@ class VideoFrameProcessor(
             sharpness = sharpness,
             sharpnessFloor = profile.minSharpness,
             subjectRatio = subjectRatio,
-            minSubjectRatio = if (target.usesFace) profile.minFaceHeightRatio else MIN_TORSO_HEIGHT_RATIO,
+            minSubjectRatio = when {
+                target.usesFace -> profile.minFaceHeightRatio
+                target.usesPerson -> MIN_PERSON_HEIGHT_RATIO
+                else -> MIN_TORSO_HEIGHT_RATIO
+            },
             centreOffset = centreOffset,
             confidence = faceScore,
             // Only ask the detector once there is a score to rescale: `set.face` is lazy, and
@@ -873,8 +951,16 @@ class VideoFrameProcessor(
     ) {
         private val faceDelegate = lazy { createFace() }
         private val poseDelegate = lazy { OfflinePoseDetector() }
+        private val personDelegate = lazy { PersonFootDetector.create(context, backend) }
         val face: SubjectFaceDetector by faceDelegate
         val pose: OfflinePoseDetector by poseDelegate
+
+        /**
+         * Null when `foot_track_net` cannot start here. The person gate then passes everything
+         * rather than rejecting everything — a missing model must not silently empty a session,
+         * and `perf_report.json` records that it was absent.
+         */
+        val person: PersonFootDetector? by personDelegate
 
         /**
          * Falls back to ML Kit FAST when the requested backend cannot start — a missing model
@@ -894,6 +980,7 @@ class VideoFrameProcessor(
         fun close() {
             if (faceDelegate.isInitialized()) face.close()
             if (poseDelegate.isInitialized()) pose.close()
+            if (personDelegate.isInitialized()) person?.close()
         }
     }
 
@@ -1041,6 +1128,18 @@ class VideoFrameProcessor(
             private const val MIN_FACE_HEIGHT_RATIO_UHD = 0.030f
         private const val MIN_FACE_HEIGHT_RATIO_FHD = 0.035f
         private const val MIN_TORSO_HEIGHT_RATIO = 0.25f
+
+        /**
+         * Smallest person box worth a photo, as a fraction of the detect bitmap's height.
+         *
+         * **Unmeasured**, unlike the face ratios above, and deliberately loose. The kept photos
+         * from run1mins put faces at 0.036–0.050 of frame height; a runner's face is roughly a
+         * seventh of their standing height, which puts the same runners at 0.25–0.35 as a
+         * person box. 0.15 therefore sits well below anything already being kept, so switching
+         * the person gate on cannot quietly discard frames the face gate was passing — which is
+         * the failure that would be hardest to notice. Tighten it once a race has been through.
+         */
+        private const val MIN_PERSON_HEIGHT_RATIO = 0.15f
 
         /** How far a torso must stay from the frame edge to count as fully in shot. */
         private const val EDGE_MARGIN_RATIO = 0.02f

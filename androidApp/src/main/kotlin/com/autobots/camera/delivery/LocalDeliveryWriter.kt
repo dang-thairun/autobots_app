@@ -113,10 +113,15 @@ class LocalDeliveryWriter(
 
     /**
      * MediaStore rewrites DISPLAY_NAME to match MIME_TYPE, so `perf_report.json`
-     * declared as text/plain would land as `perf_report.json.txt`.
+     * declared as text/plain would land as `perf_report.json.txt` — and `photos.csv`
+     * did exactly that until `.csv` was listed here too. Every extension this project
+     * writes needs an entry; the default is the trap, not the safety net.
      */
-    private fun mimeTypeFor(fileName: String): String =
-        if (fileName.endsWith(".json", ignoreCase = true)) "application/json" else "text/plain"
+    private fun mimeTypeFor(fileName: String): String = when {
+        fileName.endsWith(".json", ignoreCase = true) -> "application/json"
+        fileName.endsWith(".csv", ignoreCase = true) -> "text/csv"
+        else -> "text/plain"
+    }
 
     private fun galleryRelativePath(): String =
         SessionAlbumNaming.galleryRelativePath(albumSubfolder)

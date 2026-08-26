@@ -53,6 +53,9 @@ import androidx.compose.ui.layout.ContentScale
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.detection.FaceDetLiteDetector
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.runtime.LaunchedEffect
 import com.autobots.camera.ExtractionTarget
 
 /** Miniature of the frame in the card — big enough to recognise the lane, no bigger. */
@@ -786,9 +789,27 @@ private fun ImportTimeField(
     label: String,
     modifier: Modifier = Modifier,
 ) {
+    // Held as TextFieldValue, not String, so the caret can be placed deliberately.
+    //
+    // [formatTimeInput] rewrites the entire string on every keystroke — "1" becomes "0:01",
+    // then "0:10", then "1:00". A String-valued OutlinedTextField cannot say where the caret
+    // goes after that, so Compose keeps the old offset and it lands in the middle of a value
+    // that has since changed length. The next digit is then inserted mid-string and the field
+    // scrambles: typing 1-0-0-0 into "0:00" yields "10:00:00" rather than "10:00", and editing
+    // an existing value is worse. Pinning the caret to the end after each reformat is the only
+    // position that stays correct, because the end is where the formatter appends.
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    LaunchedEffect(value) {
+        // The caller resets the text when Full length is toggled; follow it without fighting.
+        if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
+    }
     OutlinedTextField(
-        value = value,
-        onValueChange = { onValueChange(formatTimeInput(it)) },
+        value = field,
+        onValueChange = { input ->
+            val formatted = formatTimeInput(input.text)
+            field = TextFieldValue(formatted, TextRange(formatted.length))
+            onValueChange(formatted)
+        },
         modifier = modifier,
         singleLine = true,
         label = { Text(label) },

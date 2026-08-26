@@ -33,6 +33,8 @@ Network URL  ──range───┘                                            
 >
 > **เฟรมข้ามคิวมาเป็น JPEG ไม่ใช่ bitmap** — producer หยุดที่ `nv21_jpeg` แล้ว worker เป็นคน decode: `inSampleSize` สำหรับ detect และ decode เต็มขนาดเฉพาะเฟรมที่ผ่านด่านขนาด
 >
+> **v0.1.6 เพิ่มตัวตรวจจับตัวที่สาม และเปลี่ยนวิธีตัดสินใจว่าจะเก็บรูปไหน** — `foot_track_net` (Person) รันบน NPU เดียวกับ face · การจัดอันดับเลิกใช้ sharpness อย่างเดียวมาเป็นคะแนนรวม 5 ด้าน · หน้าต่าง dedup เปลี่ยนจาก "1 วินาทีของนาฬิกา" เป็น "1 วินาทีของคนคนนั้น" ผ่าน `SubjectTracker` · ดู §1 ท้าย loop และ §5.1
+>
 > **`yuv_nv21` ไม่ใช่คอขวดอีกแล้วตั้งแต่ v0.1.5** — 63.9 → **12.9 ms/เฟรม** (61.7% → 15.9% ของ wall) หลังเปลี่ยนจาก `ByteBuffer.get()` ทีละ byte เป็น bulk row copy พร้อม runtime probe ว่าเครื่องวาง chroma เป็น NV21 หรือ NV12 · ดู §4
 
 ```mermaid
@@ -49,8 +51,9 @@ sequenceDiagram
     participant Sampler as Worker 2P · VideoFrameSampler + MediaCodec
     participant FQ as frameQueue Channel cap=6 — ถือ JPEG
     participant Detect as Worker 2C · detect worker ×2
-    participant Det as DetectorSet — LiteRT NPU (default) / GPU / ML Kit
+    participant Det as DetectorSet — face_det_lite / foot_track_net / ML Kit pose
     participant Sharp as FaceSharpnessScorer CPU
+    participant Trk as SubjectTracker — ท้าย chunk
     participant Sel as selectKeepers — ท้าย chunk
     participant WQ as WriteQueue cap=48
     participant Writer as LocalDeliveryWriter
@@ -63,7 +66,7 @@ sequenceDiagram
         UI->>Coord: CapturePipelineCoordinator.create()
         Coord->>Coord: sessionDir = cache/autobots/{sessionId}, facesDir
         Coord->>VQ: เปิด videoQueue + start Worker 2 loop
-        UI->>Coord: setResolution(FHD/UHD), setExtractionTarget(Face/Pose)
+        UI->>Coord: setResolution(FHD/UHD), setExtractionTarget(Face · Pose · Person — เปิดร่วมกันได้)
         UI->>Recorder: start() ผูก CameraX VideoCapture
         Coord->>Coord: onRecordingStarted() → beginSession(LiveCapture)
         Note over UI: auto-upload switch ล็อกระหว่างอัด — เปลี่ยนกลางคันไม่ได้<br/>KeepScreenOn(active = isCapturing) กันจอดับระหว่างถ่าย
@@ -141,16 +144,40 @@ sequenceDiagram
                 Detect->>Detect: decode(inSampleSize=2) → jpeg_argb_detect 22.7 ms
                 Detect->>Detect: downscale → rotate ที่ 640px — scale_for_detect 2.3 ms
 
-                alt ExtractionTarget = Face
+                Note over Detect,Det: v0.1.6 — ExtractionTarget เป็น **flag set** ไม่ใช่ enum ของคอมบิเนชัน<br/>เปิดพร้อมกันได้ทั้งสาม และทุกด่านเป็น **AND** · ลำดับคือ face → person → pose<br/>(face ตัดทิ้งเยอะสุดและตัดบน NPU · pose แพงสุดเพราะเป็น ML Kit บน CPU)
+
+                opt usesFace
                     Detect->>Det: face.detect(detectBmp) — LiteRT face_det_lite หรือ ML Kit FAST
-                    Det-->>Detect: face bounds
-                    Note over Det: enableTracking ถอดออกตั้งแต่ v0.1.4 — เป็นต้นเหตุของ roiInvalid ทั้งหมด<br/>portrait 4K รัน tileCount 3 → detect 13.9 → 43.3 ms/เฟรม (OQ-05)
-                    Detect->>Detect: เลือก face ใหญ่สุด · subjectRatio ≥ 3.0% (UHD) / 3.5% (FHD)
-                else ExtractionTarget = Pose
+                    Det-->>Detect: face bounds + score (null บน ML Kit)
+                    Note over Det: enableTracking ถอดออกตั้งแต่ v0.1.4 — เป็นต้นเหตุของ roiInvalid ทั้งหมด<br/>portrait 4K รัน tileCount 3 → detect 13.9 → 43.3 ms/เฟรม (OQ-05)<br/>v0.1.6: กรองด้วย zone **ก่อน** เลือกใหญ่สุด และ score ต้อง ≥ minFaceScore
+                    Detect->>Detect: เลือก face ใหญ่สุดในโซน · subjectRatio ≥ 3.0% (UHD) / 3.5% (FHD)
+                end
+
+                opt usesPerson
+                    Detect->>Det: person.detect(detectBmp) — foot_track_net w8a8 บน QNN HTP
+                    Det-->>Detect: person boxes **ของทุกคนในเฟรม**
+                    Note over Det: letterbox ทั้งเฟรมลง 640×480 (ไม่ tile แบบ face — คนตัวสูง tile แล้วขาดกลางตัว)<br/>landscape 640×360 → scale 1.0 ไม่ย่อเลย · portrait 640×1137 → 0.42×<br/>อ่านเฉพาะ heatmap คลาส 1 (person) · คลาส 0 (face) กับ landmark 17 จุดยังไม่ได้ถอด
+                    alt มี face อยู่แล้ว
+                        Detect->>Detect: เอาเฉพาะ person box ที่ **ครอบจุดกึ่งกลางของ face นั้น**
+                        Note over Detect: เป็นการ *ยืนยัน* face ไม่ใช่ค้นหารอบสอง<br/>ไม่งั้นคนดูที่ยืนอยู่อีกมุมจะทำให้เฟรมที่ตัวนักวิ่งไม่อยู่ในภาพผ่านด่านได้
+                    else ไม่มี face
+                        Detect->>Detect: เอา person ใหญ่สุดในโซน · personRatio ≥ 15%
+                    end
+                    opt เปิดตัวตรวจจับมากกว่าหนึ่งตัว
+                        Detect->>Detect: isFullyFramed(personBox) — ห่างขอบ ≥ 2% ทุกด้าน ไม่งั้น rejects.cropped
+                        Note over Detect: เหตุผลหลักที่ควรเปิด person คู่กับ face — face นั่งกลางเฟรมสบาย ๆ ได้<br/>ทั้งที่ตัวถูกตัดขาดที่ขอบ มีแต่กล่องลำตัวเท่านั้นที่มองเห็นเรื่องนี้
+                    end
+                end
+
+                opt usesPose
                     Detect->>Det: pose.detect(detectBmp) — PoseDetector SINGLE_IMAGE
                     Det-->>Detect: torso bounds (ไหล่ + สะโพก)
+                    Note over Det: **เห็นได้คนเดียวต่อเฟรม** ตามสเปกของ ML Kit — คืน PoseDetectionResult? ตัวเดียว<br/>จึงใช้ทำ tracking หลายคนไม่ได้ ต่างจาก person
                     Detect->>Detect: torsoRatio ≥ 25%
                 end
+
+                Detect->>Trk: recordSighting(ptsUs, ทุกกล่องในโซน, subject)
+                Note over Detect,Trk: **บันทึกก่อนด่านตัดสิน** — ถ้าให้ tracker เห็นเฉพาะเฟรมที่ผ่านครบทุกด่าน<br/>คนที่บังเอิญตัวเล็กไป/เบลอไป/ติดขอบ จะหายไปจากสายตา tracker เป็นช่วง ๆ<br/>ช่องว่างพวกนั้นเกิน maxGapUs → คนเดียวแตกเป็น track ละเฟรม<br/>วัดตอนที่ยังผิด: asicsmeta ได้ 139 "คน" ต่อ 32 รูป เกือบทุก track มี frames=1
 
                 alt ไม่พบ subject หรือ subject เล็กเกินไป — TC-16 23%, TC-18 64%
                     Detect->>Detect: rejects.noSubject / tooSmall · skipped++
@@ -169,8 +196,10 @@ sequenceDiagram
                             Detect->>Detect: rejects.tooSoft · skipped++
                             Note over Detect: TC-16: 5,082 เฟรมจ่ายค่า decode เต็มไปแล้วก่อนถูกตัดที่นี่ ≈ 4.4 นาที (OQ-02)
                         else score ผ่าน
-                            Detect->>Detect: saveFrame ทันที → {face|pose}_c###_{ptsUs}.jpg (JPEG 95%) — save_jpeg 106.0 ms
-                            Detect->>Detect: candidates += SavedCandidate(file, sharpness, ptsUs)
+                            Detect->>Detect: FrameQuality.score() — sharpness · size · centre · confidence · framing
+                            Note over Detect: ทุกเทอมนอร์มัลไลซ์เป็น 0..1 ก่อนถ่วงน้ำหนัก เพราะหน่วยเทียบกันไม่ได้<br/>Laplacian variance วิ่ง 65–540 ในคลิปเดียว ส่วนที่เหลือเป็นสัดส่วน/ความน่าจะเป็น<br/>confidence หารด้วยเพดานของ detector เอง (face_det_lite แตะได้สูงสุด 0.853)<br/>centre วัดเทียบ **โซนที่ operator วาด** ไม่ใช่กลางเฟรม
+                            Detect->>Detect: saveFrame ทันที → {face|pose|person}_c###_{ptsUs}.jpg (JPEG 95%) — save_jpeg 106.0 ms
+                            Detect->>Detect: candidates += SavedCandidate(file, sharpness, ptsUs, quality)
                         end
                     end
                 end
@@ -178,13 +207,21 @@ sequenceDiagram
             end
         end
 
-        Note over Sel: worker เสร็จไม่เรียงลำดับ — dedup จึงทำครั้งเดียวหลังทุกตัว join
-        Sel->>Sel: sort candidates ตาม ptsUs
-        loop ทุกหน้าต่าง DEDUP_WINDOW_US (1 s)
-            Sel->>Sel: จัดอันดับตาม sharpness → เก็บ top 3 · ที่เหลือ file.delete() + skipped++
+        Note over Trk,Sel: worker เสร็จไม่เรียงลำดับ — ทั้ง tracking และ dedup จึงทำครั้งเดียวหลังทุกตัว join<br/>**offline คือเคสง่าย**: เห็นทั้ง chunk แล้วค่อยตัดสิน ไม่มี latency budget ให้ป้องกัน
+        Trk->>Trk: sort sightings ตาม ptsUs → assign() ทุกเฟรม ทุกกล่อง
+        loop ทุกเฟรมที่ sample มา
+            Trk->>Trk: pass 1 — IOU เทียบ **กล่องที่ทำนายไว้** (กล่องเดิม + velocity × dt)
+            Trk->>Trk: pass 2 — ระยะจุดกึ่งกลาง + ขนาดใกล้เคียง สำหรับที่ pass 1 จับคู่ไม่ได้
+            Trk->>Trk: จับคู่ไม่ได้เลย = คนใหม่ · ไม่เจอเกิน 600 ms = ปิด track
         end
-        Note over Sel: TC-16: เข้ารหัสไป 12,330 ไฟล์ เก็บจริง 6,578 — ลบทิ้ง 5,752 ไฟล์ที่เขียนลงดิสก์แล้ว ≈ 10 นาที<br/>dedup ตัดสินด้วย sharpness + PTS ซึ่งรู้ทั้งคู่ก่อน encode (OQ-01)<br/>จำนวนรูปถูกจำกัดด้วยจำนวนหน้าต่าง ไม่ใช่จำนวน sample — ต้องขยับ MAX_KEEP_PER_WINDOW (OQ-04)
-        Sel-->>Coord: VideoProcessResult(kept, skipped, framesSampled, durationMs, savedFiles เรียงตาม PTS)
+        Note over Trk: ทำนายก่อนเทียบเป็นเรื่องจำเป็น ไม่ใช่ของแถม — คนวิ่ง 3 m/s ขยับระหว่างสอง sample (120 ms)<br/>**ไกลกว่าความกว้างตัวเอง** ⇒ IOU ดิบเป็น 0 · ถ้าใช้ IOU เฉย ๆ คนเดียวจะแตกเป็น track ละเฟรม<br/>และความพังแบบนั้น**หน้าตาเหมือนทำงานได้** เพราะทุกเฟรมก็ยังมี id ครบ
+        Trk-->>Sel: trackId ของ subject ในแต่ละเฟรม + TrackSummary ทุก track
+        Sel->>Sel: จัดกลุ่ม candidates **ตาม trackId** ไม่ใช่ตามนาฬิกา
+        loop ทุก track · ทุกหน้าต่าง DEDUP_WINDOW_US (1 s) *ของ track นั้น*
+            Sel->>Sel: จัดอันดับตาม quality.total → เก็บ top 3 · ที่เหลือ file.delete() + skipped++
+        end
+        Note over Sel: เดิมหน้าต่างเป็น "1 วินาทีของนาฬิกา" ซึ่งเท่ากับสมมติว่า 1 วินาที = คนเดียว<br/>สองคนวิ่งมาพร้อมกันจึงแชร์โควตา 3 รูป → เก็บคนใกล้ 3 ใบ อีกคนไม่ได้เลย **โดยตัวนับทุกตัวยังบอกว่าปกติ**<br/>run4mins: 9 จาก 23 chunk มีคนเกินหนึ่ง · c22 แยกได้ 4 คน (track 1, 2, 3, 5)<br/>TC-16: เข้ารหัสไป 12,330 ไฟล์ เก็บจริง 6,578 — ลบทิ้ง 5,752 ไฟล์ที่เขียนลงดิสก์แล้ว ≈ 10 นาที (OQ-01)
+        Sel-->>Coord: VideoProcessResult(kept, skipped, framesSampled, durationMs, savedPhotos, **tracks**)
         Coord->>Coord: ChunkRecord.status = Done + metrics
         Coord->>Coord: recordChunkEndToEnd — queue wait · REALTIME RATIO
 
@@ -222,15 +259,22 @@ sequenceDiagram
     Coord->>Coord: finalizeCurrentSession() → status Done หรือ Failed
     Coord->>Coord: buildSessionRecord(chunkHistory) → PipelineSessionRecord
     Coord->>Coord: toLogText() → session_log.txt · buildPerfReport() → perf_report.json
+    Coord->>Coord: writePhotoIndex() → **photos.csv** · writeTrackIndex() → **tracks.csv**
+    Note over Coord: photos.csv = 1 แถวต่อรูปที่เก็บ — score, sharpness, คะแนนย่อยทั้ง 5, `track`<br/>tracks.csv = 1 แถวต่อคนที่ผ่านหน้ากล้อง **รวมคนที่ไม่ได้รูปเลย**<br/>photos.csv ตอบไม่ได้ว่า "พลาดใครไปบ้าง" เพราะบันทึกเฉพาะสิ่งที่เก็บได้<br/>`track` คือสะพานเชื่อมสองไฟล์ · ไม่ซ้ำเฉพาะใน chunk เดียวกัน ต้องใช้คู่ chunk+track
     Coord->>Coord: mirror cache/autobots/{sessionId}/ และ cache/autobots/logs/{subfolder}/
-    Coord->>Writer: publishText(session_log.txt) · publishText(perf_report.json)
+    Coord->>Writer: publishText(session_log.txt · perf_report.json · photos.csv · tracks.csv)
+    Note over Writer: mimeTypeFor() ต้องรู้จักนามสกุลทุกตัว — MediaStore **เขียนชื่อไฟล์ใหม่ให้ตรง MIME**<br/>ประกาศ .csv เป็น text/plain แล้วจะได้ `photos.csv.txt` (บั๊กจริงที่เจอใน v0.1.6)
     Writer->>Store: legacy File → DCIM/AutoBots/{subfolder}/
     alt legacy ไม่สำเร็จ (API 29+)
         Writer->>Store: fallback MediaStore.Downloads → Download/AutoBots/{subfolder}/
     end
     Store-->>Writer: log Uri
     Coord->>UI: onDrainComplete()
-    UI-->>Operator: Session card ใน ChunkHistoryPage — N chunks · X faces · total time
+    UI-->>Operator: Session card ใน ChunkHistoryPage — N chunks · X shots · total time
+    opt เปิด Person detection
+        UI-->>Operator: `~5 people · 3 photographed · 49 others`
+        Note over UI: โชว์เฉพาะตอนเปิด person — โหมด face ล้วนก็ track ได้ แต่ track จากกล่องหน้า<br/>ซึ่งหลุดทันทีที่คนก้มหรือหันข้าง ตัวเลขจะน้อยกว่าจริงมาก แต่หน้าตาน่าเชื่อถือเท่ากัน
+    end
     Note over UQ: การอัปโหลดเดินต่อของมันเองหลัง drain — ดู §2<br/>artifact ทั้งสองไฟล์ถูกเขียนตอนจบ session เท่านั้น ถ้า crash ระหว่างทางจะไม่มีอะไรเหลือ (NA-05)
 ```
 
@@ -479,10 +523,16 @@ videoQueue(8) ──▶ Sampler ──▶ frameQueue(6) ──▶ detect worker 
 | Frame queue | `VideoFrameProcessor.FRAME_QUEUE_CAPACITY` | **6** — ~2 MB/ช่อง (JPEG) |
 | Detect workers | `VideoFrameProcessor.DETECT_WORKERS` | **2** — Compare all บังคับเป็น 1 |
 | **Detector backend** | `DetectorBackend` (เลือกจาก UI) | **LiteRT NPU *(default ตั้งแต่ v0.1.5)*** → GPU → ML Kit FAST · Compare all |
-| Dedup window | `VideoFrameProcessor.DEDUP_WINDOW_US` | 1,000,000 µs |
+| **Extraction target** | `ExtractionTarget` | **flag set ตั้งแต่ v0.1.6** — `usesFace` / `usesPose` / `usesPerson` เปิดร่วมกันได้ ทุกด่านเป็น AND |
+| **Person model** | `PersonFootDetector.ASSET_PATH` | `foot_track_net.tflite` w8a8 · input 640×480×3 · stride 4 · **letterbox ไม่ tile** |
+| **Person threshold** | `PersonFootDetector.DEFAULT_SCORE_THRESHOLD` / `NMS_IOU` | 0.70 / 0.50 — ตามค่า demo ของ Qualcomm · heatmap ผ่าน sigmoid มาแล้ว ไม่ต้องแปลง |
+| Dedup window | `VideoFrameProcessor.DEDUP_WINDOW_US` | 1,000,000 µs — **ต่อ track ตั้งแต่ v0.1.6** ไม่ใช่ต่อนาฬิกา |
 | Keep ต่อ window | `VideoFrameProcessor.MAX_KEEP_PER_WINDOW` | **3** — เพดานของจำนวนรูป ไม่ใช่ sample interval (OQ-04) |
+| **น้ำหนักคะแนน** | `FrameQuality.W_*` | sharpness .40 · size .20 · centre .15 · confidence .15 · framing .10 — **เถียงเอา ยังไม่ได้วัด** |
+| **Tracker** | `SubjectTracker.DEFAULT_IOU` / `_CENTRE_DISTANCE` / `_MAX_GAP_US` | 0.20 / 0.18 เฟรม / 600,000 µs (≈ 5 sample ที่ 120 ms) |
+| **เกณฑ์นับคน** | `TrackSummary.MOVED_THROUGH_DISPLACEMENT` / `SUBJECT_MIN_HEIGHT` | 0.10 / 0.25 — วัดจากมุมกล้องเดียว ดู §7 |
 | Min sharpness | `MIN_SHARPNESS` / `MIN_SHARPNESS_UHD` | 80.0 / 65.0 |
-| Min subject ratio | `MIN_FACE_HEIGHT_RATIO_FHD` / `_UHD` / `MIN_TORSO_HEIGHT_RATIO` | FHD 3.5% · UHD 3.0% / 25% |
+| Min subject ratio | `MIN_FACE_HEIGHT_RATIO_FHD` / `_UHD` / `MIN_TORSO_HEIGHT_RATIO` / `MIN_PERSON_HEIGHT_RATIO` | FHD 3.5% · UHD 3.0% / 25% / **15% (ยังไม่ได้วัด)** |
 | ML Kit min face | `OfflineFaceDetector.setMinFaceSize` | 0.025 (เทียบกับ**ความกว้าง**) |
 | ML Kit tracking | `OfflineFaceDetector` | **ถอดออกแล้ว** — TC-16 และ TC-18 ได้ `roiInvalid` 0 ทั้งคู่ ยืนยันว่าใช่ต้นเหตุ |
 | Detect width | `ProcessProfile.detectBitmapWidth` | 640 px (ทั้ง FHD/UHD) |
@@ -557,7 +607,10 @@ videoQueue(8) ──▶ Sampler ──▶ frameQueue(6) ──▶ detect worker 
 | **ปิดแอป = ต้อง sign in ใหม่** | ตั้งใจ — token ไม่ลงดิสก์ · มี remember credentials ให้ auto sign-in ตอน worker วิ่ง |
 | **requeue สร้าง object ซ้ำ** | server mint UUID เอง ตั้ง key เองไม่ได้ · ต้องแก้ที่ backend |
 | **Clear queue ลบหลักฐาน** | ปุ่ม (กดสองครั้ง) ล้าง `upload_items` ทั้งตาราง · **นั่นคือบันทึกเดียวที่บอกว่าอัปอะไรไปบ้าง** — TC-19 เสียตัวเลข retry/throughput ไปเพราะเรื่องนี้ (OQ-06 / NA-10) |
-| **artifact เขียนตอนจบเท่านั้น** | crash กลางทาง = ไม่มี `session_log.txt` / `perf_report.json` เลย (NA-05) |
+| **artifact เขียนตอนจบเท่านั้น** | crash กลางทาง = ไม่มี `session_log.txt` / `perf_report.json` / `photos.csv` / `tracks.csv` เลย (NA-05) |
+| **ตัวเลขจำนวนคนเป็นค่าประมาณ** | `track` = "หนึ่งครั้งที่ถูกมองเห็นต่อเนื่อง" ไม่ใช่ "หนึ่งคน" · tracker รีเซ็ตทุก chunk ⇒ คนที่วิ่งคาบเกี่ยวถูกนับสองครั้ง · ไม่มี re-identification ⇒ คนที่หายไปนานกลับมาเป็นคนใหม่ · ตั้งใจให้**นับเกิน**มากกว่านับขาด เพราะนับขาดแปลว่ามีคนที่ไม่มีใครถ่ายและไม่มีใครรู้ |
+| **เกณฑ์ `SUBJECT_MIN_HEIGHT` มาจากมุมกล้องเดียว** | asicsmeta (เส้นชัยกลางคืน) แยกสองกลุ่มสะอาด — คนดู 0.13–0.19 · คนที่ได้รูป 0.32–0.81 จึงวางไว้ที่ 0.25 กลางช่องว่าง · **เลนส์กว้างกว่าหรือเลนอยู่ไกลกว่านี้ นักวิ่งจริงจะตัวเล็กลงแล้วโดนตัดเงียบ ๆ** · บรรทัด `N others` บนการ์ดคือตัวเตือน และ `tracks.csv` เก็บ `meanHeight` ทุกแถวไว้ให้ขีดเส้นใหม่ |
+| **ยังไม่ได้ถอด landmark ของ foot_track_net** | โมเดลให้จุด 17 จุด + visibility แต่ model card ไม่ระบุว่า index ไหนคือเท้า · "เห็นเท้า = ติดเต็มตัว" เป็นสัญญาณที่ควรได้ แต่ต้องยืนยัน mapping ก่อน ไม่ใช่เดา |
 | **มือถือ vs Wi-Fi** | constraint เดียวคือ "มีเน็ต" — อัปผ่าน 4G/5G ได้โดยไม่ถาม (NA-02) |
 
 ---

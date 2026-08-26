@@ -136,6 +136,7 @@ object PerfRecovery {
                     } else {
                         f.optDouble("subjectRatio").toFloat()
                     },
+                    score = if (f.isNull("score")) null else f.optDouble("score").toFloat(),
                 )
                 if (f.optBoolean("kept")) kept += pts
             }

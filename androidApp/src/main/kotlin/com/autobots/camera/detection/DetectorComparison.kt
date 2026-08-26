@@ -78,11 +78,16 @@ class DetectorComparison private constructor(
                 JSONObject().apply {
                     put("ms", round3(elapsedNs / 1e6))
                     put("n", boxes.size)
+                    // Scores make two backends comparable on the same frame in a way a count
+                    // cannot: "found 1" says nothing about how close that call was.
+                    boxes.mapNotNull { it.score }.takeIf { it.isNotEmpty() }?.let { scores ->
+                        put("maxScore", round3(scores.max().toDouble()))
+                    }
                     // The pipeline's size gate reads height against the detect bitmap, so
                     // recording the same ratio here makes the two directly comparable.
                     put(
                         "largestHeightRatio",
-                        boxes.maxOfOrNull { it.height() }
+                        boxes.maxOfOrNull { it.bounds.height() }
                             ?.let { round3(it.toDouble() / detectBitmap.height) }
                             ?: JSONObject.NULL,
                     )
@@ -234,9 +239,19 @@ class DetectorComparison private constructor(
             return DetectorComparison(entries, primary, unavailable)
         }
 
-        private fun boxesJson(boxes: List<Rect>) = JSONArray().apply {
-            for (box in boxes.sortedByDescending { it.height() }.take(MAX_BOXES_PER_BACKEND)) {
-                put(JSONArray().apply { put(box.left); put(box.top); put(box.right); put(box.bottom) })
+        /**
+         * `[left, top, right, bottom]`, plus the score as a fifth element where the backend
+         * has one. Rows stay readable by the existing [rectOf], which reads the first four.
+         */
+        private fun boxesJson(boxes: List<DetectedFace>) = JSONArray().apply {
+            for (face in boxes.sortedByDescending { it.bounds.height() }.take(MAX_BOXES_PER_BACKEND)) {
+                val box = face.bounds
+                put(
+                    JSONArray().apply {
+                        put(box.left); put(box.top); put(box.right); put(box.bottom)
+                        face.score?.let { put(round3(it.toDouble())) }
+                    },
+                )
             }
         }
 

@@ -45,6 +45,13 @@ class FaceDetLiteDetector private constructor(
     private val effectiveBackend: DetectorBackend,
     private val heatmapIndex: Int,
     private val bboxIndex: Int,
+    /**
+     * Probability a cell must reach to be considered a face at all.
+     *
+     * Below this the cell is dropped before NMS ever sees it, so raising it cannot recover
+     * anything later in the pipeline — it is the one gate whose rejects leave no trace.
+     */
+    private val minScore: Float,
 ) : SubjectFaceDetector {
 
     private val inputBuffer: ByteBuffer =
@@ -55,6 +62,12 @@ class FaceDetLiteDetector private constructor(
         ByteBuffer.allocateDirect(GRID_W * GRID_H * 4).order(ByteOrder.nativeOrder())
     private val landmarkBuffer: ByteBuffer =
         ByteBuffer.allocateDirect(GRID_W * GRID_H * 10).order(ByteOrder.nativeOrder())
+
+    /**
+     * [minScore] as a raw heatmap value, so the hot loop compares in the model's own units.
+     * Monotone, therefore an identical cut — see [sigmoid].
+     */
+    private val minLogit: Float = logitOf(minScore)
 
     /** Reused across frames; the detect bitmap is a constant size within a session. */
     private var pixelCache = IntArray(0)
@@ -67,9 +80,10 @@ class FaceDetLiteDetector private constructor(
             "requestedBackend" to backend.slug,
             "effectiveBackend" to effectiveBackend.slug,
             "tileCount" to tilesPerFrame,
+            "minScore" to minScore,
         )
 
-    override suspend fun detect(bitmap: Bitmap): List<Rect> {
+    override suspend fun detect(bitmap: Bitmap): List<DetectedFace> {
         val tiles = planTiles(bitmap.width, bitmap.height)
         tilesPerFrame = tiles.size
 
@@ -93,7 +107,7 @@ class FaceDetLiteDetector private constructor(
             }
             decodeTile(tile, found)
         }
-        return nonMaxSuppression(found).map { it.rect }
+        return nonMaxSuppression(found).map { DetectedFace(it.rect, sigmoid(it.score)) }
     }
 
     private fun landmarkOutput(): Map<Int, Any> {
@@ -181,7 +195,7 @@ class FaceDetLiteDetector private constructor(
         for (gy in 0 until GRID_H) {
             for (gx in 0 until GRID_W) {
                 val score = dequantHeatmap(hm.get(gy * GRID_W + gx))
-                if (score < SCORE_THRESHOLD) continue
+                if (score < minLogit) continue
                 if (!isLocalMax(hm, gx, gy, score)) continue
 
                 val base = (gy * GRID_W + gx) * 4
@@ -280,7 +294,32 @@ class FaceDetLiteDetector private constructor(
         private const val BBOX_ZERO_POINT = 9
 
         /** Matches the reference implementation's default. */
-        private const val SCORE_THRESHOLD = 0.55f
+        /**
+         * The cut every result up to v0.1.6 was produced with, expressed as a probability.
+         *
+         * The model's `heatmap` output is **not** a probability: dequantised it spans about
+         * −5.24 … +1.76, i.e. a logit. The original constant was `0.55` **in those units**,
+         * and `sigmoid(0.55) = 0.634`, so this is the same cut written in units an operator
+         * can reason about. Because sigmoid is monotone, nothing about which faces pass has
+         * changed.
+         */
+        const val DEFAULT_SCORE_THRESHOLD = 0.634f
+
+        /**
+         * The highest probability this model can report.
+         *
+         * `(255 - 191) * 0.027428 = 1.755` is the largest value the quantised heatmap can
+         * hold, and `sigmoid(1.755) = 0.853`. A threshold above that rejects every frame —
+         * which is why the UI stops well short of it.
+         */
+        const val MAX_REACHABLE_SCORE = 0.853f
+
+        private fun sigmoid(x: Float): Float = (1.0 / (1.0 + kotlin.math.exp(-x.toDouble()))).toFloat()
+
+        private fun logitOf(p: Float): Float {
+            val clamped = p.coerceIn(0.0001f, 0.9999f).toDouble()
+            return kotlin.math.ln(clamped / (1.0 - clamped)).toFloat()
+        }
         private const val NMS_IOU = 0.3f
 
         /** Fraction of a tile's height shared with the next, so seams do not split faces. */
@@ -294,7 +333,11 @@ class FaceDetLiteDetector private constructor(
          *   libraries absent from the build. The caller reports the reason and falls back
          *   rather than failing the session.
          */
-        fun create(context: Context, backend: DetectorBackend): FaceDetLiteDetector? {
+        fun create(
+            context: Context,
+            backend: DetectorBackend,
+            minScore: Float = DEFAULT_SCORE_THRESHOLD,
+        ): FaceDetLiteDetector? {
             val model = runCatching { loadModel(context) }.getOrElse {
                 Log.e(TAG, "Cannot read $ASSET_PATH", it)
                 return null
@@ -360,7 +403,7 @@ class FaceDetLiteDetector private constructor(
                     "heatmapIdx=$heatmapIndex bboxIdx=$bboxIndex",
             )
             return FaceDetLiteDetector(
-                interpreter, delegate, backend, effective, heatmapIndex, bboxIndex,
+                interpreter, delegate, backend, effective, heatmapIndex, bboxIndex, minScore,
             )
         }
 

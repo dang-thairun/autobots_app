@@ -16,6 +16,7 @@ import com.autobots.camera.VideoPreviewController
 import com.autobots.camera.capture.ChunkCaptureMeta
 import com.autobots.camera.capture.ImportSplitResult
 import com.autobots.camera.capture.ImportedVideoSplitter
+import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.delivery.LocalDeliveryWriter
 import com.autobots.camera.network.RemoteVideoFetcher
 import com.autobots.camera.network.VideoHttp
@@ -48,6 +49,7 @@ import com.autobots.camera.SessionSource
 import com.autobots.camera.SessionStatus
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Collections
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -201,6 +203,10 @@ class CapturePipelineCoordinator(
     private var extractionTarget = ExtractionTarget.Face
     /** Capture Zone, normalised. Null (or full frame) means every corner counts. */
     private var detectZone: DetectZone? = null
+    private var minFaceScore = FaceDetLiteDetector.DEFAULT_SCORE_THRESHOLD
+
+    /** One row per kept JPEG, flushed to `photos.csv` when the session finishes. */
+    private val photoRows = Collections.synchronizedList(ArrayList<String>())
     private var shutterCeilingFps: Int? = null
     private var exposureIndex: Int = 0
     private var exposureStepEv: Double? = null
@@ -253,16 +259,28 @@ class CapturePipelineCoordinator(
                         sampleIntervalMs = resolution.frameSampleIntervalMs,
                         detectorBackend = detectorBackend,
                         detectZone = detectZone,
+                        minFaceScore = minFaceScore,
                     ) { percent ->
                         currentChunkPercent = percent
                         publishStats()
                     }
-                    val images = result.savedFiles.map { file ->
+                    val images = result.savedPhotos.map { photo ->
                         ExtractedFaceImage(
-                            fileName = file.name,
-                            sizeBytes = file.length(),
-                            absolutePath = file.absolutePath,
+                            fileName = photo.file.name,
+                            sizeBytes = photo.file.length(),
+                            absolutePath = photo.file.absolutePath,
+                            score = photo.score,
                         )
+                    }
+                    result.savedPhotos.forEach { photo ->
+                        photoRows += listOf(
+                            photo.file.name,
+                            item.index.toString(),
+                            photo.timestampUs.toString(),
+                            photo.score?.let { String.format(Locale.US, "%.4f", it) } ?: "",
+                            String.format(Locale.US, "%.2f", photo.sharpness),
+                            String.format(Locale.US, "%.4f", photo.subjectRatio),
+                        ).joinToString(",")
                     }
                     facesKept += result.kept
                     facesSkipped += result.skipped
@@ -328,6 +346,11 @@ class CapturePipelineCoordinator(
     /** Null or a full-frame zone both mean "scan everything". */
     fun setDetectZone(value: DetectZone?) {
         detectZone = value?.takeUnless { it.isFullFrame }
+    }
+
+    /** Confidence a face must reach. Honoured by LiteRT backends only; ML Kit has no score. */
+    fun setMinFaceScore(value: Float) {
+        minFaceScore = value
     }
 
     /** Recorded onto the session so a field report can say what the AE was told to do. */
@@ -832,12 +855,32 @@ class CapturePipelineCoordinator(
         }
     }
 
+    /**
+     * `photos.csv` — one row per kept JPEG, next to `session_log.txt`.
+     *
+     * Written on every session, not only under `CamPerf`: the score that let a photo through
+     * cannot be recovered from the photo, and a threshold nobody has distribution data for
+     * can only be tuned by guessing. CSV rather than JSON because the consumer is a
+     * spreadsheet or a dataframe, not this app.
+     */
+    private fun writePhotoIndex(session: PipelineSessionRecord) {
+        val rows = synchronized(photoRows) { ArrayList(photoRows) }
+        if (rows.isEmpty()) return
+        val text = buildString {
+            appendLine("# ${session.displayName} · ${session.extractionTarget.label} · ${detectorBackend.slug} · minFaceScore=$minFaceScore")
+            appendLine("file,chunk,ptsUs,score,sharpness,subjectRatio")
+            rows.forEach { appendLine(it) }
+        }
+        writeSessionFile(session, PHOTO_INDEX_FILE, text)
+    }
+
     private fun writeSessionLog(session: PipelineSessionRecord) {
         val text = session.toLogText()
         if (session.albumFolderName.isNotEmpty()) {
             deliveryWriter.albumSubfolder = session.albumFolderName
         }
         writeSessionFile(session, LocalDeliveryWriter.SESSION_LOG_FILE, text)
+        writePhotoIndex(session)
 
         // Written before the perf report so a compare-mode session still leaves its
         // observations behind even if perf collection is off.
@@ -1131,6 +1174,9 @@ class CapturePipelineCoordinator(
     )
 
     companion object {
+        /** Sits beside `session_log.txt` in the session album. */
+        const val PHOTO_INDEX_FILE = "photos.csv"
+
         private const val TAG = "CapturePipeline"
         const val VIDEO_QUEUE_CAPACITY = 8
 

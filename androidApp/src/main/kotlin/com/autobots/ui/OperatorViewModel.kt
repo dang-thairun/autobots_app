@@ -19,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.withTimeoutOrNull
 import com.autobots.camera.CameraCapabilities
 import com.autobots.camera.DetectZone
+import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.detection.DetectorAvailability
 import com.autobots.camera.ExtractionTarget
@@ -114,6 +115,8 @@ data class OperatorUiState(
     val pendingImport: PendingVideoImport? = null,
     /** Capture Zone for the next run. Null means the whole frame is scanned. */
     val detectZone: DetectZone? = null,
+    /** Confidence a face must reach to count. LiteRT backends only — ML Kit has no score. */
+    val minFaceScore: Float = FaceDetLiteDetector.DEFAULT_SCORE_THRESHOLD,
     /** A frame from the pending clip, drawn under the zone editor. Null while loading. */
     val pendingImportFrame: Bitmap? = null,
     val isCheckingNetworkUrl: Boolean = false,
@@ -273,6 +276,21 @@ internal const val NETWORK_IMPORT_DIR = "network_import"
  * ISO than a phone sensor can pay for at 5 a.m.
  */
 internal val SHUTTER_CEILING_FPS = listOf(30, 60)
+
+/**
+ * Bounds for the face score control.
+ *
+ * The ceiling is not a taste decision: a w8a8 `face_det_lite` cannot report more than
+ * [FaceDetLiteDetector.MAX_REACHABLE_SCORE] (0.853), so a threshold at or above that rejects
+ * every frame and the session keeps nothing while looking healthy. Stopping at 0.80 leaves
+ * the operator inside the range the model can actually reach.
+ *
+ * The floor is a guess and is labelled as one — nothing has measured where `face_det_lite`
+ * starts calling texture a face on race footage. That is what `photos.csv` now collects.
+ */
+internal const val FACE_SCORE_MIN = 0.40f
+internal const val FACE_SCORE_MAX = 0.80f
+internal const val FACE_SCORE_STEP = 0.02f
 
 data class PendingVideoImport(
     val uri: Uri,
@@ -803,6 +821,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         coordinator.setExtractionTarget(extractionTarget)
         coordinator.setDetectorBackend(_state.value.detectorBackend)
         coordinator.setDetectZone(_state.value.detectZone)
+        coordinator.setMinFaceScore(_state.value.minFaceScore)
         coordinator.setExposureSettings(
             shutterCeilingFps = _state.value.shutterCeilingFps,
             exposureIndex = _state.value.exposureIndex,
@@ -1115,6 +1134,7 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
         coordinator.setExtractionTarget(_state.value.extractionTarget)
         coordinator.setDetectorBackend(_state.value.detectorBackend)
         coordinator.setDetectZone(_state.value.detectZone)
+        coordinator.setMinFaceScore(_state.value.minFaceScore)
         // No exposure settings: they drive the camera, and an imported clip was exposed
         // before it ever reached this phone. Recording them here would put a shutter and an
         // EV bias on a session they had no part in.
@@ -1246,6 +1266,16 @@ class OperatorViewModel(application: Application) : AndroidViewModel(application
     fun setStreamResolution(resolution: StreamResolution) {
         if (_state.value.isCapturing) return
         _state.update { it.copy(streamResolution = resolution) }
+    }
+
+    /** Steps by [FACE_SCORE_STEP], clamped to a range where the model still behaves. */
+    fun stepMinFaceScore(delta: Int) {
+        _state.update { current ->
+            val next = current.minFaceScore + delta * FACE_SCORE_STEP
+            current.copy(
+                minFaceScore = next.coerceIn(FACE_SCORE_MIN, FACE_SCORE_MAX),
+            )
+        }
     }
 
     /** Null clears the zone back to the whole frame. */

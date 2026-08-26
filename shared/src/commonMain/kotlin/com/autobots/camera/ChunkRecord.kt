@@ -7,6 +7,8 @@ data class ExtractedFaceImage(
     val fileName: String,
     val sizeBytes: Long,
     val absolutePath: String,
+    /** Detector confidence that kept this frame; null on backends that report none. */
+    val score: Float? = null,
 )
 
 enum class ChunkProcessStatus {

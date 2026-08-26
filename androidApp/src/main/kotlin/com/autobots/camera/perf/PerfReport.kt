@@ -27,10 +27,15 @@ class PerfReport {
     /** One sampled frame and why it lived or died. */
     data class FrameDiag(
         val ptsUs: Long,
-        /** candidate · no_subject · too_small · too_soft · roi_invalid · decode_failed */
+        /**
+         * candidate · no_subject · too_small · too_soft · roi_invalid · cropped ·
+         * out_of_zone · decode_failed
+         */
         val outcome: String,
         val sharpness: Double?,
         val subjectRatio: Float?,
+        /** Detector confidence for the face; null on ML Kit, which reports none. */
+        val score: Float? = null,
     )
 
     /** What Worker 2 measured for one chunk. Filled in by VideoFrameProcessor. */
@@ -793,6 +798,7 @@ class PerfReport {
                             "subjectRatio",
                             frame.subjectRatio?.let { round3(it.toDouble()) } ?: JSONObject.NULL,
                         )
+                        put("score", frame.score?.let { round3(it.toDouble()) } ?: JSONObject.NULL)
                     },
                 )
             }

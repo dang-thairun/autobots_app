@@ -33,16 +33,32 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 
+/**
+ * One kept JPEG, with the numbers that decided it was kept.
+ *
+ * Written to `photos.csv` next to `session_log.txt`. None of this is recoverable from the
+ * image afterwards, and a threshold cannot be tuned against evidence that was never kept.
+ */
+data class SavedPhoto(
+    val file: File,
+    val timestampUs: Long,
+    val sharpness: Double,
+    val subjectRatio: Float,
+    val score: Float?,
+)
+
 data class VideoProcessResult(
     val kept: Int,
     val skipped: Int,
     val durationMs: Long,
-    val savedFiles: List<File> = emptyList(),
+    val savedPhotos: List<SavedPhoto> = emptyList(),
     val framesSampled: Int = 0,
     val decodeFailures: Int = 0,
     /** Populated only when [CamPerf.enabled]; feeds `perf_report.json`. */
     val diag: PerfReport.ChunkDiag? = null,
-)
+) {
+    val savedFiles: List<File> get() = savedPhotos.map { it.file }
+}
 
 /**
  * Worker 2 — sample video chunks, keep sharp full-frame JPEGs with visible faces or poses.
@@ -92,6 +108,7 @@ class VideoFrameProcessor(
     /** One detector pair per detect worker — see the class doc on why they are not shared. */
     private var detectors: List<DetectorSet> = emptyList()
     private var detectorsBackend: DetectorBackend? = null
+    private var detectorsScoreFloor: Float? = null
 
     /** Non-null only in [DetectorBackend.CompareAll]; see [DetectorComparison]. */
     private var comparison: DetectorComparison? = null
@@ -100,6 +117,12 @@ class VideoFrameProcessor(
     private var target = ExtractionTarget.Face
     /** Null means the whole frame counts — the zone gate is then skipped entirely. */
     private var zone: DetectZone? = null
+
+    /**
+     * Confidence a face must reach to count. Only LiteRT backends can honour it — ML Kit
+     * reports no score — so a session on ML Kit ignores this entirely.
+     */
+    private var faceScoreFloor = FaceDetLiteDetector.DEFAULT_SCORE_THRESHOLD
     private var backend = DetectorBackend.DEFAULT
 
     /** Per-chunk stage timings. Chunks are serial, but workers within one are not — see [StageStats]. */
@@ -114,9 +137,10 @@ class VideoFrameProcessor(
         outcome: String,
         sharpness: Double? = null,
         subjectRatio: Float? = null,
+        score: Float? = null,
     ) {
         if (!CamPerf.enabled) return
-        frameLog.add(PerfReport.FrameDiag(timestampUs, outcome, sharpness, subjectRatio))
+        frameLog.add(PerfReport.FrameDiag(timestampUs, outcome, sharpness, subjectRatio, score))
     }
 
     suspend fun process(
@@ -127,6 +151,7 @@ class VideoFrameProcessor(
         sampleIntervalMs: Long,
         detectorBackend: DetectorBackend = DetectorBackend.DEFAULT,
         detectZone: DetectZone? = null,
+        minFaceScore: Float = FaceDetLiteDetector.DEFAULT_SCORE_THRESHOLD,
         onProgress: (Int) -> Unit = {},
     ): VideoProcessResult {
         currentChunkIndex = chunkIndex
@@ -134,6 +159,7 @@ class VideoFrameProcessor(
         target = extractionTarget
         backend = detectorBackend
         zone = detectZone?.takeUnless { it.isFullFrame }
+        faceScoreFloor = minFaceScore
         ensureDetectors(detectorBackend)
 
         // Before the pipeline starts, so the reading is of an idle-ish core rather than of
@@ -186,7 +212,8 @@ class VideoFrameProcessor(
         }
 
         // Selection runs once, over the whole chunk, in PTS order — see the class doc.
-        val (kept, savedFiles, keptPtsUs) = selectKeepers(candidates, skipped)
+        val keepers = selectKeepers(candidates, skipped)
+        val kept = keepers.size
         onProgress(100)
 
         val durationMs = System.currentTimeMillis() - started
@@ -205,7 +232,15 @@ class VideoFrameProcessor(
             kept = kept,
             skipped = skipped.get(),
             durationMs = durationMs,
-            savedFiles = savedFiles,
+            savedPhotos = keepers.map {
+                SavedPhoto(
+                    file = it.file,
+                    timestampUs = it.timestampUs,
+                    sharpness = it.sharpness,
+                    subjectRatio = it.subjectRatio,
+                    score = it.score,
+                )
+            },
             framesSampled = scannedFrames,
             decodeFailures = sampleStats.decodeFailures,
             diag = if (!CamPerf.enabled) {
@@ -231,7 +266,7 @@ class VideoFrameProcessor(
                     detector = detectorDiagnostics(),
                     stages = perf?.snapshot().orEmpty(),
                     frames = synchronized(frameLog) { ArrayList(frameLog) },
-                    keptPtsUs = keptPtsUs,
+                    keptPtsUs = keepers.map { it.timestampUs },
                 )
             },
         )
@@ -258,20 +293,28 @@ class VideoFrameProcessor(
 
     private fun ensureDetectors(backend: DetectorBackend) {
         val workers = workerCountFor(backend)
-        if (detectorsBackend == backend && detectors.size == workers) return
+        // The score floor is baked into the detector at construction, so a change to it has
+        // to rebuild them — otherwise the setting would appear to apply and do nothing.
+        if (detectorsBackend == backend &&
+            detectorsScoreFloor == faceScoreFloor &&
+            detectors.size == workers
+        ) {
+            return
+        }
         detectors.forEach { it.close() }
         comparison?.close()
 
         if (backend == DetectorBackend.CompareAll) {
             // ML Kit FAST stays the decision-maker, so kept/rejected counts remain directly
             // comparable with every earlier release.
-            detectors = List(workers) { DetectorSet(appContext, COMPARE_PRIMARY) }
+            detectors = List(workers) { DetectorSet(appContext, COMPARE_PRIMARY, faceScoreFloor) }
             comparison = DetectorComparison.create(appContext, COMPARE_PRIMARY)
         } else {
-            detectors = List(workers) { DetectorSet(appContext, backend) }
+            detectors = List(workers) { DetectorSet(appContext, backend, faceScoreFloor) }
             comparison = null
         }
         detectorsBackend = backend
+        detectorsScoreFloor = faceScoreFloor
     }
 
     /** Rendered `detector_compare.json`, or null when the session was not in compare mode. */
@@ -303,7 +346,15 @@ class VideoFrameProcessor(
                     skipped.incrementAndGet()
                     continue
                 }
-                candidates.add(SavedCandidate(saved, candidate.sharpness, candidate.timestampUs))
+                candidates.add(
+                    SavedCandidate(
+                        file = saved,
+                        sharpness = candidate.sharpness,
+                        timestampUs = candidate.timestampUs,
+                        subjectRatio = candidate.subjectRatio,
+                        score = candidate.score,
+                    ),
+                )
             } catch (t: Throwable) {
                 // One bad frame must not take the worker — and therefore the chunk — down.
                 Log.w(TAG, "Frame ${frame.timestampUs}us failed", t)
@@ -327,7 +378,7 @@ class VideoFrameProcessor(
     private fun selectKeepers(
         candidates: List<SavedCandidate>,
         skipped: AtomicInteger,
-    ): Triple<Int, List<File>, List<Long>> {
+    ): List<SavedCandidate> {
         val byPts = synchronized(candidates) { ArrayList(candidates) }.sortedBy { it.timestampUs }
         val keepers = mutableListOf<SavedCandidate>()
         val window = mutableListOf<SavedCandidate>()
@@ -357,8 +408,7 @@ class VideoFrameProcessor(
         // Deliver in capture order, not in the sharpness order the windows ranked them by.
         // Sorting on the file name would be wrong: PTS values have differing digit counts,
         // so "..._1200000.jpg" sorts before "..._960000.jpg" lexicographically.
-        val ordered = keepers.sortedBy { it.timestampUs }
-        return Triple(ordered.size, ordered.map { it.file }, ordered.map { it.timestampUs })
+        return keepers.sortedBy { it.timestampUs }
     }
 
     /**
@@ -384,6 +434,7 @@ class VideoFrameProcessor(
         val detectHeight = detectBmp.height
 
         var faceBox: Rect? = null
+        var faceScore: Float? = null
         var torsoBox: Rect? = null
         var subjectRatio = 0f
         var reject: String? = null
@@ -405,14 +456,15 @@ class VideoFrameProcessor(
                 // inside the zone.
                 val inZone = zone?.let { z ->
                     faces.filter {
-                        z.containsCentre(it.left, it.top, it.right, it.bottom, detectWidth, detectHeight)
+                        val b = it.bounds
+                        z.containsCentre(b.left, b.top, b.right, b.bottom, detectWidth, detectHeight)
                     }
                 } ?: faces
                 if (zone != null && faces.isNotEmpty() && inZone.isEmpty()) {
                     rejects.outOfZone.incrementAndGet()
                     reject = "out_of_zone"
                 }
-                val largest = inZone.maxByOrNull { it.height() }
+                val largest = inZone.maxByOrNull { it.bounds.height() }
                 if (reject != null) {
                     // already decided
                 } else if (largest == null) {
@@ -421,12 +473,13 @@ class VideoFrameProcessor(
                 } else {
                     // Size is judged in detect space, so a rejected frame never pays for a
                     // full-res rotate.
-                    subjectRatio = largest.height().toFloat() / detectHeight
+                    subjectRatio = largest.bounds.height().toFloat() / detectHeight
                     if (subjectRatio < profile.minFaceHeightRatio) {
                         rejects.tooSmall.incrementAndGet()
                         reject = "too_small"
                     } else {
-                        faceBox = largest
+                        faceBox = largest.bounds
+                        faceScore = largest.score
                     }
                 }
             }
@@ -505,8 +558,8 @@ class VideoFrameProcessor(
             return null
         }
 
-        logFrame(timestampUs, "candidate", sharpness, subjectRatio)
-        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio)
+        logFrame(timestampUs, "candidate", sharpness, subjectRatio, faceScore)
+        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio, faceScore)
     }
 
     /**
@@ -767,7 +820,11 @@ class VideoFrameProcessor(
      * ML Kit clients for one detect worker. Both are lazy: a Face session never pays to load
      * the pose model, and vice versa.
      */
-    private class DetectorSet(private val context: Context, private val backend: DetectorBackend) {
+    private class DetectorSet(
+        private val context: Context,
+        private val backend: DetectorBackend,
+        private val minFaceScore: Float,
+    ) {
         private val faceDelegate = lazy { createFace() }
         private val poseDelegate = lazy { OfflinePoseDetector() }
         val face: SubjectFaceDetector by faceDelegate
@@ -780,7 +837,7 @@ class VideoFrameProcessor(
          * be mistaken for a result.
          */
         private fun createFace(): SubjectFaceDetector = when {
-            backend.usesLiteRt -> FaceDetLiteDetector.create(context, backend)
+            backend.usesLiteRt -> FaceDetLiteDetector.create(context, backend, minFaceScore)
                 ?: OfflineFaceDetector(accurate = false).also {
                     Log.e(TAG, "\${backend.slug} unavailable — fell back to ML Kit FAST")
                 }
@@ -799,6 +856,8 @@ class VideoFrameProcessor(
         val bitmap: Bitmap,
         val sharpness: Double,
         val subjectRatio: Float,
+        /** Detector confidence for the face this frame was kept for; null on ML Kit. */
+        val score: Float?,
     )
 
     /** A candidate already on disk, waiting to be ranked against the rest of its window. */
@@ -806,6 +865,8 @@ class VideoFrameProcessor(
         val file: File,
         val sharpness: Double,
         val timestampUs: Long,
+        val subjectRatio: Float,
+        val score: Float?,
     )
 
     /** Atomic because every detect worker reports into the same tally. */

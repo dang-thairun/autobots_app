@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
                     onShutterCeiling = operatorViewModel::setShutterCeilingFps,
                     onStepExposure = operatorViewModel::stepExposure,
                     onCameraCapabilities = operatorViewModel::onCameraCapabilities,
+                    onStepFaceScore = operatorViewModel::stepMinFaceScore,
                     onRecordingProgress = operatorViewModel::onRecordingProgress,
                     onPhotoDelivered = operatorViewModel::onPhotoDelivered,
                     onExposureReadout = operatorViewModel::onExposureReadout,

@@ -95,6 +95,7 @@ fun ImportPreviewPage(
     onCancel: () -> Unit,
     onZoneChange: (DetectZone?) -> Unit,
     onEditZone: () -> Unit,
+    onStepFaceScore: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val pending = state.pendingImport
@@ -345,9 +346,18 @@ fun ImportPreviewPage(
                             ExtractionTarget.Pose -> poseOn
                             else -> faceOn
                         }
+                        val scored = option == ExtractionTarget.Face && backend.usesLiteRt
                         DetectionToggleRow(
                             title = "${option.label} Detection",
-                            subtitle = "Process with ${importPreviewBackendLabel(backend)}",
+                            subtitle = buildString {
+                                append("Process with ${importPreviewBackendLabel(backend)}")
+                                // Only where the number is real: ML Kit reports no score, so
+                                // showing a threshold next to it would imply a gate that is
+                                // not there.
+                                if (scored) {
+                                    append(" · score ≥ ${formatFaceScore(state.minFaceScore)}")
+                                }
+                            },
                             checked = checked,
                             onCheckedChange = { on ->
                                 when (option) {
@@ -368,6 +378,13 @@ fun ImportPreviewPage(
                                 selected = backend,
                                 onSelect = { backend = it },
                             )
+                            if (option == ExtractionTarget.Face) {
+                                MinScoreRow(
+                                    value = state.minFaceScore,
+                                    enabled = backend.usesLiteRt,
+                                    onStep = onStepFaceScore,
+                                )
+                            }
                         }
                     }
                 }
@@ -598,6 +615,72 @@ private fun ProcessWithPicker(
         )
     }
 }
+
+/**
+ * The confidence a face has to reach before the frame is even considered.
+ *
+ * Disabled on ML Kit rather than hidden: the operator should be able to see that the setting
+ * exists and that this backend cannot honour it, which is also why the reason is printed
+ * instead of leaving a greyed-out control to be puzzled over.
+ */
+@Composable
+private fun MinScoreRow(
+    value: Float,
+    enabled: Boolean,
+    onStep: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Min score",
+                color = Color(0xFFB0BEC5),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            if (!enabled) {
+                Text(
+                    text = "ML Kit ไม่คืนคะแนน — ใช้ GPU หรือ NPU",
+                    color = Color(0xFF78909C),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                )
+            }
+        }
+        ScoreStepButton(label = "−", enabled = enabled) { onStep(-1) }
+        Text(
+            text = formatFaceScore(value),
+            color = if (enabled) Color(0xFF80CBC4) else Color.White.copy(alpha = 0.35f),
+            style = MaterialTheme.typography.labelMedium,
+        )
+        ScoreStepButton(label = "+", enabled = enabled) { onStep(1) }
+    }
+}
+
+@Composable
+private fun ScoreStepButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        color = if (enabled) Color.White else Color.White.copy(alpha = 0.3f),
+        style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color.White.copy(alpha = if (enabled) 0.12f else 0.05f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    )
+}
+
+/** Two decimals, so 0.55 and 0.60 do not read as the same number at a glance. */
+internal fun formatFaceScore(value: Float): String = String.format("%.2f", value)
 
 /**
  * Read-only miniature of the zone over a frame of the clip. Tap opens [ZoneEditorPage].

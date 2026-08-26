@@ -118,6 +118,7 @@ fun OperatorShellScreen(
     onShutterCeiling: (Int?) -> Unit,
     onStepExposure: (Int) -> Unit,
     onCameraCapabilities: (CameraCapabilities?) -> Unit,
+    onStepFaceScore: (Int) -> Unit,
     uploadCounts: UploadQueueCounts,
     uploadItems: List<UploadItem>,
     onRetryFailedUploads: () -> Unit,
@@ -251,6 +252,7 @@ fun OperatorShellScreen(
                 },
                 onCancel = goHome,
                 onZoneChange = onDetectZone,
+                onStepFaceScore = onStepFaceScore,
                 onEditZone = {
                     zoneEditorReturn = OperatorDestination.ImportPreview
                     destination = OperatorDestination.ZoneEditor
@@ -1547,6 +1549,7 @@ private fun OperatorShellPreview() {
             onShutterCeiling = {},
             onStepExposure = {},
             onCameraCapabilities = {},
+            onStepFaceScore = {},
             onCheckNetworkUrl = {},
             onClearNetworkUrlError = {},
             onConfirmImport = { _, _, _, _ -> },

@@ -57,11 +57,12 @@ class OfflineFaceDetector(
 
     override val diagnostics: Map<String, Any> get() = mapOf("mlkitMode" to mode)
 
-    override suspend fun detect(bitmap: Bitmap): List<Rect> = suspendCancellableCoroutine { cont ->
+    override suspend fun detect(bitmap: Bitmap): List<DetectedFace> = suspendCancellableCoroutine { cont ->
         val image = InputImage.fromBitmap(bitmap, 0)
         detector.process(image)
             .addOnSuccessListener { faces ->
-                if (cont.isActive) cont.resume(faces.map { it.boundingBox })
+                // No score: ML Kit's face API does not expose a detection confidence.
+                if (cont.isActive) cont.resume(faces.map { DetectedFace(it.boundingBox) })
             }
             .addOnFailureListener {
                 if (cont.isActive) cont.resume(emptyList())

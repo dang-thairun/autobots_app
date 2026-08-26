@@ -11,6 +11,7 @@ import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.FrameQuality
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.SubjectTracker
+import com.autobots.camera.TrackSummary
 import com.autobots.camera.TrackedBox
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.detection.FaceDetLiteDetector
@@ -66,6 +67,8 @@ data class VideoProcessResult(
     val savedPhotos: List<SavedPhoto> = emptyList(),
     val framesSampled: Int = 0,
     val decodeFailures: Int = 0,
+    /** Every passage the tracker saw in this chunk, photographed or not. */
+    val tracks: List<TrackSummary> = emptyList(),
     /** Populated only when [CamPerf.enabled]; feeds `perf_report.json`. */
     val diag: PerfReport.ChunkDiag? = null,
 ) {
@@ -131,6 +134,13 @@ class VideoFrameProcessor(
     private var zone: DetectZone? = null
 
     /**
+     * Who was visible in each sampled frame, kept or not — the tracker's real input.
+     *
+     * Written from every detect worker, so synchronised; read once per chunk after they finish.
+     */
+    private val sightings = Collections.synchronizedList(ArrayList<Sighting>())
+
+    /**
      * Confidence a face must reach to count. Only LiteRT backends can honour it — ML Kit
      * reports no score — so a session on ML Kit ignores this entirely.
      */
@@ -182,6 +192,7 @@ class VideoFrameProcessor(
         perf = CamPerf.stageStats()
         sharpnessSamples.clear()
         frameLog.clear()
+        sightings.clear()
         outputDir.mkdirs()
 
         val skipped = AtomicInteger(0)
@@ -224,7 +235,8 @@ class VideoFrameProcessor(
         }
 
         // Selection runs once, over the whole chunk, in PTS order — see the class doc.
-        val keepers = selectKeepers(candidates, skipped)
+        val selection = selectKeepers(candidates, skipped)
+        val keepers = selection.keepers
         val kept = keepers.size
         onProgress(100)
 
@@ -257,6 +269,7 @@ class VideoFrameProcessor(
             },
             framesSampled = scannedFrames,
             decodeFailures = sampleStats.decodeFailures,
+            tracks = selection.tracks,
             diag = if (!CamPerf.enabled) {
                 null
             } else {
@@ -381,8 +394,6 @@ class VideoFrameProcessor(
                         subjectRatio = candidate.subjectRatio,
                         score = candidate.score,
                         quality = candidate.quality,
-                        trackBoxes = candidate.trackBoxes,
-                        subjectIndex = candidate.subjectIndex,
                     ),
                 )
             } catch (t: Throwable) {
@@ -419,26 +430,35 @@ class VideoFrameProcessor(
      *    clearance alongside sharpness. See [FrameQuality] for why each term is normalised and
      *    why the weights are recorded per photo rather than trusted.
      */
+    /** What one chunk's selection produced: the photos, and every passage behind them. */
+    private data class Selection(
+        val keepers: List<SavedCandidate>,
+        val tracks: List<TrackSummary>,
+    )
+
     private fun selectKeepers(
         candidates: List<SavedCandidate>,
         skipped: AtomicInteger,
-    ): List<SavedCandidate> {
+    ): Selection {
         val byPts = synchronized(candidates) { ArrayList(candidates) }.sortedBy { it.timestampUs }
-        if (byPts.isEmpty()) return emptyList()
+        if (byPts.isEmpty()) return Selection(emptyList(), emptyList())
 
-        // Identity first, selection second. The tracker has to see the frames in capture order
-        // and it has to see *every* observed box, not only the subject's, or a runner loses
-        // their id in the frames where someone else was the subject.
+        // Identity first, selection second. The tracker runs over **every sampled frame**, in
+        // capture order, and over every box in them — not over the kept candidates. A runner
+        // who was briefly too small or clipped still has to stay the same person through those
+        // frames, and someone who is merely present has to keep their id through the frames
+        // where somebody else was the subject.
         val tracker = SubjectTracker()
-        val trackOf = HashMap<Long, Int>(byPts.size)
-        for (candidate in byPts) {
-            val ids = tracker.assign(candidate.timestampUs, candidate.trackBoxes)
-            tracker.commit(candidate.timestampUs, candidate.trackBoxes, ids)
-            ids.getOrNull(candidate.subjectIndex)?.let {
-                trackOf[candidate.timestampUs] = it
-                candidate.trackId = it
+        val trackOf = HashMap<Long, Int>()
+        val frames = synchronized(sightings) { ArrayList(sightings) }.sortedBy { it.timestampUs }
+        for (frame in frames) {
+            val ids = tracker.assign(frame.timestampUs, frame.boxes)
+            tracker.commit(frame.timestampUs, frame.boxes, ids)
+            if (frame.subjectIndex >= 0) {
+                ids.getOrNull(frame.subjectIndex)?.let { trackOf[frame.timestampUs] = it }
             }
         }
+        byPts.forEach { it.trackId = trackOf[it.timestampUs] ?: UNTRACKED }
 
         // One budget per runner, not one per second. A window is still [DEDUP_WINDOW_US] long,
         // but it is now a window *of that runner's frames*, so two people going past together
@@ -473,10 +493,19 @@ class VideoFrameProcessor(
                 entry.file.delete()
             }
         }
+
+        // Stamp the outcome onto the passage that produced it. A track with captured=false is
+        // the interesting row: someone went past and the pipeline has no photograph of them.
+        val photosPerTrack = kept.groupingBy { it.trackId }.eachCount()
+        val tracks = tracker.finish().map {
+            val photos = photosPerTrack[it.id] ?: 0
+            it.copy(captured = photos > 0, photos = photos)
+        }
+
         // Deliver in capture order, not in the quality order the windows ranked them by.
         // Sorting on the file name would be wrong: PTS values have differing digit counts,
         // so "..._1200000.jpg" sorts before "..._960000.jpg" lexicographically.
-        return kept
+        return Selection(kept, tracks)
     }
 
     /**
@@ -535,6 +564,7 @@ class VideoFrameProcessor(
                     rejects.outOfZone.incrementAndGet()
                     reject = "out_of_zone"
                 }
+                observed = inZone.map { it.bounds }
                 val largest = inZone.maxByOrNull { it.bounds.height() }
                 if (reject != null) {
                     // already decided
@@ -661,6 +691,19 @@ class VideoFrameProcessor(
             detectBmp.recycle()
         }
 
+        // Record who was visible **before** the gates decide anything.
+        //
+        // This has to happen on rejected frames too, and getting it wrong is not obvious. The
+        // tracker's whole premise is that a person is seen continuously; if it is only shown
+        // the frames that passed every gate, a runner disappears from its view for every frame
+        // they were slightly too small, slightly soft, or clipped the frame edge. Those gaps
+        // routinely exceed the track's tolerance, so one runner becomes a string of one-frame
+        // tracks — which then each get their own photo budget and their own row in the count.
+        //
+        // Measured on the asicsmeta clip when this was wrong: 139 "passages" for 32 photos,
+        // nearly all with frames=1.
+        recordSighting(timestampUs, observed, personBox ?: faceBox ?: torsoBox, detectWidth, detectHeight)
+
         if (reject != null) {
             logFrame(timestampUs, reject, subjectRatio = subjectRatio.takeIf { it > 0f })
             return null
@@ -736,18 +779,32 @@ class VideoFrameProcessor(
             edgeMargin = edgeMargin,
         )
 
-        // Who the tracker should follow this frame. With a person detector running that is
-        // everyone in the zone, and the subject is one of them; otherwise the only box the
-        // frame has is the subject's own. Normalised, so a track means the same thing whatever
-        // the detect bitmap happened to be.
-        val trackRects = observed.ifEmpty { listOf(subjectBox) }
-        val subjectIndex = trackRects.indexOf(personBox ?: subjectBox).coerceAtLeast(0)
-        val trackBoxes = trackRects.map { it.normalisedIn(detectWidth, detectHeight) }
-
         logFrame(timestampUs, "candidate", sharpness, subjectRatio, faceScore)
-        return FrameCandidate(
-            timestampUs, upright, sharpness, subjectRatio, faceScore, quality,
-            trackBoxes, subjectIndex,
+        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio, faceScore, quality)
+    }
+
+    /** One frame's detections, normalised, with which of them the gates chose (-1 if none). */
+    private data class Sighting(
+        val timestampUs: Long,
+        val boxes: List<TrackedBox>,
+        val subjectIndex: Int,
+    )
+
+    private fun recordSighting(
+        timestampUs: Long,
+        observed: List<Rect>,
+        subject: Rect?,
+        detectWidth: Int,
+        detectHeight: Int,
+    ) {
+        if (observed.isEmpty() && subject == null) return
+        val rects = observed.ifEmpty { listOfNotNull(subject) }
+        sightings.add(
+            Sighting(
+                timestampUs = timestampUs,
+                boxes = rects.map { it.normalisedIn(detectWidth, detectHeight) },
+                subjectIndex = subject?.let { rects.indexOf(it) } ?: -1,
+            ),
         )
     }
 
@@ -1064,10 +1121,6 @@ class VideoFrameProcessor(
         /** Detector confidence for the face this frame was kept for; null on ML Kit. */
         val score: Float?,
         val quality: FrameQuality.Score,
-        /** Everyone observed this frame, for [SubjectTracker]. */
-        val trackBoxes: List<TrackedBox>,
-        /** Which of [trackBoxes] is the subject this frame was kept for. */
-        val subjectIndex: Int,
     )
 
     /** A candidate already on disk, waiting to be ranked against the rest of its window. */
@@ -1078,8 +1131,6 @@ class VideoFrameProcessor(
         val subjectRatio: Float,
         val score: Float?,
         val quality: FrameQuality.Score,
-        val trackBoxes: List<TrackedBox>,
-        val subjectIndex: Int,
         var trackId: Int = UNTRACKED,
     )
 

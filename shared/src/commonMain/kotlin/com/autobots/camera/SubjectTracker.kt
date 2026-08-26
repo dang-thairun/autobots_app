@@ -16,6 +16,13 @@ data class TrackedBox(
     val centreY: Float get() = (top + bottom) / 2f
     val width: Float get() = right - left
     val height: Float get() = bottom - top
+
+    /** How far this box sits from the middle of the frame, in normalised units. */
+    fun distanceToFrameCentre(): Float {
+        val dx = centreX - 0.5f
+        val dy = centreY - 0.5f
+        return sqrt(dx * dx + dy * dy)
+    }
 }
 
 /**
@@ -73,14 +80,45 @@ class SubjectTracker(
         var vx: Float = 0f,
         var vy: Float = 0f,
         var hits: Int = 1,
-    )
+    ) {
+        val firstBox: TrackedBox = box
+        val firstSeenUs: Long = lastSeenUs
+
+        /**
+         * Where this track was before [box] was matched to it.
+         *
+         * [commit] needs both endpoints to measure a velocity, and [update] has already
+         * overwritten [box] by the time it runs — without this the difference is the new box
+         * minus itself, so every track reports a speed of exactly zero and
+         * [TrackSummary.directionLabel] then answers "L→R" for everyone by default.
+         */
+        var prevBox: TrackedBox = box
+        var closestToCentre: Float = box.distanceToFrameCentre()
+        var heightSum: Float = box.height
+
+        fun summarise() = TrackSummary(
+            id = id,
+            firstSeenUs = firstSeenUs,
+            lastSeenUs = lastSeenUs,
+            frames = hits,
+            firstCentreX = firstBox.centreX,
+            firstCentreY = firstBox.centreY,
+            lastCentreX = box.centreX,
+            lastCentreY = box.centreY,
+            velocityX = vx,
+            velocityY = vy,
+            closestToCentre = closestToCentre,
+            meanHeight = if (hits > 0) heightSum / hits else 0f,
+        )
+    }
 
     private val tracks = mutableListOf<Track>()
+    private val finished = mutableListOf<TrackSummary>()
     private var nextId = 1
 
     /** Track ids for [boxes], positionally. Call once per frame, in ascending [timestampUs]. */
     fun assign(timestampUs: Long, boxes: List<TrackedBox>): List<Int> {
-        tracks.removeAll { timestampUs - it.lastSeenUs > maxGapUs }
+        retire { timestampUs - it.lastSeenUs > maxGapUs }
         if (boxes.isEmpty()) return emptyList()
 
         val assigned = IntArray(boxes.size) { UNASSIGNED }
@@ -146,8 +184,29 @@ class SubjectTracker(
 
     private fun update(track: Track, box: TrackedBox, assigned: IntArray, index: Int) {
         assigned[index] = track.id
+        track.prevBox = track.box
         track.box = box
         track.hits++
+        track.heightSum += box.height
+        track.closestToCentre = min(track.closestToCentre, box.distanceToFrameCentre())
+    }
+
+    private fun retire(expired: (Track) -> Boolean) {
+        val out = tracks.filter(expired)
+        if (out.isEmpty()) return
+        out.forEach { finished.add(it.summarise()) }
+        tracks.removeAll(out.toSet())
+    }
+
+    /**
+     * Every track this instance ever opened, closed ones and still-open ones alike.
+     *
+     * Call once, after the last [assign]. The tracker is spent afterwards — the remaining live
+     * tracks have been retired into the result.
+     */
+    fun finish(): List<TrackSummary> {
+        retire { true }
+        return finished.sortedBy { it.firstSeenUs }
     }
 
     /**
@@ -164,9 +223,9 @@ class SubjectTracker(
                 val box = boxes[i]
                 // Smoothed, because one detector jitter should not send the prediction flying.
                 track.vx = track.vx * (1f - VELOCITY_GAIN) +
-                    ((box.centreX - track.box.centreX) / dtSec) * VELOCITY_GAIN
+                    ((box.centreX - track.prevBox.centreX) / dtSec) * VELOCITY_GAIN
                 track.vy = track.vy * (1f - VELOCITY_GAIN) +
-                    ((box.centreY - track.box.centreY) / dtSec) * VELOCITY_GAIN
+                    ((box.centreY - track.prevBox.centreY) / dtSec) * VELOCITY_GAIN
             }
             track.lastSeenUs = timestampUs
         }

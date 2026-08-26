@@ -6,6 +6,7 @@ import android.util.Log
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.FrameQuality
+import com.autobots.camera.TrackSummary
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.ChunkProcessStatus
@@ -208,6 +209,9 @@ class CapturePipelineCoordinator(
 
     /** One row per kept JPEG, flushed to `photos.csv` when the session finishes. */
     private val photoRows = Collections.synchronizedList(ArrayList<String>())
+
+    /** Every passage the tracker saw this session, with the chunk it belongs to. */
+    private val trackRows = Collections.synchronizedList(ArrayList<Pair<Int, TrackSummary>>())
     private var shutterCeilingFps: Int? = null
     private var exposureIndex: Int = 0
     private var exposureStepEv: Double? = null
@@ -273,6 +277,7 @@ class CapturePipelineCoordinator(
                             score = photo.score,
                         )
                     }
+                    result.tracks.forEach { trackRows += item.index to it }
                     result.savedPhotos.forEach { photo ->
                         photoRows += listOf(
                             photo.file.name,
@@ -910,6 +915,64 @@ class CapturePipelineCoordinator(
         writeSessionFile(session, PHOTO_INDEX_FILE, text)
     }
 
+    /**
+     * One row per passage — including the ones that produced no photograph.
+     *
+     * `photos.csv` can only ever describe what was kept, so it cannot answer "did we miss
+     * anyone". This can: a row with `captured=false` is somebody who went past the lens and
+     * came away with nothing, and there is no other record that they were ever there.
+     *
+     * CSV rather than JSON deliberately. Every field is a scalar, the rows are independent, and
+     * the questions asked of it — how many went through, how many did we photograph, which
+     * direction, how fast — are one filter and one count in a spreadsheet. JSON would only earn
+     * its nesting if the per-frame path of each track were kept, which it is not.
+     */
+    private fun writeTrackIndex(session: PipelineSessionRecord) {
+        val rows = synchronized(trackRows) { ArrayList(trackRows) }
+        if (rows.isEmpty()) return
+        val movedThrough = rows.count { it.second.movedThrough }
+        val captured = rows.count { it.second.captured }
+        val text = buildString {
+            appendLine("# ${session.displayName} · ${session.extractionTarget.label} · ${detectorBackend.slug}")
+            appendLine(
+                "# passages=${rows.size} movedThrough=$movedThrough captured=$captured " +
+                    "chunks=${rows.map { it.first }.distinct().size}",
+            )
+            // Said here rather than left to be rediscovered: this is an upper bound.
+            appendLine(
+                "# a track is one continuous sighting, not one person — bystanders are tracked, " +
+                    "chunk boundaries split a runner in two, and there is no re-identification",
+            )
+            appendLine(
+                "chunk,track,firstUs,lastUs,durationUs,frames,firstX,firstY,lastX,lastY," +
+                    "velX,velY,speed,directionDeg,direction,displacement,closestToCentre," +
+                    "meanHeight,captured,photos",
+            )
+            rows.sortedWith(compareBy({ it.first }, { it.second.firstSeenUs })).forEach { (chunk, t) ->
+                appendLine(
+                    listOf(
+                        chunk.toString(),
+                        t.id.toString(),
+                        t.firstSeenUs.toString(),
+                        t.lastSeenUs.toString(),
+                        t.durationUs.toString(),
+                        t.frames.toString(),
+                        f(t.firstCentreX), f(t.firstCentreY), f(t.lastCentreX), f(t.lastCentreY),
+                        f(t.velocityX), f(t.velocityY), f(t.speed),
+                        String.format(Locale.US, "%.1f", t.directionDegrees),
+                        t.directionLabel,
+                        f(t.displacement), f(t.closestToCentre), f(t.meanHeight),
+                        if (t.captured) "1" else "0",
+                        t.photos.toString(),
+                    ).joinToString(","),
+                )
+            }
+        }
+        writeSessionFile(session, TRACK_INDEX_FILE, text)
+    }
+
+    private fun f(value: Float): String = String.format(Locale.US, "%.4f", value)
+
     private fun writeSessionLog(session: PipelineSessionRecord) {
         val text = session.toLogText()
         if (session.albumFolderName.isNotEmpty()) {
@@ -917,6 +980,7 @@ class CapturePipelineCoordinator(
         }
         writeSessionFile(session, LocalDeliveryWriter.SESSION_LOG_FILE, text)
         writePhotoIndex(session)
+        writeTrackIndex(session)
 
         // Written before the perf report so a compare-mode session still leaves its
         // observations behind even if perf collection is off.
@@ -1034,6 +1098,11 @@ class CapturePipelineCoordinator(
             SessionSource.LiveCapture -> SessionAlbumNaming.liveFolder(startedAt)
         }
         deliveryWriter.albumSubfolder = albumFolder
+        // Both accumulate for the life of the coordinator, which outlives a session: extracting
+        // twice without restarting the app would otherwise put the first run's rows in the
+        // second run's file, under the second run's album name.
+        synchronized(photoRows) { photoRows.clear() }
+        synchronized(trackRows) { trackRows.clear() }
         // Live capture has no knowable total; the bar falls back to chunksRecorded.
         expectedChunks = 0
         drainNotified.set(false)
@@ -1212,6 +1281,7 @@ class CapturePipelineCoordinator(
     companion object {
         /** Sits beside `session_log.txt` in the session album. */
         const val PHOTO_INDEX_FILE = "photos.csv"
+        const val TRACK_INDEX_FILE = "tracks.csv"
 
         private const val TAG = "CapturePipeline"
         const val VIDEO_QUEUE_CAPACITY = 8

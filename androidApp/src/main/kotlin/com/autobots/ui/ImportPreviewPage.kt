@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
+import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.ExtractionTarget
 
 /** Miniature of the frame in the card — big enough to recognise the lane, no bigger. */
@@ -356,6 +357,7 @@ fun ImportPreviewPage(
                                 // not there.
                                 if (scored) {
                                     append(" · score ≥ ${formatFaceScore(state.minFaceScore)}")
+                                    append(" (logit ${formatFaceLogit(state.minFaceScore)})")
                                 }
                             },
                             checked = checked,
@@ -652,11 +654,21 @@ private fun MinScoreRow(
             }
         }
         ScoreStepButton(label = "−", enabled = enabled) { onStep(-1) }
-        Text(
-            text = formatFaceScore(value),
-            color = if (enabled) Color(0xFF80CBC4) else Color.White.copy(alpha = 0.35f),
-            style = MaterialTheme.typography.labelMedium,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = formatFaceScore(value),
+                color = if (enabled) Color(0xFF80CBC4) else Color.White.copy(alpha = 0.35f),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            // Both units, because the two audiences differ: an operator reads the
+            // probability, and every report written before v0.1.6 quotes the logit.
+            Text(
+                text = "logit ${formatFaceLogit(value)}",
+                color = Color(0xFF78909C),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 9.sp,
+            )
+        }
         ScoreStepButton(label = "+", enabled = enabled) { onStep(1) }
     }
 }
@@ -681,6 +693,10 @@ private fun ScoreStepButton(
 
 /** Two decimals, so 0.55 and 0.60 do not read as the same number at a glance. */
 internal fun formatFaceScore(value: Float): String = String.format("%.2f", value)
+
+/** The same threshold in the model's own units — what `face_det_lite` actually compares. */
+internal fun formatFaceLogit(value: Float): String =
+    String.format("%.2f", FaceDetLiteDetector.logitOf(value))
 
 /**
  * Read-only miniature of the zone over a frame of the clip. Tap opens [ZoneEditorPage].

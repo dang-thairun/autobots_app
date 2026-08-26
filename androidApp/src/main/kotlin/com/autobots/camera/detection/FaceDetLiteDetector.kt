@@ -303,7 +303,15 @@ class FaceDetLiteDetector private constructor(
          * can reason about. Because sigmoid is monotone, nothing about which faces pass has
          * changed.
          */
-        const val DEFAULT_SCORE_THRESHOLD = 0.634f
+        val DEFAULT_SCORE_THRESHOLD: Float = sigmoid(LEGACY_LOGIT_THRESHOLD)
+
+        /**
+         * The constant as it was written from 0.1.3 to 0.1.6, in the model's own units.
+         * Kept here so the default is *derived* from it — writing 0.634 by hand moved the
+         * effective cut to 0.549416, which is not the same threshold, only one that looks
+         * like it.
+         */
+        private const val LEGACY_LOGIT_THRESHOLD = 0.55f
 
         /**
          * The highest probability this model can report.
@@ -314,12 +322,15 @@ class FaceDetLiteDetector private constructor(
          */
         const val MAX_REACHABLE_SCORE = 0.853f
 
-        private fun sigmoid(x: Float): Float = (1.0 / (1.0 + kotlin.math.exp(-x.toDouble()))).toFloat()
-
-        private fun logitOf(p: Float): Float {
+        /** Probability back to the model's own units — for showing both side by side. */
+        fun logitOf(p: Float): Float {
             val clamped = p.coerceIn(0.0001f, 0.9999f).toDouble()
             return kotlin.math.ln(clamped / (1.0 - clamped)).toFloat()
         }
+
+        private fun sigmoid(x: Float): Float = (1.0 / (1.0 + kotlin.math.exp(-x.toDouble()))).toFloat()
+
+
         private const val NMS_IOU = 0.3f
 
         /** Fraction of a tile's height shared with the next, so seams do not split faces. */

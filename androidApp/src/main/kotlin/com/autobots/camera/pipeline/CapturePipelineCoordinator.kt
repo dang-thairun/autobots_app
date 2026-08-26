@@ -278,6 +278,15 @@ class CapturePipelineCoordinator(
                             item.index.toString(),
                             photo.timestampUs.toString(),
                             photo.score?.let { String.format(Locale.US, "%.4f", it) } ?: "",
+                            photo.score
+                                ?.let {
+                                    String.format(
+                                        Locale.US,
+                                        "%.4f",
+                                        FaceDetLiteDetector.logitOf(it),
+                                    )
+                                }
+                                ?: "",
                             String.format(Locale.US, "%.2f", photo.sharpness),
                             String.format(Locale.US, "%.4f", photo.subjectRatio),
                         ).joinToString(",")
@@ -867,8 +876,15 @@ class CapturePipelineCoordinator(
         val rows = synchronized(photoRows) { ArrayList(photoRows) }
         if (rows.isEmpty()) return
         val text = buildString {
-            appendLine("# ${session.displayName} · ${session.extractionTarget.label} · ${detectorBackend.slug} · minFaceScore=$minFaceScore")
-            appendLine("file,chunk,ptsUs,score,sharpness,subjectRatio")
+            appendLine(
+                "# ${session.displayName} · ${session.extractionTarget.label} · " +
+                    "${detectorBackend.slug} · minFaceScore=" +
+                    String.format(Locale.US, "%.4f", minFaceScore) +
+                    " (logit " +
+                    String.format(Locale.US, "%.4f", FaceDetLiteDetector.logitOf(minFaceScore)) +
+                    ")",
+            )
+            appendLine("file,chunk,ptsUs,score,scoreLogit,sharpness,subjectRatio")
             rows.forEach { appendLine(it) }
         }
         writeSessionFile(session, PHOTO_INDEX_FILE, text)

@@ -33,6 +33,17 @@ interface SubjectFaceDetector : AutoCloseable {
     suspend fun detect(bitmap: Bitmap): List<DetectedFace>
 
     /**
+     * The highest value [DetectedFace.score] can ever take on this detector.
+     *
+     * Not always 1.0, and assuming it is silently penalises whoever cannot reach it:
+     * `face_det_lite` tops out at 0.853 because its quantised heatmap has no codepoint above
+     * that, so scoring its best possible face as 0.853 against another backend's 1.0 docks it
+     * 15% for a reason that has nothing to do with the photograph. Consumers rescale by this.
+     */
+    val scoreCeiling: Float
+        get() = 1f
+
+    /**
      * How the detector describes itself in `perf_report.json` — backend, and anything that
      * changes what the numbers mean (tile count, delegate actually in use after fallback).
      */

@@ -8,6 +8,7 @@ import android.util.Log
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
+import com.autobots.camera.FrameQuality
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.detection.FaceDetLiteDetector
@@ -45,6 +46,8 @@ data class SavedPhoto(
     val sharpness: Double,
     val subjectRatio: Float,
     val score: Float?,
+    /** What actually decided this frame outranked the others in its window. */
+    val quality: FrameQuality.Score,
 )
 
 data class VideoProcessResult(
@@ -239,6 +242,7 @@ class VideoFrameProcessor(
                     sharpness = it.sharpness,
                     subjectRatio = it.subjectRatio,
                     score = it.score,
+                    quality = it.quality,
                 )
             },
             framesSampled = scannedFrames,
@@ -353,6 +357,7 @@ class VideoFrameProcessor(
                         timestampUs = candidate.timestampUs,
                         subjectRatio = candidate.subjectRatio,
                         score = candidate.score,
+                        quality = candidate.quality,
                     ),
                 )
             } catch (t: Throwable) {
@@ -370,10 +375,15 @@ class VideoFrameProcessor(
     /**
      * Dedup, applied once per chunk instead of once per streaming frame.
      *
-     * Identical rule to 0.1.3 — windows are anchored on the first candidate and closed after
-     * [DEDUP_WINDOW_US], keeping the [MAX_KEEP_PER_WINDOW] sharpest. Because the input is
-     * sorted by PTS first, the outcome matches the streaming version exactly; sorting is what
-     * makes it independent of the order workers happened to finish in.
+     * Windows are anchored on the first candidate and closed after [DEDUP_WINDOW_US], keeping
+     * the [MAX_KEEP_PER_WINDOW] **best**. Because the input is sorted by PTS first, the
+     * outcome is independent of the order workers happened to finish in.
+     *
+     * "Best" meant *sharpest* through 0.1.6, and only sharpest — every other measurement the
+     * pipeline had already paid for was discarded at exactly the moment it chose. It now means
+     * [FrameQuality.Score.total], which folds in subject size, composition, detector
+     * confidence and edge clearance alongside sharpness. See [FrameQuality] for why each term
+     * is normalised and why the weights are recorded per photo rather than trusted.
      */
     private fun selectKeepers(
         candidates: List<SavedCandidate>,
@@ -386,7 +396,7 @@ class VideoFrameProcessor(
 
         fun closeWindow() {
             if (window.isEmpty()) return
-            for ((index, entry) in window.sortedByDescending { it.sharpness }.withIndex()) {
+            for ((index, entry) in window.sortedByDescending { it.quality.total }.withIndex()) {
                 if (index < MAX_KEEP_PER_WINDOW) {
                     keepers.add(entry)
                 } else {
@@ -405,7 +415,7 @@ class VideoFrameProcessor(
             window.add(entry)
         }
         closeWindow()
-        // Deliver in capture order, not in the sharpness order the windows ranked them by.
+        // Deliver in capture order, not in the quality order the windows ranked them by.
         // Sorting on the file name would be wrong: PTS values have differing digit counts,
         // so "..._1200000.jpg" sorts before "..._960000.jpg" lexicographically.
         return keepers.sortedBy { it.timestampUs }
@@ -558,8 +568,44 @@ class VideoFrameProcessor(
             return null
         }
 
+        // Composition is judged in **detect space**, where the boxes were found, so it costs
+        // no extra mapping and means the same thing whatever the source resolution was.
+        //
+        // Against the zone when there is one, not the frame: the operator drew that rectangle
+        // to say where the lane is, and a runner dead-centre in a zone at the left of the
+        // frame is perfectly composed for this session. Judging them against the frame centre
+        // would penalise every photo the zone was set up to take.
+        val region = zone ?: DetectZone.FULL
+        val centreOffset = FrameQuality.centreOffsetOf(
+            subjectBox.left.toFloat(), subjectBox.top.toFloat(),
+            subjectBox.right.toFloat(), subjectBox.bottom.toFloat(),
+            region.left * detectWidth, region.top * detectHeight,
+            region.right * detectWidth, region.bottom * detectHeight,
+        )
+        // Edge clearance uses the **widest** box available — framing is a fact about the body,
+        // not the head. A face can sit comfortably inside the frame while the legs below it are
+        // cut off, which is precisely the shot this term exists to rank down.
+        val framingBox = torsoBox ?: subjectBox
+        val edgeMargin = FrameQuality.edgeMarginOf(
+            framingBox.left.toFloat(), framingBox.top.toFloat(),
+            framingBox.right.toFloat(), framingBox.bottom.toFloat(),
+            detectWidth.toFloat(), detectHeight.toFloat(),
+        )
+        val quality = FrameQuality.score(
+            sharpness = sharpness,
+            sharpnessFloor = profile.minSharpness,
+            subjectRatio = subjectRatio,
+            minSubjectRatio = if (target.usesFace) profile.minFaceHeightRatio else MIN_TORSO_HEIGHT_RATIO,
+            centreOffset = centreOffset,
+            confidence = faceScore,
+            // Only ask the detector once there is a score to rescale: `set.face` is lazy, and
+            // touching it in a Pose-only session would load a face model that never runs.
+            confidenceCeiling = if (faceScore != null) set.face.scoreCeiling else 1f,
+            edgeMargin = edgeMargin,
+        )
+
         logFrame(timestampUs, "candidate", sharpness, subjectRatio, faceScore)
-        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio, faceScore)
+        return FrameCandidate(timestampUs, upright, sharpness, subjectRatio, faceScore, quality)
     }
 
     /**
@@ -858,6 +904,7 @@ class VideoFrameProcessor(
         val subjectRatio: Float,
         /** Detector confidence for the face this frame was kept for; null on ML Kit. */
         val score: Float?,
+        val quality: FrameQuality.Score,
     )
 
     /** A candidate already on disk, waiting to be ranked against the rest of its window. */
@@ -867,6 +914,7 @@ class VideoFrameProcessor(
         val timestampUs: Long,
         val subjectRatio: Float,
         val score: Float?,
+        val quality: FrameQuality.Score,
     )
 
     /** Atomic because every detect worker reports into the same tally. */

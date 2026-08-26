@@ -75,6 +75,8 @@ class FaceDetLiteDetector private constructor(
     private var tilesPerFrame = 0
     @Volatile private var loggedRawSample = false
 
+    override val scoreCeiling: Float get() = MAX_REACHABLE_SCORE
+
     override val diagnostics: Map<String, Any>
         get() = mapOf(
             "requestedBackend" to backend.slug,

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
+import com.autobots.camera.FrameQuality
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.ChunkProcessStatus
@@ -289,6 +290,16 @@ class CapturePipelineCoordinator(
                                 ?: "",
                             String.format(Locale.US, "%.2f", photo.sharpness),
                             String.format(Locale.US, "%.4f", photo.subjectRatio),
+                            // The composite and every term that fed it. The weights in
+                            // FrameQuality are argued, not measured; recording the components
+                            // is what lets a real race re-fit them instead of re-arguing them.
+                            String.format(Locale.US, "%.4f", photo.quality.total),
+                            String.format(Locale.US, "%.4f", photo.quality.sharpness),
+                            String.format(Locale.US, "%.4f", photo.quality.size),
+                            String.format(Locale.US, "%.4f", photo.quality.centre),
+                            photo.quality.confidence
+                                ?.let { String.format(Locale.US, "%.4f", it) } ?: "",
+                            String.format(Locale.US, "%.4f", photo.quality.framing),
                         ).joinToString(",")
                     }
                     facesKept += result.kept
@@ -884,7 +895,15 @@ class CapturePipelineCoordinator(
                     String.format(Locale.US, "%.4f", FaceDetLiteDetector.logitOf(minFaceScore)) +
                     ")",
             )
-            appendLine("file,chunk,ptsUs,score,scoreLogit,sharpness,subjectRatio")
+            appendLine(
+                "# weights sharpness=${FrameQuality.W_SHARPNESS} size=${FrameQuality.W_SUBJECT_SIZE} " +
+                    "centre=${FrameQuality.W_CENTRE} confidence=${FrameQuality.W_CONFIDENCE} " +
+                    "framing=${FrameQuality.W_FRAMING}",
+            )
+            appendLine(
+                "file,chunk,ptsUs,score,scoreLogit,sharpness,subjectRatio," +
+                    "quality,qSharpness,qSize,qCentre,qConfidence,qFraming",
+            )
             rows.forEach { appendLine(it) }
         }
         writeSessionFile(session, PHOTO_INDEX_FILE, text)

@@ -1412,7 +1412,7 @@ private fun CompactStatusCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "Record chunks → extract sharp frames (Face or Pose, experimental)",
+                    text = "Record chunks → extract sharp frames (Face / Pose / Person, experimental)",
                     color = Color(0xFF90A4AE),
                     style = MaterialTheme.typography.labelSmall,
                 )

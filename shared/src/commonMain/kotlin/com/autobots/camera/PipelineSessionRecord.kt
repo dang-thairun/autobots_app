@@ -62,7 +62,7 @@ data class PipelineSessionRecord(
      * that came out would be a fraction of the truth while looking exactly as authoritative.
      * Better to show nothing than a number that cannot be believed.
      */
-    val peopleCount: PeopleCount? = null,
+    val subjectCount: SubjectCount? = null,
     val chunks: List<ChunkRecord> = emptyList(),
 ) {
     val galleryPath: String
@@ -109,7 +109,7 @@ data class PipelineSessionRecord(
             detectorBackend.modelTag(extractionTarget)
 
     /**
-     * How many runners went past, for the history card.
+     * How many subjects went past, for the history card.
      *
      * Three words chosen against three earlier attempts, all of which misled:
      *
@@ -118,10 +118,16 @@ data class PipelineSessionRecord(
      *    whether five tracks were five humans, since a runner crossing a chunk boundary counts
      *    twice and nothing here re-identifies anyone. Hedging the noun points at the wrong
      *    thing.
-     *  - **"runners" against "others", not "people" against "others"**, because the others are
+     *  - **"subjects" against "others", not "people" against "others"**, because the others are
      *    people too — spectators behind the barrier, marshals, crew. "N people · M others"
      *    reads as though the M were not, which is both wrong and the first thing a reader
      *    trips over.
+     *
+     *    "Runners" was the obvious word and is the wrong one: nothing in the pipeline is
+     *    specific to running, and the same rig points at a cycling stage or a parade without a
+     *    line of code changing. "Subject" is also the vocabulary the code already speaks —
+     *    `SubjectFaceDetector`, `SubjectTracker`, `subjectRatio`, `noSubject` — so the screen
+     *    and the source now name the same thing the same way.
      *  - **"others" rather than "bystanders"**, because that group is not only bystanders. It
      *    also holds runners too distant to measure and anyone seen for a single frame. Naming
      *    it precisely would claim more than the data supports.
@@ -130,9 +136,9 @@ data class PipelineSessionRecord(
      * there is no way to notice the filter misfiring on a camera angle it was never measured
      * against.
      */
-    val peopleLine: String?
-        get() = peopleCount?.let {
-            "~${it.runners} runners · ${it.captured} photographed · ${it.others} others"
+    val subjectLine: String?
+        get() = subjectCount?.let {
+            "~${it.subjects} subjects · ${it.captured} photographed · ${it.others} others"
         }
 
     val headlineSummary: String
@@ -261,7 +267,7 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
     appendLine("Photos skipped: $facesSkipped")
     detectionSummary?.let { appendLine(it) }
     appendLine(headlineSummary)
-    peopleLine?.let { appendLine(it) }
+    subjectLine?.let { appendLine(it) }
     if (totalDurationMs > 0) appendLine(timingSummary)
     splitDurationMs.takeIf { it > 0 }?.let {
         val active = (it - splitBlockedMs).coerceAtLeast(0L)
@@ -368,14 +374,14 @@ fun formatVideoDurationMs(ms: Long): String {
  * They are reported as a set on purpose: [runners] alone reads as attendance, which it is not.
  * See [TrackSummary] for the three reasons a passage is not a person.
  */
-data class PeopleCount(
-    /** Passages that moved through and were close enough to have been running. */
-    val runners: Int,
+data class SubjectCount(
+    /** Passages that moved through and were close enough to have been the subject. */
+    val subjects: Int,
     /** Every distinct thing the tracker followed, bystanders included. */
     val passages: Int,
-    /** Of [runners], how many came away with at least one photograph. */
+    /** Of [subjects], how many came away with at least one photograph. */
     val captured: Int,
 ) {
-    /** Everything tracked that was not counted as a runner — the crowd, and the far away. */
-    val others: Int get() = (passages - runners).coerceAtLeast(0)
+    /** Everything tracked that was not counted as a subject — the crowd, and the far away. */
+    val others: Int get() = (passages - subjects).coerceAtLeast(0)
 }

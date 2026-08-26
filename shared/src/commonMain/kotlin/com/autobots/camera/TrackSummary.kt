@@ -95,7 +95,7 @@ data class TrackSummary(
         get() = displacement >= MOVED_THROUGH_DISPLACEMENT
 
     /**
-     * Moved through **and** was near enough for the movement to have been a run.
+     * Moved through **and** was near enough to have been the thing the camera is pointed at.
      *
      * [movedThrough] alone counts the crowd. Measured on the asicsmeta finish chute: the four
      * tracks it called "L→R" against forty going the other way were not runners doubling back,
@@ -103,7 +103,7 @@ data class TrackSummary(
      * top tenth of the frame at [meanHeight] 0.13–0.19, moving 0.085–0.156, just over the
      * displacement bar. Every track that actually produced a photograph measured 0.32–0.81.
      *
-     * Nothing sat between the two groups, so [RUNNER_MIN_HEIGHT] is set in the middle of an
+     * Nothing sat between the two groups, so [SUBJECT_MIN_HEIGHT] is set in the middle of an
      * empty gap rather than on a slope — but it is **one camera angle's gap**. A wider lens or
      * a lane further from the kerb would put real runners lower, and this would then discard
      * them silently. [movedThrough] is still reported alongside so the raw figure stays
@@ -118,8 +118,8 @@ data class TrackSummary(
      * of 49, with the evidence sitting right there. A frame that cleared the face, size,
      * sharpness and person gates is better evidence of a runner than any displacement figure.
      */
-    val likelyRunner: Boolean
-        get() = meanHeight >= RUNNER_MIN_HEIGHT && (movedThrough || captured)
+    val likelySubject: Boolean
+        get() = meanHeight >= SUBJECT_MIN_HEIGHT && (movedThrough || captured)
 
     companion object {
         private const val PI_F = 3.1415927f
@@ -127,7 +127,7 @@ data class TrackSummary(
         /** @see movedThrough */
         const val MOVED_THROUGH_DISPLACEMENT = 0.10f
 
-        /** @see likelyRunner */
-        const val RUNNER_MIN_HEIGHT = 0.25f
+        /** @see likelySubject */
+        const val SUBJECT_MIN_HEIGHT = 0.25f
     }
 }

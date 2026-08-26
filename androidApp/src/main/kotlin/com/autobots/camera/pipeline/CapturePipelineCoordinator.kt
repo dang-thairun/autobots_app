@@ -6,7 +6,7 @@ import android.util.Log
 import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.FrameQuality
-import com.autobots.camera.PeopleCount
+import com.autobots.camera.SubjectCount
 import com.autobots.camera.TrackSummary
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.ExtractionTarget
@@ -929,16 +929,16 @@ class CapturePipelineCoordinator(
      * its nesting if the per-frame path of each track were kept, which it is not.
      */
     /**
-     * Null unless the person detector ran — see [PipelineSessionRecord.peopleCount].
+     * Null unless the person detector ran — see [PipelineSessionRecord.subjectCount].
      */
-    private fun peopleCount(): PeopleCount? {
+    private fun subjectCount(): SubjectCount? {
         if (!extractionTarget.usesPerson) return null
         val rows = synchronized(trackRows) { ArrayList(trackRows) }
         if (rows.isEmpty()) return null
-        return PeopleCount(
-            runners = rows.count { it.second.likelyRunner },
+        return SubjectCount(
+            subjects = rows.count { it.second.likelySubject },
             passages = rows.size,
-            captured = rows.count { it.second.likelyRunner && it.second.captured },
+            captured = rows.count { it.second.likelySubject && it.second.captured },
         )
     }
 
@@ -951,18 +951,18 @@ class CapturePipelineCoordinator(
             appendLine("# ${session.displayName} · ${session.extractionTarget.label} · ${detectorBackend.slug}")
             appendLine(
                 "# passages=${rows.size} movedThrough=$movedThrough " +
-                    "likelyRunner=${rows.count { it.second.likelyRunner }} captured=$captured " +
+                    "likelySubject=${rows.count { it.second.likelySubject }} captured=$captured " +
                     "chunks=${rows.map { it.first }.distinct().size}",
             )
             // Said here rather than left to be rediscovered: this is an upper bound.
             appendLine(
                 "# a track is one continuous sighting, not one person — bystanders are tracked, " +
-                    "chunk boundaries split a runner in two, and there is no re-identification",
+                    "chunk boundaries split a subject in two, and there is no re-identification",
             )
             appendLine(
                 "chunk,track,firstUs,lastUs,durationUs,frames,firstX,firstY,lastX,lastY," +
                     "velX,velY,speed,directionDeg,direction,displacement,closestToCentre," +
-                    "meanHeight,movedThrough,likelyRunner,captured,photos",
+                    "meanHeight,movedThrough,likelySubject,captured,photos",
             )
             rows.sortedWith(compareBy({ it.first }, { it.second.firstSeenUs })).forEach { (chunk, t) ->
                 appendLine(
@@ -979,7 +979,7 @@ class CapturePipelineCoordinator(
                         t.directionLabel,
                         f(t.displacement), f(t.closestToCentre), f(t.meanHeight),
                         if (t.movedThrough) "1" else "0",
-                        if (t.likelyRunner) "1" else "0",
+                        if (t.likelySubject) "1" else "0",
                         if (t.captured) "1" else "0",
                         t.photos.toString(),
                     ).joinToString(","),
@@ -1231,7 +1231,7 @@ class CapturePipelineCoordinator(
             facesSkipped = facesSkippedTotal,
             errorMessage = meta.errorMessage,
             albumFolderName = meta.albumFolderName,
-            peopleCount = peopleCount(),
+            subjectCount = subjectCount(),
             chunks = chunks,
         )
     }

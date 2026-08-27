@@ -11,7 +11,9 @@ Naming: [CONVENTIONS.md](./CONVENTIONS.md).
 | **ThermalGuard auto-throttle** ⬆️ | เลื่อนความสำคัญขึ้น — เหตุผลเดิมที่ไม่ทำ ("throttle เงียบๆ แล้วพลาดนักวิ่ง") ถูกเขียนไว้สำหรับ pipeline แบบ real-time และ **ใช้ไม่ได้กับ Plan B**: วิดีโออัดไว้หมดแล้ว การยืด sample interval หรือหยุด upload ชั่วคราวไม่ทำให้พลาดใครเลย ดู Flow 8 ใน [ARCHITECTURE.md](./ARCHITECTURE.md) |
 | **ยืนยันความละเอียดปลายทาง** | เฟรม 4K = 8.3 MP · ครอปแล้วพอขายไหม · ถ้าไม่พอคือต้องคิด hybrid (วิดีโอตัดสินใจ → ยิง `ImageCapture` จริง) ซึ่งเป็นงานใหญ่และ **แก้ทีหลังไม่ได้** |
 | ~~On-device frame scoring~~ | **ทำแล้ว v0.1.6** — `FrameQuality` 5 ด้าน · เหลือแต่ smile ที่ยังไม่ทำ |
-| YOLO / TFLite detector | Replace ML Kit if field recall needs it |
+| YOLO / TFLite detector | **ปฏิเสธสำหรับ v0.1.7** — AGPL (YOLO) · QNN ไม่รับ postprocess op (EfficientDet-Lite) · ยังไม่มีข้อมูลว่า recall ไม่พอ — [V_0_1_7_PLAN.md §7](./V_0_1_7_PLAN.md) |
+| **Person ID เป็นแกน (ByteTrack + quality ต่อคน)** | **แผน v0.1.7** — pipeline วันนี้เป็น frame-centric · คนที่วิ่งคู่กับคนตัวใหญ่กว่าได้ 0 รูป — [V_0_1_7_PLAN.md](./V_0_1_7_PLAN.md) |
+| 🔁 **ขยาย `CHUNK_TARGET_BYTES` 50 → 200 MB** | **เลื่อนไว้ ไม่ใช่ปฏิเสธ** — chunk ที่ 4K ยาวแค่ ~10–12 วิ ทำให้นักวิ่งถูกหั่นที่รอยต่อ · v0.1.7 แก้ด้วยการเย็บ metadata แทน · เงื่อนไขที่ต้องกลับมาดู: [V_0_1_7_PLAN.md §10](./V_0_1_7_PLAN.md) |
 | ~~Cloud / remote upload~~ | **ทำแล้ว v0.1.5** — ย้ายไปบรรทัด "Already shipped" ข้างล่าง |
 | iOS / iPad operator | Wi‑Fi preview + remote controls |
 | Face AF fallback UI | When tripod moves / focus not calibrated (v0.1 P9) |

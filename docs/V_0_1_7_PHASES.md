@@ -183,10 +183,10 @@
 
 ### สิ่งที่ต้องส่งมอบจาก S0
 
-- [ ] นับทั้ง 3 ตัวเลขจากคลิปที่วัดไว้แล้ว — `run4mins` และคลิปเส้นชัยกลางคืน (ถ้ายังเก็บไฟล์ไว้)
-- [ ] เขียนผลลง `reports/v0.1.7/s0_baseline.md` ตามแบบเดียวกับ `reports/v0.1.3/`
-- [ ] **ตอบให้ได้ 2 ข้อ ก่อนเริ่มเขียนโค้ด:** ทำ S9 ไหม (จาก S0.1) · ทำก้อน 2 ไหม (จาก S0.3)
-- [ ] อัปเดตคำตอบนั้นลง [V_0_1_7_PLAN.md](./V_0_1_7_PLAN.md) §7
+- [x] นับ **S0.2 + S0.3** จาก session v0.1.6 ที่มีอยู่บนเครื่อง (11 session · ไม่ต้องรันใหม่) — ⛔ S0.1 ยังทำไม่ได้
+- [x] เขียนผลลง [`reports/v0.1.7/s0_baseline.md`](../reports/v0.1.7/s0_baseline.md) + ข้อมูลดิบใน `raw/`
+- [x] **ก้อน 2 → ทำ** (S0.3 = 34.3%) · **ก้อน 3 → ลดความสำคัญ** (S0.2 = 4.2% ต่ำกว่าที่ประมาณเท่าตัว) · **S9 ยังตัดสินไม่ได้** จนได้ S0.1
+- [x] อัปเดตลง [PLAN §6](./V_0_1_7_PLAN.md) แล้ว — แทนค่าประมาณ 8–17% ด้วย 4.2% ที่วัดจริง
 
 > ⛔ **ห้ามข้าม S0.1** — ถ้าวิดีโอขาดเกิน 0.6 วินาที งานทั้งก้อน 3 ทำไม่ได้ **การรู้ตอนนี้ประหยัดงานไปทั้งก้อน**
 
@@ -210,9 +210,9 @@
 
 **ทำ**
 
-- [x] `TrackedBox` รับ `score` (default `1f` ให้ path face/pose ยังคอมไพล์ผ่าน)
-- [x] `Sighting.boxes` ถือ `DetectedPerson` แทน `Rect` เปล่า
-- [x] `recordSighting()` ส่ง score ต่อ
+- [x] `TrackedBox` รับ `score` — **`Float? = null` ไม่ใช่ `1f`** · ค่ากลาง ๆ = แจกแต้มที่ detector ไม่ได้ทำได้เอง ⇒ ลอกแบบแผน `FrameQuality.Score.confidence` ที่ nullable ด้วยเหตุผลเดียวกัน
+- [x] score ถึง tracker — **ทำที่ `observed` ไม่ใช่ `Sighting.boxes`** · `Sighting.boxes` เป็น `List<TrackedBox>` อยู่แล้ว จึงเปลี่ยน `observed` จาก `List<Rect>` เป็น `List<TrackedBox>` แล้ว normalise ตอน assign ทั้ง 2 path (face ใช้ `DetectedFace.score` · person ใช้ `DetectedPerson.score`) — **ไม่ต้องมีชนิดใหม่**
+- [x] `recordSighting()` ส่ง score ต่อ — รับ `TrackedBox` ตรง ๆ · `subjectIndex` เทียบด้วย `copy(score = null)`
 
 **เสร็จเมื่อ**
 

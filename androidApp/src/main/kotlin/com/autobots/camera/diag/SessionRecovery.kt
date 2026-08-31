@@ -6,6 +6,7 @@ import com.autobots.camera.delivery.LocalDeliveryWriter
 import com.autobots.camera.perf.PerfRecovery
 import com.autobots.camera.perf.PerfReport
 import com.autobots.camera.perf.PerfStream
+import com.autobots.camera.pipeline.CsvPart
 import java.io.File
 
 /**
@@ -32,6 +33,7 @@ object SessionRecovery {
         val now = System.currentTimeMillis()
         var recovered = 0
         for (dir in dirs) {
+            sweepCsvParts(dir, now)
             val stream = File(dir, PerfStream.FILE_NAME)
             if (!stream.isFile) continue
             // A stream being written right now belongs to a live session, not a dead one.
@@ -51,6 +53,24 @@ object SessionRecovery {
         }
         if (recovered > 0) Log.i(TAG, "Recovered $recovered report(s) from crashed sessions")
         return recovered
+    }
+
+    /**
+     * Drop `*.part` CSV bodies left by a session that died before publishing.
+     *
+     * Done before the `perf_stream.jsonl` checks below, and keyed on each part's own timestamp,
+     * because a session with `CamPerf` disabled writes no stream at all — the loop would
+     * `continue` past it and the parts would never be swept. There is nothing to recover from
+     * them: the rows they hold were already published if the session drained, and a crashed
+     * session's photos are the record that matters.
+     */
+    private fun sweepCsvParts(dir: File, now: Long) {
+        val parts = dir.listFiles { f -> f.isFile && f.name.endsWith(CsvPart.SUFFIX) } ?: return
+        for (part in parts) {
+            // Same reason as the stream's grace window: a live session is still appending.
+            if (now - part.lastModified() < LIVE_GRACE_MS) continue
+            if (part.delete()) Log.i(TAG, "${dir.name}: dropped stale ${part.name}")
+        }
     }
 
     private fun recoverOne(context: Context, dir: File, stream: File): Boolean {

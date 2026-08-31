@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import java.io.File
+import java.io.OutputStream
 
 /**
  * Local Delivery — publish JPEG into DCIM/AutoBots via MediaStore (gallery-visible).
@@ -74,16 +75,29 @@ class LocalDeliveryWriter(
      * Session log / plain text next to JPEGs under DCIM/AutoBots when possible.
      * MediaStore.Files does not allow RELATIVE_PATH under DCIM on API 29+ (crashes on insert).
      */
-    fun publishText(fileName: String, content: String): Uri? {
-        val legacy = legacyPublishText(fileName, content)
+    fun publishText(fileName: String, content: String): Uri? =
+        publishStream(fileName) { it.write(content.toByteArray(Charsets.UTF_8)) }
+
+    /**
+     * Same destinations as [publishText], but the caller writes straight into the stream.
+     *
+     * A file that is built row by row over a whole session must not have to become one `String`
+     * to be delivered — that allocation is the thing `CsvPart` exists to avoid, and routing it
+     * back through [publishText] at the last moment would put it right back.
+     *
+     * [write] may be invoked more than once across the two destinations, so it must be
+     * re-runnable rather than consume a one-shot source.
+     */
+    fun publishStream(fileName: String, write: (OutputStream) -> Unit): Uri? {
+        val legacy = legacyPublishStream(fileName, write)
         if (legacy != null) return legacy
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return publishTextToDownloads(fileName, content)
+            return publishStreamToDownloads(fileName, write)
         }
         return null
     }
 
-    private fun publishTextToDownloads(fileName: String, content: String): Uri? {
+    private fun publishStreamToDownloads(fileName: String, write: (OutputStream) -> Unit): Uri? {
         val relativePath = SessionAlbumNaming.downloadsRelativePath(albumSubfolder)
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -95,7 +109,7 @@ class LocalDeliveryWriter(
         return try {
             val uri = resolver.insert(collection, values) ?: return null
             resolver.openOutputStream(uri)?.use { out ->
-                out.write(content.toByteArray(Charsets.UTF_8))
+                write(out)
             } ?: run {
                 resolver.delete(uri, null, null)
                 return null
@@ -150,11 +164,11 @@ class LocalDeliveryWriter(
         }
     }
 
-    private fun legacyPublishText(fileName: String, content: String): Uri? {
+    private fun legacyPublishStream(fileName: String, write: (OutputStream) -> Unit): Uri? {
         return try {
             val dir = legacyAlbumDir().apply { mkdirs() }
             val dest = File(dir, fileName)
-            dest.writeText(content, Charsets.UTF_8)
+            dest.outputStream().use { write(it) }
             Log.i(TAG, "Delivered $fileName → ${dest.absolutePath} (legacy)")
             Uri.fromFile(dest)
         } catch (t: Throwable) {

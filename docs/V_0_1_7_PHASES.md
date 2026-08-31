@@ -224,7 +224,7 @@
 
 
 
-## S2 · ไฟล์ต่อ chunk + streaming + guardrail ดิสก์
+## ✅ S2 · ไฟล์ต่อ chunk + streaming + guardrail ดิสก์ — **เสร็จแล้ว**
 
 > PLAN §3.6 · §3.7
 
@@ -238,19 +238,19 @@
 
 **ทำ**
 
-- [ ] **writer ต่อ chunk** — เลิกสะสม `trackRows`/`photoRows` ในหน่วยความจำ · เขียน `tracks/c000N.csv` + `photos/c000N.csv` จบต่อ chunk แล้วปิดไฟล์
-- [ ] 🆕 **`LocalDeliveryWriter.publishFile(File)`** — stream เข้า MediaStore ด้วย `file.inputStream().copyTo(out)` ใช้ `IS_PENDING` เดิม
-- [ ] **ไฟล์รวมตอนจบ** — merge ด้วย `BufferedWriter` ไล่แถว แล้วส่งผ่าน `publishFile` **ไม่ใช่** `publishText`
-- [ ] **`chunks.csv`** append ต่อ chunk — `sourceOffsetUs` เอาจาก `segmentStartUs` ที่ splitter มีอยู่แล้ว
-- [ ] **startup orphan cleanup** — ล้าง `sessionDir` ของ session เก่าที่ตกค้าง ทุกครั้งที่เปิดแอป
-- [ ] **disk watermark ระหว่างรัน** — เหลือ < 2 GB หรือ < 5% ⇒ บังคับ flush ก่อนรับเพิ่ม
+- [x] **writer ต่อ chunk** — เลิกสะสม `trackRows`/`photoRows` ในหน่วยความจำ · เขียน `tracks/c000N.csv` + `photos/c000N.csv` จบต่อ chunk แล้วปิดไฟล์
+- [x] 🆕 **`LocalDeliveryWriter.publishStream(fileName) { out -> }`** — stream เข้า MediaStore ด้วย `file.inputStream().copyTo(out)` ใช้ `IS_PENDING` เดิม
+- [x] **ไฟล์รวมตอนจบ** — `publishPart()` เขียน header แล้ว `copyTo(out)` เนื้อไฟล์ตรง ๆ · ไม่มี merge เพราะไม่มีไฟล์ย่อย
+- [x] **`chunks.csv`** append ต่อ chunk — `sourceOffsetUs` เอาจาก `segmentStartUs` ที่ splitter มีอยู่แล้ว
+- [x] **startup orphan cleanup** — ใช้ `SessionRecovery.sweep` ที่มีอยู่ เพิ่ม `sweepCsvParts()` 12 บรรทัด · เกณฑ์ `LIVE_GRACE_MS` เดิม — ล้าง `sessionDir` ของ session เก่าที่ตกค้าง ทุกครั้งที่เปิดแอป
+- [x] **disk watermark ระหว่างรัน** — `warnIfDiskLow()` ต่อ chunk · **เตือนไม่หยุด** เพราะวิดีโออัดไว้แล้ว หยุดตรงนี้ = เสียนักวิ่งเพื่อรักษาดิสก์ — เหลือ < 2 GB หรือ < 5% ⇒ บังคับ flush ก่อนรับเพิ่ม
 
 **เสร็จเมื่อ**
 
-- [ ] ฆ่าโปรเซสกลางคัน ⇒ **มีข้อมูลถึง chunk ล่าสุด** ไม่ใช่ศูนย์
-- [ ] เปิดแอปใหม่หลังฆ่า ⇒ **ไม่มีไฟล์ตกค้าง**
-- [ ] **peak heap ไม่โตตามความยาว session** ← ผ่านหรือไม่ผ่านอยู่ที่ `publishFile`
-- [ ] `chunks.csv` มี `sourceOffsetUs` ที่ seek บนคลิปต้นฉบับได้ตรงจุด
+- [x] ฆ่าโปรเซสกลางคัน ⇒ **22 chunk รอด** (33 track · 51 photo · 22 chunk rows) — ก่อน S2 ได้ศูนย์
+- [x] เปิดแอปใหม่หลังฆ่า ⇒ **`.part` หายหมด** (หลังพ้น `LIVE_GRACE_MS` 120 วิ)
+- [x] **peak heap ไม่โตตามความยาว session** — ไม่มี `String` ก้อนเดียวของทั้งไฟล์อีกแล้ว ทั้งฝั่ง cache และ MediaStore
+- [x] `chunks.csv` มี `sourceOffsetUs` จริง (80000 · 8720000 · 17360000 …) และเจอของแถม: **`rotationDeg=90`** — คลิป import หมุน 90° ⇒ ยืนยันว่าคอลัมน์นี้จำเป็น
 
 ---
 
@@ -503,3 +503,6 @@ deliveryWriter.publishText(fileName, text)   // MediaStore ← รับ String 
 - **เหตุผลทั้งหมด:** [V_0_1_7_PLAN.md](./V_0_1_7_PLAN.md) — §12 คือการตอบกลับรีวิว
 - [DESIGN_FLOW.md](./DESIGN_FLOW.md) · [PIPELINE_FLOW.md](./PIPELINE_FLOW.md) · [CONVENTIONS.md](./CONVENTIONS.md) · [REPORT_GUIDELINE_TH.md](./REPORT_GUIDELINE_TH.md)
 
+
+
+**S2 ยืนยันบนเครื่อง 2026-08-31** (`24069PC21G`) — `tracks.csv` / `photos.csv` **เหมือน baseline ทุกไบต์รวม header** · `chunks.csv` เพิ่มใหม่ 37 แถว

@@ -71,6 +71,16 @@ data class VideoProcessResult(
     val tracks: List<TrackSummary> = emptyList(),
     /** Populated only when [CamPerf.enabled]; feeds `perf_report.json`. */
     val diag: PerfReport.ChunkDiag? = null,
+    /**
+     * Size and orientation of the bitmap every box in this chunk was normalised against.
+     *
+     * Detection runs on an upright, downscaled copy of the frame, so a normalised box means
+     * nothing without these. `chunks.csv` records them so a desktop tool can put the boxes
+     * back on the video.
+     */
+    val detectWidth: Int = 0,
+    val detectHeight: Int = 0,
+    val rotationDegrees: Int = 0,
 ) {
     val savedFiles: List<File> get() = savedPhotos.map { it.file }
 }
@@ -154,6 +164,9 @@ class VideoFrameProcessor(
     private val frameLog = Collections.synchronizedList(ArrayList<PerfReport.FrameDiag>())
     private var currentChunkIndex = 0
 
+    /** Detect-bitmap width/height/rotation, set by the first frame of the chunk. */
+    private var detectGeometry: Triple<Int, Int, Int>? = null
+
     private fun logFrame(
         timestampUs: Long,
         outcome: String,
@@ -177,6 +190,7 @@ class VideoFrameProcessor(
         onProgress: (Int) -> Unit = {},
     ): VideoProcessResult {
         currentChunkIndex = chunkIndex
+        detectGeometry = null
         profile = ProcessProfile.forResolution(resolution)
         target = extractionTarget
         backend = detectorBackend
@@ -252,6 +266,7 @@ class VideoFrameProcessor(
             CamPerf.log { stats.table("Worker2 ${file.name} (${resolution.label}, ${target.label})") }
         }
         CamPerf.log { sharpnessReport(file.name) }
+        val geometry = detectGeometry
         return VideoProcessResult(
             kept = kept,
             skipped = skipped.get(),
@@ -296,6 +311,9 @@ class VideoFrameProcessor(
                     keptPtsUs = keepers.map { it.timestampUs },
                 )
             },
+            detectWidth = geometry?.first ?: 0,
+            detectHeight = geometry?.second ?: 0,
+            rotationDegrees = geometry?.third ?: 0,
         )
     }
 
@@ -529,6 +547,9 @@ class VideoFrameProcessor(
         }
         val detectWidth = detectBmp.width
         val detectHeight = detectBmp.height
+        // Constant for the whole chunk, but read off the bitmap rather than the profile: the
+        // height follows the source aspect and rotation follows the container.
+        detectGeometry = Triple(detectWidth, detectHeight, frame.rotationDegrees)
 
         var faceBox: Rect? = null
         var faceScore: Float? = null

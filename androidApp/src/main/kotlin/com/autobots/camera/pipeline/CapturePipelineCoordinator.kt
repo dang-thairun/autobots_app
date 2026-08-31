@@ -52,7 +52,6 @@ import com.autobots.camera.SessionSource
 import com.autobots.camera.SessionStatus
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Collections
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -209,10 +208,23 @@ class CapturePipelineCoordinator(
     private var minFaceScore = FaceDetLiteDetector.DEFAULT_SCORE_THRESHOLD
 
     /** One row per kept JPEG, flushed to `photos.csv` when the session finishes. */
-    private val photoRows = Collections.synchronizedList(ArrayList<String>())
+    /**
+     * Bodies of `photos.csv` / `tracks.csv` / `chunks.csv`, appended as each chunk finishes.
+     *
+     * These replaced two in-memory row lists. See [CsvPart] for why: a session that died lost
+     * every row, and `buildString` at drain made peak heap grow with session length.
+     */
+    private val photosPart = CsvPart(File(sessionDir, PHOTO_INDEX_FILE + CsvPart.SUFFIX))
+    private val tracksPart = CsvPart(File(sessionDir, TRACK_INDEX_FILE + CsvPart.SUFFIX))
+    private val chunksPart = CsvPart(File(sessionDir, CHUNK_INDEX_FILE + CsvPart.SUFFIX))
+
+    /**
+     * Running totals for the `#` header lines and [subjectCount], which used to be counted by
+     * walking the row list at drain. The list is gone; these are the only survivors of it.
+     */
+    private val trackTotals = TrackTotals()
 
     /** Every passage the tracker saw this session, with the chunk it belongs to. */
-    private val trackRows = Collections.synchronizedList(ArrayList<Pair<Int, TrackSummary>>())
     private var shutterCeilingFps: Int? = null
     private var exposureIndex: Int = 0
     private var exposureStepEv: Double? = null
@@ -278,37 +290,14 @@ class CapturePipelineCoordinator(
                             score = photo.score,
                         )
                     }
-                    result.tracks.forEach { trackRows += item.index to it }
-                    result.savedPhotos.forEach { photo ->
-                        photoRows += listOf(
-                            photo.file.name,
-                            item.index.toString(),
-                            photo.timestampUs.toString(),
-                            photo.score?.let { String.format(Locale.US, "%.4f", it) } ?: "",
-                            photo.score
-                                ?.let {
-                                    String.format(
-                                        Locale.US,
-                                        "%.4f",
-                                        FaceDetLiteDetector.logitOf(it),
-                                    )
-                                }
-                                ?: "",
-                            String.format(Locale.US, "%.2f", photo.sharpness),
-                            String.format(Locale.US, "%.4f", photo.subjectRatio),
-                            // The composite and every term that fed it. The weights in
-                            // FrameQuality are argued, not measured; recording the components
-                            // is what lets a real race re-fit them instead of re-arguing them.
-                            String.format(Locale.US, "%.4f", photo.quality.total),
-                            String.format(Locale.US, "%.4f", photo.quality.sharpness),
-                            String.format(Locale.US, "%.4f", photo.quality.size),
-                            String.format(Locale.US, "%.4f", photo.quality.centre),
-                            photo.quality.confidence
-                                ?.let { String.format(Locale.US, "%.4f", it) } ?: "",
-                            String.format(Locale.US, "%.4f", photo.quality.framing),
-                            photo.trackId.toString(),
-                        ).joinToString(",")
+                    result.tracks.forEach { track ->
+                        trackTotals.add(track)
+                        tracksPart.append(trackRow(item.index, track))
                     }
+                    if (result.tracks.isNotEmpty()) trackTotals.chunks++
+                    chunksPart.append(chunkRow(item, result))
+                    result.savedPhotos.forEach { photosPart.append(photoRow(item.index, it)) }
+                    warnIfDiskLow(item.index)
                     facesKept += result.kept
                     facesSkipped += result.skipped
                     lastChunkProcessMs = result.durationMs
@@ -661,7 +650,9 @@ class CapturePipelineCoordinator(
             }
             publishStats()
         }
-        val accepted = videoQueue.trySend(ChunkWorkItem(meta.index, meta.file))
+        val accepted = videoQueue.trySend(
+            ChunkWorkItem(meta.index, meta.file, meta.sourceOffsetUs, meta.recordedAtEpochMs),
+        )
         if (!accepted.isSuccess) {
             videoPending.decrementAndGet()
             Log.w(TAG, "Video queue full, dropped ${meta.file.name}")
@@ -708,9 +699,26 @@ class CapturePipelineCoordinator(
         publishStats()
     }
 
-    fun hasStorageForRecording(): Boolean {
-        val freeMb = VideoPreviewController.freeStorageMb(appContext.cacheDir)
-        return freeMb >= VideoPreviewController.MIN_FREE_STORAGE_MB
+    fun hasStorageForRecording(): Boolean = freeStorageMb() >= VideoPreviewController.MIN_FREE_STORAGE_MB
+
+    private fun freeStorageMb(): Long = VideoPreviewController.freeStorageMb(appContext.cacheDir)
+
+    /**
+     * Log once per chunk when the cache is running out, because nothing else will.
+     *
+     * [hasStorageForRecording] is checked when a session *starts* and never again, which is how
+     * the un-deleted chunk `.mp4` bug reached 25 GB with nothing to show for it in any log. A
+     * line per chunk is the cheapest thing that would have caught it.
+     *
+     * Deliberately not a stop: the video is already recorded, so aborting here would lose
+     * runners to protect disk. The stop belongs where the writing starts, not where the reading
+     * has already happened.
+     */
+    private fun warnIfDiskLow(chunkIndex: Int) {
+        val freeMb = freeStorageMb()
+        if (freeMb >= VideoPreviewController.MIN_FREE_STORAGE_MB) return
+        Log.w(TAG, "cache low: ${freeMb}MB free after chunk $chunkIndex — session files may be dropped")
+        perfReport.addEvent(System.currentTimeMillis(), "disk_low", chunkIndex, freeMb.toInt())
     }
 
     fun close() {
@@ -891,9 +899,8 @@ class CapturePipelineCoordinator(
      * spreadsheet or a dataframe, not this app.
      */
     private fun writePhotoIndex(session: PipelineSessionRecord) {
-        val rows = synchronized(photoRows) { ArrayList(photoRows) }
-        if (rows.isEmpty()) return
-        val text = buildString {
+        if (!photosPart.hasRows) return
+        val header = buildString {
             appendLine(
                 "# ${session.displayName} · ${session.extractionTarget.label} · " +
                     "${detectorBackend.slug} · minFaceScore=" +
@@ -911,9 +918,8 @@ class CapturePipelineCoordinator(
                 "file,chunk,ptsUs,score,scoreLogit,sharpness,subjectRatio," +
                     "quality,qSharpness,qSize,qCentre,qConfidence,qFraming,track",
             )
-            rows.forEach { appendLine(it) }
         }
-        writeSessionFile(session, PHOTO_INDEX_FILE, text)
+        publishPart(session, PHOTO_INDEX_FILE, header, photosPart)
     }
 
     /**
@@ -925,34 +931,16 @@ class CapturePipelineCoordinator(
      *
      * CSV rather than JSON deliberately. Every field is a scalar, the rows are independent, and
      * the questions asked of it — how many went through, how many did we photograph, which
-     * direction, how fast — are one filter and one count in a spreadsheet. JSON would only earn
-     * its nesting if the per-frame path of each track were kept, which it is not.
+     * direction, how fast — are one filter and one count in a spreadsheet.
      */
-    /**
-     * Null unless the person detector ran — see [PipelineSessionRecord.subjectCount].
-     */
-    private fun subjectCount(): SubjectCount? {
-        if (!extractionTarget.usesPerson) return null
-        val rows = synchronized(trackRows) { ArrayList(trackRows) }
-        if (rows.isEmpty()) return null
-        return SubjectCount(
-            subjects = rows.count { it.second.likelySubject },
-            passages = rows.size,
-            captured = rows.count { it.second.likelySubject && it.second.captured },
-        )
-    }
-
     private fun writeTrackIndex(session: PipelineSessionRecord) {
-        val rows = synchronized(trackRows) { ArrayList(trackRows) }
-        if (rows.isEmpty()) return
-        val movedThrough = rows.count { it.second.movedThrough }
-        val captured = rows.count { it.second.captured }
-        val text = buildString {
+        if (!tracksPart.hasRows) return
+        val header = buildString {
             appendLine("# ${session.displayName} · ${session.extractionTarget.label} · ${detectorBackend.slug}")
             appendLine(
-                "# passages=${rows.size} movedThrough=$movedThrough " +
-                    "likelySubject=${rows.count { it.second.likelySubject }} captured=$captured " +
-                    "chunks=${rows.map { it.first }.distinct().size}",
+                "# passages=${trackTotals.passages} movedThrough=${trackTotals.movedThrough} " +
+                    "likelySubject=${trackTotals.likelySubject} captured=${trackTotals.captured} " +
+                    "chunks=${trackTotals.chunks}",
             )
             // Said here rather than left to be rediscovered: this is an upper bound.
             appendLine(
@@ -964,32 +952,146 @@ class CapturePipelineCoordinator(
                     "velX,velY,speed,directionDeg,direction,displacement,closestToCentre," +
                     "meanHeight,movedThrough,likelySubject,captured,photos",
             )
-            rows.sortedWith(compareBy({ it.first }, { it.second.firstSeenUs })).forEach { (chunk, t) ->
-                appendLine(
-                    listOf(
-                        chunk.toString(),
-                        t.id.toString(),
-                        t.firstSeenUs.toString(),
-                        t.lastSeenUs.toString(),
-                        t.durationUs.toString(),
-                        t.frames.toString(),
-                        f(t.firstCentreX), f(t.firstCentreY), f(t.lastCentreX), f(t.lastCentreY),
-                        f(t.velocityX), f(t.velocityY), f(t.speed),
-                        String.format(Locale.US, "%.1f", t.directionDegrees),
-                        t.directionLabel,
-                        f(t.displacement), f(t.closestToCentre), f(t.meanHeight),
-                        if (t.movedThrough) "1" else "0",
-                        if (t.likelySubject) "1" else "0",
-                        if (t.captured) "1" else "0",
-                        t.photos.toString(),
-                    ).joinToString(","),
-                )
-            }
         }
-        writeSessionFile(session, TRACK_INDEX_FILE, text)
+        publishPart(session, TRACK_INDEX_FILE, header, tracksPart)
+    }
+
+    /** The key that maps every normalised box in the other files back onto video — see [chunkRow]. */
+    private fun writeChunkIndex(session: PipelineSessionRecord) {
+        if (!chunksPart.hasRows) return
+        val header = buildString {
+            appendLine("# ${session.displayName} · boxes in the other files are normalised on an upright detect bitmap of detectW×detectH")
+            appendLine("chunk,video,sourceOffsetUs,recordedAtEpochMs,framesSampled,sampleIntervalMs,detectW,detectH,rotationDeg")
+        }
+        publishPart(session, CHUNK_INDEX_FILE, header, chunksPart)
+    }
+
+    /**
+     * Header, then the body straight off disk — never both in one `String`.
+     *
+     * Routing this through [writeSessionFile] would undo the whole point of [CsvPart]: the file
+     * would have to be materialised in memory at drain, which is the allocation that grows with
+     * session length. The body is discarded only after both destinations have it.
+     */
+    private fun publishPart(
+        session: PipelineSessionRecord,
+        fileName: String,
+        header: String,
+        part: CsvPart,
+    ) {
+        val headerBytes = header.toByteArray(Charsets.UTF_8)
+        runCatching {
+            sessionDir.mkdirs()
+            File(sessionDir, fileName).outputStream().use { out ->
+                out.write(headerBytes)
+                part.copyTo(out)
+            }
+        }.onFailure { Log.e(TAG, "$fileName cache write failed", it) }
+        runCatching {
+            deliveryWriter.publishStream(fileName) { out ->
+                out.write(headerBytes)
+                part.copyTo(out)
+            }
+        }.onFailure { Log.e(TAG, "$fileName gallery write failed", it) }
+        part.discard()
+    }
+
+    /** Null unless the person detector ran — see [PipelineSessionRecord.subjectCount]. */
+    private fun subjectCount(): SubjectCount? {
+        if (!extractionTarget.usesPerson) return null
+        if (trackTotals.passages == 0) return null
+        return SubjectCount(
+            subjects = trackTotals.likelySubject,
+            passages = trackTotals.passages,
+            captured = trackTotals.capturedSubjects,
+        )
     }
 
     private fun f(value: Float): String = String.format(Locale.US, "%.4f", value)
+
+    private fun photoRow(chunk: Int, photo: SavedPhoto): String = listOf(
+        photo.file.name,
+        chunk.toString(),
+        photo.timestampUs.toString(),
+        photo.score?.let { f(it) } ?: "",
+        photo.score?.let { f(FaceDetLiteDetector.logitOf(it)) } ?: "",
+        String.format(Locale.US, "%.2f", photo.sharpness),
+        f(photo.subjectRatio),
+        // The composite and every term that fed it. The weights in FrameQuality are argued,
+        // not measured; recording the components is what lets a real race re-fit them instead
+        // of re-arguing them.
+        f(photo.quality.total),
+        f(photo.quality.sharpness),
+        f(photo.quality.size),
+        f(photo.quality.centre),
+        photo.quality.confidence?.let { f(it) } ?: "",
+        f(photo.quality.framing),
+        photo.trackId.toString(),
+    ).joinToString(",")
+
+    private fun trackRow(chunk: Int, t: TrackSummary): String = listOf(
+        chunk.toString(),
+        t.id.toString(),
+        t.firstSeenUs.toString(),
+        t.lastSeenUs.toString(),
+        t.durationUs.toString(),
+        t.frames.toString(),
+        f(t.firstCentreX), f(t.firstCentreY), f(t.lastCentreX), f(t.lastCentreY),
+        f(t.velocityX), f(t.velocityY), f(t.speed),
+        String.format(Locale.US, "%.1f", t.directionDegrees),
+        t.directionLabel,
+        f(t.displacement), f(t.closestToCentre), f(t.meanHeight),
+        if (t.movedThrough) "1" else "0",
+        if (t.likelySubject) "1" else "0",
+        if (t.captured) "1" else "0",
+        t.photos.toString(),
+    ).joinToString(",")
+
+    /**
+     * One row per chunk — the key that lets the other three files be mapped back onto video.
+     *
+     * `sourceOffsetUs` is where this chunk starts inside the imported file. The splitter
+     * already knows it (`ImportedVideoSplitter` subtracts it to rebase each chunk's PTS to
+     * zero); recording it is what makes a desktop overlay possible without keeping the chunks,
+     * which are deleted as soon as Worker 2 is done with them.
+     *
+     * `rotationDeg` matters for the same reason: detection runs on an upright, downscaled
+     * bitmap, so every normalised box in the other files is relative to *that* orientation.
+     */
+    private fun chunkRow(item: ChunkWorkItem, result: VideoProcessResult): String = listOf(
+        item.index.toString(),
+        item.videoFile.name,
+        item.sourceOffsetUs.toString(),
+        item.recordedAtEpochMs.toString(),
+        result.framesSampled.toString(),
+        resolution.frameSampleIntervalMs.toString(),
+        result.detectWidth.toString(),
+        result.detectHeight.toString(),
+        result.rotationDegrees.toString(),
+    ).joinToString(",")
+
+    /** Replaces walking the old row list at drain — see [trackTotals]. */
+    private class TrackTotals {
+        var passages = 0
+        var movedThrough = 0
+        var likelySubject = 0
+        var captured = 0
+        var capturedSubjects = 0
+        var chunks = 0
+
+        fun add(t: TrackSummary) {
+            passages++
+            if (t.movedThrough) movedThrough++
+            if (t.likelySubject) likelySubject++
+            if (t.captured) captured++
+            if (t.likelySubject && t.captured) capturedSubjects++
+        }
+
+        fun reset() {
+            passages = 0; movedThrough = 0; likelySubject = 0
+            captured = 0; capturedSubjects = 0; chunks = 0
+        }
+    }
 
     private fun writeSessionLog(session: PipelineSessionRecord) {
         val text = session.toLogText()
@@ -999,6 +1101,7 @@ class CapturePipelineCoordinator(
         writeSessionFile(session, LocalDeliveryWriter.SESSION_LOG_FILE, text)
         writePhotoIndex(session)
         writeTrackIndex(session)
+        writeChunkIndex(session)
 
         // Written before the perf report so a compare-mode session still leaves its
         // observations behind even if perf collection is off.
@@ -1119,8 +1222,10 @@ class CapturePipelineCoordinator(
         // Both accumulate for the life of the coordinator, which outlives a session: extracting
         // twice without restarting the app would otherwise put the first run's rows in the
         // second run's file, under the second run's album name.
-        synchronized(photoRows) { photoRows.clear() }
-        synchronized(trackRows) { trackRows.clear() }
+        photosPart.discard()
+        tracksPart.discard()
+        chunksPart.discard()
+        trackTotals.reset()
         // Live capture has no knowable total; the bar falls back to chunksRecorded.
         expectedChunks = 0
         drainNotified.set(false)
@@ -1295,12 +1400,16 @@ class CapturePipelineCoordinator(
     private data class ChunkWorkItem(
         val index: Int,
         val videoFile: File,
+        /** For `chunks.csv` — see [chunkRow]. 0 for live capture, where the chunk *is* the source. */
+        val sourceOffsetUs: Long = 0L,
+        val recordedAtEpochMs: Long = 0L,
     )
 
     companion object {
         /** Sits beside `session_log.txt` in the session album. */
         const val PHOTO_INDEX_FILE = "photos.csv"
         const val TRACK_INDEX_FILE = "tracks.csv"
+        const val CHUNK_INDEX_FILE = "chunks.csv"
 
         private const val TAG = "CapturePipeline"
         const val VIDEO_QUEUE_CAPACITY = 8

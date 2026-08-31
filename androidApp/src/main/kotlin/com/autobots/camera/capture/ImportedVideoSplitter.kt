@@ -185,6 +185,7 @@ class ImportedVideoSplitter(
                         recordedAtEpochMs = System.currentTimeMillis(),
                         recordDurationMs = ((endPtsUs - segmentStartUs) / 1000L).coerceAtLeast(0L),
                         videoSizeBytes = file.length(),
+                        sourceOffsetUs = segmentStartUs,
                     ),
                 )
                 index++

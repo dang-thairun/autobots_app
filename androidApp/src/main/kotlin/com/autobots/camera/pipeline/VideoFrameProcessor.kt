@@ -535,7 +535,7 @@ class VideoFrameProcessor(
         var torsoBox: Rect? = null
         var personBox: Rect? = null
         /** Everything the person detector saw in the zone this frame — the tracker's input. */
-        var observed: List<Rect> = emptyList()
+        var observed: List<TrackedBox> = emptyList()
         var subjectRatio = 0f
         var reject: String? = null
 
@@ -564,7 +564,7 @@ class VideoFrameProcessor(
                     rejects.outOfZone.incrementAndGet()
                     reject = "out_of_zone"
                 }
-                observed = inZone.map { it.bounds }
+                observed = inZone.map { it.bounds.normalisedIn(detectWidth, detectHeight, it.score) }
                 val largest = inZone.maxByOrNull { it.bounds.height() }
                 if (reject != null) {
                     // already decided
@@ -610,7 +610,7 @@ class VideoFrameProcessor(
                         z.containsCentre(b.left, b.top, b.right, b.bottom, detectWidth, detectHeight)
                     }
                 } ?: people
-                observed = inZone.map { it.bounds }
+                observed = inZone.map { it.bounds.normalisedIn(detectWidth, detectHeight, it.score) }
                 val relevant = if (anchor != null) {
                     inZone.filter { it.bounds.contains(anchor.centerX(), anchor.centerY()) }
                 } else {
@@ -792,27 +792,34 @@ class VideoFrameProcessor(
 
     private fun recordSighting(
         timestampUs: Long,
-        observed: List<Rect>,
+        observed: List<TrackedBox>,
         subject: Rect?,
         detectWidth: Int,
         detectHeight: Int,
     ) {
         if (observed.isEmpty() && subject == null) return
-        val rects = observed.ifEmpty { listOfNotNull(subject) }
+        // Pose has no detector list and no score of its own; the torso still has to reach the
+        // tracker, with the score left null rather than invented.
+        val subjectBox = subject?.normalisedIn(detectWidth, detectHeight, score = null)
+        val boxes = observed.ifEmpty { listOfNotNull(subjectBox) }
         sightings.add(
             Sighting(
                 timestampUs = timestampUs,
-                boxes = rects.map { it.normalisedIn(detectWidth, detectHeight) },
-                subjectIndex = subject?.let { rects.indexOf(it) } ?: -1,
+                boxes = boxes,
+                // Same Rect through the same arithmetic gives identical floats, so this is an
+                // exact match, not a tolerance comparison. Score is dropped because the subject
+                // box is rebuilt here without one.
+                subjectIndex = boxes.indexOfFirst { it.copy(score = null) == subjectBox },
             ),
         )
     }
 
-    private fun Rect.normalisedIn(width: Int, height: Int): TrackedBox = TrackedBox(
+    private fun Rect.normalisedIn(width: Int, height: Int, score: Float?): TrackedBox = TrackedBox(
         left = if (width > 0) left.toFloat() / width else 0f,
         top = if (height > 0) top.toFloat() / height else 0f,
         right = if (width > 0) right.toFloat() / width else 0f,
         bottom = if (height > 0) bottom.toFloat() / height else 0f,
+        score = score,
     )
 
     /**

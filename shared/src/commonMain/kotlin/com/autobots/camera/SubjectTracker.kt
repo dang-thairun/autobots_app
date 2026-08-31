@@ -11,6 +11,14 @@ data class TrackedBox(
     val top: Float,
     val right: Float,
     val bottom: Float,
+    /**
+     * Detector confidence, or null on a path that reports none (face/pose boxes).
+     *
+     * Null rather than a neutral default for the same reason [com.autobots.camera.FrameQuality.Score.confidence]
+     * is nullable: a fixed stand-in would quietly hand a whole detector a score it never earned,
+     * and ByteTrack's high/low tier split reads this directly.
+     */
+    val score: Float? = null,
 ) {
     val centreX: Float get() = (left + right) / 2f
     val centreY: Float get() = (top + bottom) / 2f

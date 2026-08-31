@@ -38,6 +38,7 @@ Three different numbering schemes — do not mix them up.
 | **Phase B1–B4** | Plan B video pipeline slices — see [IMPLEMENTATION.md](./IMPLEMENTATION.md) | B1 = chunk record + extract + gallery |
 | **Phase P0–P8** | MVP milestones (done) | P6 = Write Queue + Local Delivery |
 | **Phase P9–P10** | Tripod hardening slices (v0.1 stills, paused) | P9c = Fixed Focus runtime |
+| **Slice S0–S11** | v0.1.7 work slices (`S` = **Slice**, same kind of unit as a Phase) — see [V_0_1_7_PHASES.md](./V_0_1_7_PHASES.md) | S6 = ByteTrack + DIoU + Hungarian |
 | **Flow 1–N** | Product / design rule (replaces old ADR 000X) | Flow 15 = Fixed Focus default |
 | **Passage step 1–10** | Runtime sequence for one runner (PRD v0.1 only) | Step 5 = Lean Burst fires |
 

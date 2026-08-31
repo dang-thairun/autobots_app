@@ -228,28 +228,50 @@
 
 > PLAN §3.6 · §3.7
 
+**ลอกของที่มีอยู่ ไม่เขียนใหม่** — [`PerfStream.kt`](../androidApp/src/main/kotlin/com/autobots/camera/perf/PerfStream.kt) แก้ปัญหาเดียวกันนี้ให้ `perf_report.json` ไปแล้ว (KDoc: *"a session that dies at minute 105 of 120 leaves nothing at all"*) พร้อม `lock` · `BufferedWriter` · ธง `failed` ที่ทำให้ writer พังแล้วไม่ล้ม pipeline · และ `PerfRecovery` ที่ทิ้งบรรทัดสุดท้ายที่เขียนไม่จบ
+
 **แตะ**
 
-- `androidApp/src/main/kotlin/com/autobots/camera/pipeline/CapturePipelineCoordinator.kt` — `trackRows` / `photoRows` (บรรทัด ~215) · `writeTrackIndex()` · `writePhotoIndex()` · `writeSessionFile()` · `hasStorageForRecording()` (~711)
-- **ไฟล์ใหม่:** ตัวเขียน CSV แบบ streaming
+- `CapturePipelineCoordinator.kt` — `trackRows` / `photoRows` (~215) · `writePhotoIndex()` (~893) · `writeTrackIndex()` (~945) · `writeSessionFile()` (~1014) · `hasStorageForRecording()` (~711)
+- `LocalDeliveryWriter.kt` — `publishText()` (~77)
+- `ImportedVideoSplitter.kt` — `segmentStartUs` (~215)
 
 **ทำ**
 
-- [ ] เลิกสะสมแถวในหน่วยความจำ — เขียน `sightings/c000N.csv` + `tracks/c000N.csv` จบต่อ chunk แล้วปิดไฟล์
-- [ ] `chunks.csv` append ต่อ chunk (คอลัมน์ตาม PLAN §3.4)
-- [ ] ไฟล์รวมตอนจบเขียนด้วย `BufferedWriter` ไล่แถว — **ไม่ใช่** `buildString`
-- [ ] **startup orphan cleanup** — ล้าง `staging/` `sightings/` `tracks/` ที่ตกค้าง ทุกครั้งที่เปิดแอป
+- [ ] **writer ต่อ chunk** — เลิกสะสม `trackRows`/`photoRows` ในหน่วยความจำ · เขียน `tracks/c000N.csv` + `photos/c000N.csv` จบต่อ chunk แล้วปิดไฟล์
+- [ ] 🆕 **`LocalDeliveryWriter.publishFile(File)`** — stream เข้า MediaStore ด้วย `file.inputStream().copyTo(out)` ใช้ `IS_PENDING` เดิม
+- [ ] **ไฟล์รวมตอนจบ** — merge ด้วย `BufferedWriter` ไล่แถว แล้วส่งผ่าน `publishFile` **ไม่ใช่** `publishText`
+- [ ] **`chunks.csv`** append ต่อ chunk — `sourceOffsetUs` เอาจาก `segmentStartUs` ที่ splitter มีอยู่แล้ว
+- [ ] **startup orphan cleanup** — ล้าง `sessionDir` ของ session เก่าที่ตกค้าง ทุกครั้งที่เปิดแอป
 - [ ] **disk watermark ระหว่างรัน** — เหลือ < 2 GB หรือ < 5% ⇒ บังคับ flush ก่อนรับเพิ่ม
-- [ ] แบ่ง subdirectory เผื่อ ~2,410 ไฟล์ที่ 3.5 ชม. (PLAN §3.8)
 
 **เสร็จเมื่อ**
 
 - [ ] ฆ่าโปรเซสกลางคัน ⇒ **มีข้อมูลถึง chunk ล่าสุด** ไม่ใช่ศูนย์
 - [ ] เปิดแอปใหม่หลังฆ่า ⇒ **ไม่มีไฟล์ตกค้าง**
-- [ ] **peak heap ไม่โตตามความยาว session**
-- [ ] `sourceOffsetUs` — ⚠️ **ไปตรวจที่ splitter ว่ารู้ค่านี้ไหม** ถ้าไม่รู้ ให้บันทึกว่าเป็นค่าประมาณ (PLAN §3.4)
+- [ ] **peak heap ไม่โตตามความยาว session** ← ผ่านหรือไม่ผ่านอยู่ที่ `publishFile`
+- [ ] `chunks.csv` มี `sourceOffsetUs` ที่ seek บนคลิปต้นฉบับได้ตรงจุด
 
+---
 
+### ⚠️ ปลายทางไม่ใช่ไฟล์ในเครื่อง — ตัวที่ตัดสิน DoD
+
+```kotlin
+// writeSessionFile() :1014 — เขียน 2 ที่
+File(sessionDir, fileName).writeText(text)   // cacheDir   ← stream ได้
+deliveryWriter.publishText(fileName, text)   // MediaStore ← รับ String เท่านั้น
+```
+
+`publishText(fileName, content: String)` ยิงเข้า MediaStore ทีเดียวด้วย `out.write(content.toByteArray())` — **และนั่นคือที่ที่ไฟล์ไปโผล่ใน `/sdcard/Download/AutoBots/`**
+
+⇒ เขียนต่อ chunk ลง cacheDir สำเร็จก็ยังไม่พอ **ไฟล์รวมยังต้องกลายเป็น String ก้อนเดียวเพื่อเข้า MediaStore** ⇒ peak heap ที่ S2 ตั้งใจกำจัด **ยังอยู่ครบ**
+
+### ตัดออกจากแผนเดิม 2 ข้อ
+
+| ตัด | เพราะ |
+|---|---|
+| `sightings/c000N.csv` | **`sightings.csv` เกิดใน S8** — วันนี้ยังไม่มีข้อมูลรายเฟรมให้เขียน · S2 มีแค่ `tracks` + `photos` |
+| แบ่ง subdirectory เผื่อ ~2,410 ไฟล์ | ext4 ไม่สะดุดที่หลักพัน — **ทำเมื่อ S11 วัดแล้วเห็นปัญหาจริง** ไม่ใช่ตอนนี้ |
 
 ## S3 · แยก Worker 1 / Worker 2
 

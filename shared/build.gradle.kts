@@ -26,6 +26,7 @@ kotlin {
             implementation(libs.ktor.serialization.json)
         }
         commonTest.dependencies {
+            implementation(kotlin("test"))
         }
         androidMain.dependencies {
         }

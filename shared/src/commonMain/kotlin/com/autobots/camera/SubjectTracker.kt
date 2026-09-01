@@ -207,14 +207,32 @@ class SubjectTracker(
     }
 
     /**
-     * Every track this instance ever opened, closed ones and still-open ones alike.
+     * The tracks that have closed since the last call — nobody has been matched to them for
+     * longer than [maxGapUs], so the person really has left the frame.
+     *
+     * This is what lets selection wait for a *person* instead of for a chunk. A tracker that
+     * only ever spoke at [finish] forced the pipeline to decide at the end of whichever chunk
+     * it happened to be holding, which cut a runner crossing a chunk edge into two people and
+     * gave each half its own budget of photos.
+     *
+     * Each track comes out exactly once: this drains the closed list rather than copying it.
+     */
+    fun drainClosed(): List<TrackSummary> {
+        if (finished.isEmpty()) return emptyList()
+        val out = finished.sortedBy { it.firstSeenUs }
+        finished.clear()
+        return out
+    }
+
+    /**
+     * Every track not already handed out by [drainClosed], closed ones and still-open ones alike.
      *
      * Call once, after the last [assign]. The tracker is spent afterwards — the remaining live
      * tracks have been retired into the result.
      */
     fun finish(): List<TrackSummary> {
         retire { true }
-        return finished.sortedBy { it.firstSeenUs }
+        return drainClosed()
     }
 
     /**

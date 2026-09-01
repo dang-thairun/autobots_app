@@ -9,10 +9,12 @@ import com.autobots.camera.DetectZone
 import com.autobots.camera.DetectorBackend
 import com.autobots.camera.ExtractionTarget
 import com.autobots.camera.FrameQuality
+import com.autobots.camera.PickCandidate
 import com.autobots.camera.StreamResolution
 import com.autobots.camera.SubjectTracker
 import com.autobots.camera.TrackSummary
 import com.autobots.camera.TrackedBox
+import com.autobots.camera.pickKeepers
 import com.autobots.camera.detection.DetectorComparison
 import com.autobots.camera.detection.FaceDetLiteDetector
 import com.autobots.camera.detection.OfflineFaceDetector
@@ -53,23 +55,26 @@ data class SavedPhoto(
     /** What actually decided this frame outranked the others in its window. */
     val quality: FrameQuality.Score,
     /**
-     * Which runner this is, within the chunk. Ids restart per chunk and mean nothing across
-     * them — but two photos of one runner sharing an id is the check that the per-track
-     * windowing did what it claims, and it cannot be made after the fact.
+     * Which runner this is. Ids come from one [SubjectTracker] for the whole session, so a
+     * runner who crossed a chunk boundary keeps the same id on both sides — that is the
+     * difference S3 bought, and `tracks.csv` joins on it.
      */
     val trackId: Int,
 )
 
 data class VideoProcessResult(
-    val kept: Int,
+    /** What Worker 1 saw — the handoff to [PhotoSelector]. */
+    val observation: ChunkObservation,
+    /** Frames the gates threw out. Candidates that lose their window are Worker 2's tally. */
     val skipped: Int,
     val durationMs: Long,
-    val savedPhotos: List<SavedPhoto> = emptyList(),
     val framesSampled: Int = 0,
     val decodeFailures: Int = 0,
-    /** Every passage the tracker saw in this chunk, photographed or not. */
-    val tracks: List<TrackSummary> = emptyList(),
-    /** Populated only when [CamPerf.enabled]; feeds `perf_report.json`. */
+    /**
+     * Populated only when [CamPerf.enabled]; feeds `perf_report.json`.
+     *
+     * `kept` is zero here and filled in by Worker 2 — Worker 1 no longer decides anything.
+     */
     val diag: PerfReport.ChunkDiag? = null,
     /**
      * Size and orientation of the bitmap every box in this chunk was normalised against.
@@ -81,9 +86,7 @@ data class VideoProcessResult(
     val detectWidth: Int = 0,
     val detectHeight: Int = 0,
     val rotationDegrees: Int = 0,
-) {
-    val savedFiles: List<File> get() = savedPhotos.map { it.file }
-}
+)
 
 /**
  * Worker 2 — sample video chunks, keep sharp full-frame JPEGs with visible faces or poses.
@@ -248,16 +251,20 @@ class VideoFrameProcessor(
             stats
         }
 
-        // Selection runs once, over the whole chunk, in PTS order — see the class doc.
-        val selection = selectKeepers(candidates, skipped)
-        val keepers = selection.keepers
-        val kept = keepers.size
         onProgress(100)
+        // Nothing is ranked or deleted here any more — that is [PhotoSelector]'s job, and it
+        // cannot start until it knows whether the people in this chunk have finished going past.
+        val observation = ChunkObservation(
+            chunkIndex = chunkIndex,
+            frames = synchronized(sightings) { ArrayList(sightings) },
+            candidates = synchronized(candidates) { ArrayList(candidates) },
+        )
 
         val durationMs = System.currentTimeMillis() - started
         Log.i(
             TAG,
-            "Processed ${file.name} (${resolution.label}, ${target.label}): kept=$kept " +
+            "Observed ${file.name} (${resolution.label}, ${target.label}): " +
+                "candidates=${observation.candidates.size} " +
                 "skipped=${skipped.get()} sampled=$scannedFrames " +
                 "decodeFail=${sampleStats.decodeFailures} rejects=$rejects " +
                 "workers=${detectors.size} ${durationMs}ms",
@@ -268,29 +275,18 @@ class VideoFrameProcessor(
         CamPerf.log { sharpnessReport(file.name) }
         val geometry = detectGeometry
         return VideoProcessResult(
-            kept = kept,
+            observation = observation,
             skipped = skipped.get(),
             durationMs = durationMs,
-            savedPhotos = keepers.map {
-                SavedPhoto(
-                    file = it.file,
-                    timestampUs = it.timestampUs,
-                    sharpness = it.sharpness,
-                    subjectRatio = it.subjectRatio,
-                    score = it.score,
-                    quality = it.quality,
-                    trackId = it.trackId,
-                )
-            },
             framesSampled = scannedFrames,
             decodeFailures = sampleStats.decodeFailures,
-            tracks = selection.tracks,
             diag = if (!CamPerf.enabled) {
                 null
             } else {
                 PerfReport.ChunkDiag(
                     framesSampled = scannedFrames,
-                    kept = kept,
+                    // Filled in by Worker 2, which is the only one that knows.
+                    kept = 0,
                     skipped = skipped.get(),
                     decodeFailures = sampleStats.decodeFailures,
                     processDurationMs = durationMs,
@@ -308,7 +304,8 @@ class VideoFrameProcessor(
                     detector = detectorDiagnostics(),
                     stages = perf?.snapshot().orEmpty(),
                     frames = synchronized(frameLog) { ArrayList(frameLog) },
-                    keptPtsUs = keepers.map { it.timestampUs },
+                    // Empty here; Worker 2 fills it when it decides who won each window.
+                    keptPtsUs = emptyList(),
                 )
             },
             detectWidth = geometry?.first ?: 0,
@@ -424,106 +421,6 @@ class VideoFrameProcessor(
                 frame.release()
             }
         }
-    }
-
-    /**
-     * Dedup, applied once per chunk instead of once per streaming frame.
-     *
-     * Two questions, in order: **who is in each frame**, then **which of their frames to keep**.
-     *
-     * *Who* is [SubjectTracker], run over the whole chunk in PTS order once every worker has
-     * finished. Offline is the easy case — every detection is already in hand — and it is the
-     * reason the parallel, out-of-order detect workers cost nothing here.
-     *
-     * *Which* is a window of [DEDUP_WINDOW_US] keeping the [MAX_KEEP_PER_WINDOW] **best**, and
-     * the two things that phrase means have both changed:
-     *
-     *  - The window used to be a second **of the clock**, which quietly assumed a second of
-     *    footage is one runner. Two runners in the same second shared one budget of three, so
-     *    all three keepers could be the nearer of them and the other was never photographed —
-     *    while every counter reported a healthy yield. It is now a second **of one runner's
-     *    frames**, and they get three each.
-     *  - "Best" meant *sharpest*, and only sharpest, through 0.1.6. It now means
-     *    [FrameQuality.Score.total] — subject size, composition, detector confidence and edge
-     *    clearance alongside sharpness. See [FrameQuality] for why each term is normalised and
-     *    why the weights are recorded per photo rather than trusted.
-     */
-    /** What one chunk's selection produced: the photos, and every passage behind them. */
-    private data class Selection(
-        val keepers: List<SavedCandidate>,
-        val tracks: List<TrackSummary>,
-    )
-
-    private fun selectKeepers(
-        candidates: List<SavedCandidate>,
-        skipped: AtomicInteger,
-    ): Selection {
-        val byPts = synchronized(candidates) { ArrayList(candidates) }.sortedBy { it.timestampUs }
-        if (byPts.isEmpty()) return Selection(emptyList(), emptyList())
-
-        // Identity first, selection second. The tracker runs over **every sampled frame**, in
-        // capture order, and over every box in them — not over the kept candidates. A runner
-        // who was briefly too small or clipped still has to stay the same person through those
-        // frames, and someone who is merely present has to keep their id through the frames
-        // where somebody else was the subject.
-        val tracker = SubjectTracker()
-        val trackOf = HashMap<Long, Int>()
-        val frames = synchronized(sightings) { ArrayList(sightings) }.sortedBy { it.timestampUs }
-        for (frame in frames) {
-            val ids = tracker.assign(frame.timestampUs, frame.boxes)
-            tracker.commit(frame.timestampUs, frame.boxes, ids)
-            if (frame.subjectIndex >= 0) {
-                ids.getOrNull(frame.subjectIndex)?.let { trackOf[frame.timestampUs] = it }
-            }
-        }
-        byPts.forEach { it.trackId = trackOf[it.timestampUs] ?: UNTRACKED }
-
-        // One budget per runner, not one per second. A window is still [DEDUP_WINDOW_US] long,
-        // but it is now a window *of that runner's frames*, so two people going past together
-        // get [MAX_KEEP_PER_WINDOW] photos each instead of sharing three between them.
-        val keepers = HashSet<Long>()
-        for ((_, frames) in byPts.groupBy { trackOf[it.timestampUs] ?: UNTRACKED }) {
-            var windowStartUs = -1L
-            val window = mutableListOf<SavedCandidate>()
-
-            fun closeWindow() {
-                if (window.isEmpty()) return
-                window.sortedByDescending { it.quality.total }
-                    .take(MAX_KEEP_PER_WINDOW)
-                    .forEach { keepers.add(it.timestampUs) }
-                window.clear()
-            }
-
-            for (entry in frames) {
-                if (windowStartUs < 0 || entry.timestampUs - windowStartUs >= DEDUP_WINDOW_US) {
-                    closeWindow()
-                    windowStartUs = entry.timestampUs
-                }
-                window.add(entry)
-            }
-            closeWindow()
-        }
-
-        val kept = byPts.filter { it.timestampUs in keepers }
-        for (entry in byPts) {
-            if (entry.timestampUs !in keepers) {
-                skipped.incrementAndGet()
-                entry.file.delete()
-            }
-        }
-
-        // Stamp the outcome onto the passage that produced it. A track with captured=false is
-        // the interesting row: someone went past and the pipeline has no photograph of them.
-        val photosPerTrack = kept.groupingBy { it.trackId }.eachCount()
-        val tracks = tracker.finish().map {
-            val photos = photosPerTrack[it.id] ?: 0
-            it.copy(captured = photos > 0, photos = photos)
-        }
-
-        // Deliver in capture order, not in the quality order the windows ranked them by.
-        // Sorting on the file name would be wrong: PTS values have differing digit counts,
-        // so "..._1200000.jpg" sorts before "..._960000.jpg" lexicographically.
-        return Selection(kept, tracks)
     }
 
     /**
@@ -803,13 +700,6 @@ class VideoFrameProcessor(
         logFrame(timestampUs, "candidate", sharpness, subjectRatio, faceScore)
         return FrameCandidate(timestampUs, upright, sharpness, subjectRatio, faceScore, quality)
     }
-
-    /** One frame's detections, normalised, with which of them the gates chose (-1 if none). */
-    private data class Sighting(
-        val timestampUs: Long,
-        val boxes: List<TrackedBox>,
-        val subjectIndex: Int,
-    )
 
     private fun recordSighting(
         timestampUs: Long,
@@ -1151,17 +1041,6 @@ class VideoFrameProcessor(
         val quality: FrameQuality.Score,
     )
 
-    /** A candidate already on disk, waiting to be ranked against the rest of its window. */
-    private data class SavedCandidate(
-        val file: File,
-        val sharpness: Double,
-        val timestampUs: Long,
-        val subjectRatio: Float,
-        val score: Float?,
-        val quality: FrameQuality.Score,
-        var trackId: Int = UNTRACKED,
-    )
-
     /** Atomic because every detect worker reports into the same tally. */
     private class RejectStats {
         val noSubject = AtomicInteger(0)
@@ -1206,10 +1085,6 @@ class VideoFrameProcessor(
 
     companion object {
         private const val TAG = "VideoFrameProcessor"
-        private const val DEDUP_WINDOW_US = 1_000_000L
-
-        /** Bucket for candidates the tracker could not give an id to — windowed by clock. */
-        private const val UNTRACKED = 0
 
         /**
          * Detect workers running alongside the decoder.
@@ -1245,15 +1120,6 @@ class VideoFrameProcessor(
 
         /** Halve-then-scale for the detect bitmap. See [downscale]. */
         private const val MULTISTEP_DOWNSCALE = true
-
-        /**
-         * Photos kept per dedup window.
-         *
-         * 0.1.2–0.1.3 kept the single sharpest frame, which turned a runner's whole pass in
-         * front of the lens into one photo — 42 candidates became 7 in the UHD test. Keeping
-         * three matches the Passage Outcome in CONTEXT.md (Keep-All Policy, ~3 per passage).
-         */
-        private const val MAX_KEEP_PER_WINDOW = 3
 
         /** Smallest ROI the sharpness scorer can work with. */
         private const val MIN_ROI_PX = 8

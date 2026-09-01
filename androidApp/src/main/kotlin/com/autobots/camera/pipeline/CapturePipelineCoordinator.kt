@@ -36,6 +36,7 @@ import com.autobots.camera.perf.PerfStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.File
 import com.autobots.camera.PipelineSessionRecord
@@ -73,6 +75,33 @@ class CapturePipelineCoordinator(
     private val facesDir = File(sessionDir, "faces")
     private val videoQueue = Channel<ChunkWorkItem>(VIDEO_QUEUE_CAPACITY)
     private val videoPending = AtomicInteger(0)
+
+    /**
+     * Worker 1 → Worker 2, and the disk ceiling in the same object.
+     *
+     * The capacity *is* the backpressure: once Worker 2 is a retention window behind, Worker 1
+     * suspends on [Channel.send] instead of piling more candidates onto the disk. Nothing is
+     * ever dropped to catch up — an offline pipeline has no deadline to miss, and a discarded
+     * candidate is a runner with no photograph.
+     */
+    private val handoffQueue = Channel<ChunkHandoff>(PhotoSelector.CANDIDATE_RETENTION_CHUNKS)
+    private val handoffPending = AtomicInteger(0)
+    private val selectorBusy = AtomicBoolean(false)
+
+    /**
+     * Worker 2. Recreated per session because it holds one tracker for the whole session, and
+     * a second extraction without restarting the app must not inherit the first one's people.
+     */
+    @Volatile
+    private var photoSelector = newPhotoSelector()
+
+    /**
+     * Wall clock of the first chunk, so live chunks can be placed on one session timeline.
+     *
+     * An import knows its own offsets ([ChunkWorkItem.sourceOffsetUs]); the recorder does not,
+     * and chunk presentation timestamps restart near zero every chunk. See [sessionOffsetUs].
+     */
+    private var firstChunkRecordedAtEpochMs: Long? = null
     private val workerBusy = AtomicBoolean(false)
     private val historyLock = Mutex()
     private val chunkHistory = mutableListOf<ChunkRecord>()
@@ -282,43 +311,20 @@ class CapturePipelineCoordinator(
                         currentChunkPercent = percent
                         publishStats()
                     }
-                    val images = result.savedPhotos.map { photo ->
-                        ExtractedFaceImage(
-                            fileName = photo.file.name,
-                            sizeBytes = photo.file.length(),
-                            absolutePath = photo.file.absolutePath,
-                            score = photo.score,
-                        )
-                    }
-                    result.tracks.forEach { track ->
-                        trackTotals.add(track)
-                        tracksPart.append(trackRow(item.index, track))
-                    }
-                    if (result.tracks.isNotEmpty()) trackTotals.chunks++
                     chunksPart.append(chunkRow(item, result))
-                    result.savedPhotos.forEach { photosPart.append(photoRow(item.index, it)) }
                     warnIfDiskLow(item.index)
-                    facesKept += result.kept
-                    facesSkipped += result.skipped
                     lastChunkProcessMs = result.durationMs
                     chunksProcessed++
-                    historyLock.withLock {
-                        val i = chunkHistory.indexOfFirst { it.index == item.index }
-                        if (i >= 0) {
-                            chunkHistory[i] = chunkHistory[i].copy(
-                                status = ChunkProcessStatus.Done,
-                                processDurationMs = result.durationMs,
-                                facesKept = result.kept,
-                                facesSkipped = result.skipped,
-                                framesSampled = result.framesSampled,
-                                sampleIntervalMs = resolution.frameSampleIntervalMs,
-                                extractedImages = images,
-                            )
-                        }
-                    }
-                    recordChunkEndToEnd(item, processStartMs, result)
-                    for (imageFile in result.savedFiles) {
-                        imageDelivery.enqueue(imageFile)
+                    // The chunk stays `Processing` until Worker 2 has decided its photos —
+                    // which is honest: nothing about it is finished yet.
+                    val handoff = ChunkHandoff(item, result, processStartMs, sessionOffsetUs(item))
+                    handoffPending.incrementAndGet()
+                    try {
+                        handoffQueue.send(handoff)
+                    } catch (t: Throwable) {
+                        // Nobody will decrement it for us, and a stuck counter blocks the drain.
+                        handoffPending.decrementAndGet()
+                        throw t
                     }
                 } catch (t: Throwable) {
                     Log.e(TAG, "Video process failed for ${item.videoFile.name}", t)
@@ -347,6 +353,123 @@ class CapturePipelineCoordinator(
                 }
             }
         }
+
+        // Worker 2. One consumer, so rows keep coming out in chunk order and the tracker sees
+        // frames in ascending session time — both of which a second consumer would break.
+        scope.launch(Dispatchers.Default) {
+            for (handoff in handoffQueue) {
+                selectorBusy.set(true)
+                try {
+                    val outcome = photoSelector.accept(
+                        handoff.result.observation,
+                        handoff.sessionOffsetUs,
+                    )
+                    commitOutcome(outcome)
+                    finishChunk(handoff, outcome)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Selection failed for chunk ${handoff.item.index}", t)
+                    historyLock.withLock {
+                        val i = chunkHistory.indexOfFirst { it.index == handoff.item.index }
+                        if (i >= 0) {
+                            chunkHistory[i] = chunkHistory[i].copy(status = ChunkProcessStatus.Failed)
+                        }
+                    }
+                } finally {
+                    handoffPending.decrementAndGet()
+                    selectorBusy.set(false)
+                    publishStats()
+                    maybeNotifyDrainComplete()
+                }
+            }
+        }
+    }
+
+    /** One chunk, observed and waiting for Worker 2 to say who was in it. */
+    private class ChunkHandoff(
+        val item: ChunkWorkItem,
+        val result: VideoProcessResult,
+        val processStartMs: Long,
+        val sessionOffsetUs: Long,
+    )
+
+    private fun newPhotoSelector() = PhotoSelector(
+        windowUs = PhotoSelector.DEDUP_WINDOW_US,
+        maxPerWindow = PhotoSelector.MAX_KEEP_PER_WINDOW,
+        retentionChunks = PhotoSelector.CANDIDATE_RETENTION_CHUNKS,
+    )
+
+    /**
+     * Where this chunk starts on the session clock, in microseconds.
+     *
+     * An import knows exactly, because the splitter subtracted the same number to rebase the
+     * chunk's presentation timestamps. Live recording does not, so the recorder's wall clock
+     * stands in — millisecond resolution against a 120 ms sample interval. How wide the gap
+     * between two live chunks really is is what S0.1 measures; if it is ever wider than
+     * `SubjectTracker.maxGapUs` a runner still splits at the seam, and that is S9's problem.
+     */
+    private fun sessionOffsetUs(item: ChunkWorkItem): Long {
+        if (item.sourceOffsetUs > 0L) return item.sourceOffsetUs
+        val first = firstChunkRecordedAtEpochMs ?: item.recordedAtEpochMs
+        firstChunkRecordedAtEpochMs = first
+        return ((item.recordedAtEpochMs - first).coerceAtLeast(0L)) * 1_000L
+    }
+
+    /**
+     * Write out whatever Worker 2 just settled.
+     *
+     * A settlement is per *person*, so its photos may belong to more than one chunk — a runner
+     * who crossed a boundary has frames on both sides. Every counter here therefore adds
+     * rather than assigns.
+     */
+    private suspend fun commitOutcome(outcome: PhotoSelector.Outcome) {
+        outcome.tracks.forEach { row ->
+            trackTotals.add(row.track)
+            tracksPart.append(trackRow(row.chunkIndex, row.track))
+        }
+        if (outcome.tracks.isNotEmpty()) trackTotals.chunks++
+        outcome.photos.forEach { photosPart.append(photoRow(it.chunkIndex, it.photo)) }
+        facesKept += outcome.photos.size
+        facesSkipped += outcome.losers
+
+        outcome.photos.groupBy { it.chunkIndex }.forEach { (chunk, rows) ->
+            val images = rows.map { row ->
+                ExtractedFaceImage(
+                    fileName = row.photo.file.name,
+                    sizeBytes = row.photo.file.length(),
+                    absolutePath = row.photo.file.absolutePath,
+                    score = row.photo.score,
+                )
+            }
+            historyLock.withLock {
+                val i = chunkHistory.indexOfFirst { it.index == chunk }
+                if (i >= 0) {
+                    chunkHistory[i] = chunkHistory[i].copy(
+                        facesKept = chunkHistory[i].facesKept + rows.size,
+                        extractedImages = chunkHistory[i].extractedImages + images,
+                    )
+                }
+            }
+        }
+        outcome.photos.forEach { imageDelivery.enqueue(it.photo.file) }
+    }
+
+    /** Mark the chunk that triggered this settlement done, and record its end-to-end timing. */
+    private suspend fun finishChunk(handoff: ChunkHandoff, outcome: PhotoSelector.Outcome) {
+        val result = handoff.result
+        historyLock.withLock {
+            val i = chunkHistory.indexOfFirst { it.index == handoff.item.index }
+            if (i >= 0) {
+                chunkHistory[i] = chunkHistory[i].copy(
+                    status = ChunkProcessStatus.Done,
+                    processDurationMs = result.durationMs,
+                    facesSkipped = chunkHistory[i].facesSkipped + result.skipped + outcome.losers,
+                    framesSampled = result.framesSampled,
+                    sampleIntervalMs = resolution.frameSampleIntervalMs,
+                )
+            }
+        }
+        facesSkipped += result.skipped
+        recordChunkEndToEnd(handoff, outcome)
     }
 
     fun setResolution(value: StreamResolution) {
@@ -425,6 +548,11 @@ class CapturePipelineCoordinator(
             awaitingRecorderFinalize ||
             workerBusy.get() ||
             videoPending.get() > 0 ||
+            // Worker 2 outlives Worker 1 by a retention window: without these two the session
+            // would be finalised — CSVs published, parts discarded — while it still had people
+            // to decide, and their photos would never be written.
+            handoffPending.get() > 0 ||
+            selectorBusy.get() ||
             imageDelivery.pendingCount > 0
     }
 
@@ -731,6 +859,7 @@ class CapturePipelineCoordinator(
         // stream must stay recoverable. SessionRecovery decides by whether the report exists.
         perfStream?.finish("closed")
         videoQueue.close()
+        handoffQueue.close()
         frameProcessor.close()
         imageDelivery.close()
     }
@@ -740,11 +869,14 @@ class CapturePipelineCoordinator(
      * how long a chunk waits before processing, and whether Worker 2 runs faster
      * than realtime. A realtime ratio ≥ 1.0 means shorter chunks will stall the recorder.
      */
-    private fun recordChunkEndToEnd(
-        item: ChunkWorkItem,
-        processStartMs: Long,
-        result: VideoProcessResult,
-    ) {
+    private fun recordChunkEndToEnd(handoff: ChunkHandoff, outcome: PhotoSelector.Outcome) {
+        // "Kept while this chunk was being settled", not "kept from this chunk": a runner who
+        // crossed the boundary is decided once, under whichever chunk closed them. The numbers
+        // still add up across a session, which is what the ratio below is read for.
+        val kept = outcome.photos.size
+        val item = handoff.item
+        val processStartMs = handoff.processStartMs
+        val result = handoff.result
         val recordStart = chunkStartWallMs[item.index]
         val queuedAt = chunkQueuedWallMs[item.index]
         // Footage length is the honest denominator; queue timing may be missing for a
@@ -762,7 +894,11 @@ class CapturePipelineCoordinator(
                 recordDurationMs = recordedMs,
                 queueWaitMs = queueWaitMs,
                 realtimeRatio = ratio,
-                diag = result.diag,
+                // Worker 1 could not know these two; it decides nothing.
+                diag = result.diag?.copy(
+                    kept = kept,
+                    keptPtsUs = outcome.photos.map { it.photo.timestampUs },
+                ),
             ),
         )
 
@@ -776,7 +912,7 @@ class CapturePipelineCoordinator(
                 append("│ recorded        ${CamPerf.sec(recordedMs)} of footage\n")
                 append("│ queue wait      ${CamPerf.sec(queueWaitMs)}\n")
                 append("│ process         ${CamPerf.sec(result.durationMs)}  ")
-                append("(sampled=${result.framesSampled} kept=${result.kept} skipped=${result.skipped})\n")
+                append("(sampled=${result.framesSampled} kept=$kept skipped=${result.skipped})\n")
                 append(
                     String.format(
                         Locale.US,
@@ -876,6 +1012,7 @@ class CapturePipelineCoordinator(
         if (!drainNotified.compareAndSet(false, true)) return
         CamPerf.log { "drain complete · trigger=${if (fromWatchdog) "watchdog" else "event"}" }
         scope.launch {
+            settleRemaining()
             finalizeCurrentSession()
             val session = historyLock.withLock { buildSessionRecord(chunkHistory.toList()) }
             publishStats()
@@ -887,6 +1024,38 @@ class CapturePipelineCoordinator(
             drainWatchdog?.cancel()
             heartbeat?.cancel()
             onDrainComplete()
+        }
+    }
+
+    /**
+     * Close every person Worker 2 is still holding, before the CSVs are published.
+     *
+     * A track only closes when nobody has matched it for `SubjectTracker.maxGapUs`, so at the
+     * end of a session the people who were on screen when the footage ran out have never been
+     * decided. Their candidates are on disk and their rows are in no file yet — this is the
+     * call that turns them into photos.
+     *
+     * [NonCancellable] because the CSVs are published immediately afterwards: cancelling
+     * halfway would publish files missing their last rows. Bounded by a timeout anyway, since
+     * a hang here would leave the user watching a spinner — and a leftover candidate is swept
+     * by [com.autobots.camera.diag.SessionRecovery] on the next launch either way.
+     */
+    private suspend fun settleRemaining() {
+        val selector = photoSelector
+        withContext(NonCancellable) {
+            val done = withTimeoutOrNull(SETTLE_TIMEOUT_MS) {
+                val outcome = selector.finish()
+                commitOutcome(outcome)
+                outcome
+            }
+            if (done == null) {
+                Log.w(TAG, "final selection timed out after ${SETTLE_TIMEOUT_MS}ms")
+            } else {
+                CamPerf.log {
+                    "final selection · photos=${done.photos.size} tracks=${done.tracks.size} " +
+                        "losers=${done.losers} pending=${selector.pendingCount}"
+                }
+            }
         }
     }
 
@@ -1226,6 +1395,8 @@ class CapturePipelineCoordinator(
         tracksPart.discard()
         chunksPart.discard()
         trackTotals.reset()
+        photoSelector = newPhotoSelector()
+        firstChunkRecordedAtEpochMs = null
         // Live capture has no knowable total; the bar falls back to chunksRecorded.
         expectedChunks = 0
         drainNotified.set(false)
@@ -1412,6 +1583,12 @@ class CapturePipelineCoordinator(
         const val CHUNK_INDEX_FILE = "chunks.csv"
 
         private const val TAG = "CapturePipeline"
+
+        /**
+         * Ceiling on the final settlement. Picking and deleting is cheap next to a decode; this
+         * is here so a bug cannot hold the drain open, not because it is expected to come close.
+         */
+        private const val SETTLE_TIMEOUT_MS = 10_000L
         const val VIDEO_QUEUE_CAPACITY = 8
 
         /**

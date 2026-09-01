@@ -295,6 +295,10 @@ fun PipelineSessionRecord.toLogText(): String = buildString {
             appendLine()
             appendLine("Chunk #${chunk.index}")
             appendLine("  Video: ${chunk.videoFileName}")
+            // Printed because the gap *between* two chunks is not recoverable from anything
+            // else here, and whether a live recorder's rotation drops more than
+            // SubjectTracker.maxGapUs of footage decides whether a runner splits at the seam.
+            appendLine("  Recorded at: ${chunk.recordedAtEpochMs}")
             appendLine("  Duration: ${chunk.recordDurationLabel} · ${formatChunkBytes(chunk.videoSizeBytes)}")
             if (chunk.framesSampled > 0) {
                 appendLine("  Sample interval: ${chunk.sampleIntervalMs} ms")

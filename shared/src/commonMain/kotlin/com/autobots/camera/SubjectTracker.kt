@@ -80,6 +80,12 @@ class SubjectTracker(
      * same line does not inherit their identity.
      */
     private val maxGapUs: Long = DEFAULT_MAX_GAP_US,
+    /**
+     * How far apart the sampled frames are, so a track can say how many of its own frames it
+     * missed. Zero means "unknown" and [TrackSummary.framesSpan] then falls back to
+     * [TrackSummary.frames], which reports a perfect ratio rather than a wrong one.
+     */
+    private val sampleIntervalUs: Long = 0L,
 ) {
     private class Track(
         val id: Int,
@@ -104,7 +110,17 @@ class SubjectTracker(
         var closestToCentre: Float = box.distanceToFrameCentre()
         var heightSum: Float = box.height
 
-        fun summarise() = TrackSummary(
+        /**
+         * Detector confidence, summed over the frames that had one.
+         *
+         * Counted separately from [hits] because [TrackedBox.score] is nullable on purpose —
+         * pose has no score of its own, and averaging an invented 1f in would make a track
+         * built from torsos look more confident than one built from real face detections.
+         */
+        var scoreSum: Float = box.score ?: 0f
+        var scoredHits: Int = if (box.score != null) 1 else 0
+
+        fun summarise(sampleIntervalUs: Long) = TrackSummary(
             id = id,
             firstSeenUs = firstSeenUs,
             lastSeenUs = lastSeenUs,
@@ -117,6 +133,8 @@ class SubjectTracker(
             velocityY = vy,
             closestToCentre = closestToCentre,
             meanHeight = if (hits > 0) heightSum / hits else 0f,
+            meanScore = if (scoredHits > 0) scoreSum / scoredHits else null,
+            sampleIntervalUs = sampleIntervalUs,
         )
     }
 
@@ -196,13 +214,17 @@ class SubjectTracker(
         track.box = box
         track.hits++
         track.heightSum += box.height
+        box.score?.let {
+            track.scoreSum += it
+            track.scoredHits++
+        }
         track.closestToCentre = min(track.closestToCentre, box.distanceToFrameCentre())
     }
 
     private fun retire(expired: (Track) -> Boolean) {
         val out = tracks.filter(expired)
         if (out.isEmpty()) return
-        out.forEach { finished.add(it.summarise()) }
+        out.forEach { finished.add(it.summarise(sampleIntervalUs)) }
         tracks.removeAll(out.toSet())
     }
 

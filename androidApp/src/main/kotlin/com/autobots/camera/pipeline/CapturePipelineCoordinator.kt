@@ -89,13 +89,6 @@ class CapturePipelineCoordinator(
     private val selectorBusy = AtomicBoolean(false)
 
     /**
-     * Worker 2. Recreated per session because it holds one tracker for the whole session, and
-     * a second extraction without restarting the app must not inherit the first one's people.
-     */
-    @Volatile
-    private var photoSelector = newPhotoSelector()
-
-    /**
      * Wall clock of the first chunk, so live chunks can be placed on one session timeline.
      *
      * An import knows its own offsets ([ChunkWorkItem.sourceOffsetUs]); the recorder does not,
@@ -231,6 +224,17 @@ class CapturePipelineCoordinator(
     private var pipelinePaused = false
 
     private var resolution = StreamResolution.Fhd
+
+    /**
+     * Worker 2. Recreated per session because it holds one tracker for the whole session, and
+     * a second extraction without restarting the app must not inherit the first one's people.
+     *
+     * Declared after [resolution] on purpose: it reads the sample interval, and a property
+     * initialiser cannot see one declared below it.
+     */
+    @Volatile
+    private var photoSelector = newPhotoSelector()
+
     private var extractionTarget = ExtractionTarget.Face
     /** Capture Zone, normalised. Null (or full frame) means every corner counts. */
     private var detectZone: DetectZone? = null
@@ -396,6 +400,7 @@ class CapturePipelineCoordinator(
         windowUs = PhotoSelector.DEDUP_WINDOW_US,
         maxPerWindow = PhotoSelector.MAX_KEEP_PER_WINDOW,
         retentionChunks = PhotoSelector.CANDIDATE_RETENTION_CHUNKS,
+        sampleIntervalUs = resolution.frameSampleIntervalMs * 1_000L,
     )
 
     /**
@@ -1114,12 +1119,25 @@ class CapturePipelineCoordinator(
             // Said here rather than left to be rediscovered: this is an upper bound.
             appendLine(
                 "# a track is one continuous sighting, not one person — bystanders are tracked, " +
-                    "chunk boundaries split a subject in two, and there is no re-identification",
+                    "a second lap is a second track, and there is no re-identification",
+            )
+            // One tracker runs for the whole session as of v0.1.7, so both of these changed
+            // meaning at once and a reader who assumes the old ones counts people wrong.
+            appendLine(
+                "# since v0.1.7: track ids are session-wide (a runner crossing a chunk boundary " +
+                    "keeps one id), firstUs/lastUs are session time, and the old `frames` column " +
+                    "is now `framesSeen` — read it next to framesSpan",
             )
             appendLine(
-                "chunk,track,firstUs,lastUs,durationUs,frames,firstX,firstY,lastX,lastY," +
+                "# times are ±${resolution.frameSampleIntervalMs}ms, one sampling period; " +
+                    "enteredMs is wall clock, from the session start",
+            )
+            appendLine(
+                "chunk,track,firstUs,lastUs,durationUs,enteredMs," +
+                    "framesSeen,framesSpan,framesMissed,trackedRatio," +
+                    "firstX,firstY,lastX,lastY," +
                     "velX,velY,speed,directionDeg,direction,displacement,closestToCentre," +
-                    "meanHeight,movedThrough,likelySubject,captured,photos",
+                    "meanHeight,meanScore,movedThrough,likelySubject,captured,photos",
             )
         }
         publishPart(session, TRACK_INDEX_FILE, header, tracksPart)
@@ -1204,17 +1222,27 @@ class CapturePipelineCoordinator(
         t.firstSeenUs.toString(),
         t.lastSeenUs.toString(),
         t.durationUs.toString(),
+        // Wall clock, so a passage can be lined up against a race clock or a second camera —
+        // the only column here that means anything outside this one video file.
+        (sessionStartEpochMs() + t.firstSeenUs / 1_000L).toString(),
         t.frames.toString(),
+        t.framesSpan.toString(),
+        t.framesMissed.toString(),
+        f(t.trackedRatio),
         f(t.firstCentreX), f(t.firstCentreY), f(t.lastCentreX), f(t.lastCentreY),
         f(t.velocityX), f(t.velocityY), f(t.speed),
         String.format(Locale.US, "%.1f", t.directionDegrees),
         t.directionLabel,
         f(t.displacement), f(t.closestToCentre), f(t.meanHeight),
+        t.meanScore?.let { f(it) } ?: "",
         if (t.movedThrough) "1" else "0",
         if (t.likelySubject) "1" else "0",
         if (t.captured) "1" else "0",
         t.photos.toString(),
     ).joinToString(",")
+
+    /** Zero rather than a guess when there is no session — the column is then plainly wrong. */
+    private fun sessionStartEpochMs(): Long = sessionMeta?.startedAtEpochMs ?: 0L
 
     /**
      * One row per chunk — the key that lets the other three files be mapped back onto video.

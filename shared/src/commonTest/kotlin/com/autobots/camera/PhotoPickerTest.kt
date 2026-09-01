@@ -64,3 +64,55 @@ class PhotoPickerTest {
         assertEquals(emptySet(), pickKeepers(emptyList(), WINDOW_US, MAX_PER_WINDOW))
     }
 }
+
+/**
+ * `trackedRatio` is the number S6 will be judged by, and it is easy to get subtly wrong: an
+ * unknown sampling period must report a perfect ratio, not a wrong one.
+ */
+class TrackSummaryFramesTest {
+
+    private fun track(firstUs: Long, lastUs: Long, frames: Int, intervalUs: Long) = TrackSummary(
+        id = 1,
+        firstSeenUs = firstUs,
+        lastSeenUs = lastUs,
+        frames = frames,
+        firstCentreX = 0f, firstCentreY = 0f, lastCentreX = 0f, lastCentreY = 0f,
+        velocityX = 0f, velocityY = 0f,
+        closestToCentre = 0f, meanHeight = 0f,
+        sampleIntervalUs = intervalUs,
+    )
+
+    @Test
+    fun aPassageTrackedThroughoutScoresOne() {
+        val t = track(0L, 480_000L, frames = 5, intervalUs = 120_000L)
+        assertEquals(5, t.framesSpan)
+        assertEquals(0, t.framesMissed)
+        assertEquals(1f, t.trackedRatio)
+    }
+
+    @Test
+    fun aPassageLostHalfwayScoresLess() {
+        // Seen at 0 and 480 ms only — four sampling slots wide, two of them matched.
+        val t = track(0L, 480_000L, frames = 2, intervalUs = 120_000L)
+        assertEquals(5, t.framesSpan)
+        assertEquals(3, t.framesMissed)
+        assertEquals(0.4f, t.trackedRatio)
+    }
+
+    @Test
+    fun oneFrameIsNotAGap() {
+        val t = track(1_200_000L, 1_200_000L, frames = 1, intervalUs = 120_000L)
+        assertEquals(1, t.framesSpan)
+        assertEquals(0, t.framesMissed)
+        assertEquals(1f, t.trackedRatio)
+    }
+
+    /** An absent measurement must not look like a finding. */
+    @Test
+    fun anUnknownIntervalReportsNoGap() {
+        val t = track(0L, 480_000L, frames = 2, intervalUs = 0L)
+        assertEquals(2, t.framesSpan)
+        assertEquals(0, t.framesMissed)
+        assertEquals(1f, t.trackedRatio)
+    }
+}

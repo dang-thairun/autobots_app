@@ -89,7 +89,11 @@ data class VideoProcessResult(
 )
 
 /**
- * Worker 2 — sample video chunks, keep sharp full-frame JPEGs with visible faces or poses.
+ * Worker 1 — sample video chunks, gate and score frames, write sharp full-frame JPEGs.
+ *
+ * It decides nothing about who is in them: identity and selection are [PhotoSelector]'s, and
+ * everything observed here leaves as a [ChunkObservation]. This class was called "Worker 2"
+ * through 0.1.6, when there was only one worker after the recorder.
  *
  * **Two stages, not one.** Up to and including 0.1.3 everything ran inside the decode loop:
  * [VideoFrameSampler] called back with a bitmap and blocked until detection, scoring and the
@@ -109,10 +113,10 @@ data class VideoProcessResult(
  * Two consequences follow from parallelising, and both are load-bearing:
  *  - **Each worker owns its detectors.** One ML Kit detector shared by N threads serialises
  *    inside the SDK, which is the exact cost being removed.
- *  - **Selection moved to the end of the chunk.** Workers finish out of order, so the 1 s
- *    dedup window can no longer be applied as frames stream past. Candidates are written to
- *    JPEG on arrival (as in 0.1.3) and the whole chunk is sorted by PTS and windowed once
- *    everything has landed. Same rule, same result, order-independent.
+ *  - **Selection left this class entirely.** Workers finish out of order, so the 1 s dedup
+ *    window cannot be applied as frames stream past. Candidates are written to JPEG on arrival
+ *    (as in 0.1.3) and ranked afterwards — in 0.1.4–0.1.6 at the end of the chunk, and since
+ *    0.1.7 in [PhotoSelector], once the *person* has finished going past.
  *
  * `queue_wait` and `worker_idle` in `perf_report.json` say which side is the limit:
  * `queue_wait` high → consumers are behind, raise [DETECT_WORKERS]. `worker_idle` high →
@@ -270,7 +274,7 @@ class VideoFrameProcessor(
                 "workers=${detectors.size} ${durationMs}ms",
         )
         perf?.takeIf { !it.isEmpty() }?.let { stats ->
-            CamPerf.log { stats.table("Worker2 ${file.name} (${resolution.label}, ${target.label})") }
+            CamPerf.log { stats.table("Worker1 ${file.name} (${resolution.label}, ${target.label})") }
         }
         CamPerf.log { sharpnessReport(file.name) }
         val geometry = detectGeometry

@@ -1,5 +1,12 @@
 # S0 · Baseline ก่อนเริ่ม v0.1.7
 
+> **Column note (added after S4).** The measurements below read the `frames` column of v0.1.6
+> `tracks.csv`. That column is now `framesSeen`, and `trackedRatio` sits next to it. The 34.3%
+> figure for one-frame tracks still stands as measured, but S4 showed those tracks score
+> `trackedRatio` 1.0 — they were seen once because they were only there once, not because the
+> tracker lost them. **The number for S6 to improve is `trackedRatio`, not this one.**
+
+
 **วัดเมื่อ:** 2026-08-28 · **จาก:** session v0.1.6 ที่มีอยู่บนเครื่อง `24069PC21G` (ไม่ได้รันใหม่)
 **ข้อมูลดิบ:** [`raw/`](./raw/) — `tracks.csv` + `session_log.txt` ของ 11 session
 

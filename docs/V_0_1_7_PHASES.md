@@ -56,6 +56,7 @@
 | S2  | จำกัด candidate ค้างไม่เกิน 150 ไฟล์ แล้ว**ทิ้ง** | **backpressure — รอ ไม่ทิ้ง** · เพดานเป็นไบต์ + chunk ที่ค้าง                                                                                     | ทิ้ง candidate = ทิ้งนักวิ่ง · pipeline offline ไม่มี deadline (PLAN §12 R1.1) |
 | S3  | staging + กลไก backpressure เขียนเอง              | **คิวที่สองใช้ `Channel(capacity)` แทน · ไม่มี staging · tracker อยู่ที่ W2 ข้าม chunk · ตัดสินเมื่อ track ปิด**                                    | capacity คือ backpressure ในตัว · retention 1 คุมดิสก์ ~70 MB แทน 17–42 GB     |
 | S3  | `fd.sync()` ก่อน handoff                          | **ปิด stream ก่อน enqueue**                                                                                                                       | W1/W2 โปรเซสเดียวกัน · `fsync` กันไฟดับ ไม่ได้กัน partial read (R3.1)          |
+| S4  | `framesSeen` `framesMissed` `speedMps`             | **`framesSeen` `framesSpan` `framesMissed` `trackedRatio` `meanScore` `enteredMs` · ไม่มี `speedMps`**                                             | `speedMps` ต้อง calibrate กล้อง ไม่ใช่คำนวณจากส่วนสูงที่เดา · `trackedRatio` คือตัวที่ S6 ต้องพิสูจน์ตัวเอง |
 | S8  | เน้นวัดความคมชัดที่ Face ROI                      | **ทำไปแล้วตั้งแต่ v0.1.6** ([VideoFrameProcessor.kt:712](../androidApp/src/main/kotlin/com/autobots/camera/pipeline/VideoFrameProcessor.kt#L712)) | แต่เป็นที่มาของ D1 — คนไม่มีหน้าถูกวัดคนละสเกล (R4.2)                          |
 | S8  | ฝัง `personId` ใน Exif ตอน W1                     | **2 จังหวะ** — W1 ฝัง `track[]` · S9 เขียนทับเพิ่ม `personId[]`                                                                                   | W1 ยังไม่รู้จัก `personId` (เกิดตอน S9) · รูปเป็นเฟรมเต็มมีหลายคน (R5)         |
 | S11 | รัน 60–90 นาที                                    | **รัน 3–4 ชั่วโมง**                                                                                                                               | ตรงตามเป้าที่ proposal เขียนไว้เองใน Executive Summary                         |
@@ -70,7 +71,7 @@
 ## ภาพรวม
 
 ```
-📦 ก้อน 1  ✅S1 → ✅S2 → ✅S3 → S4   บันทึกและหลักฐาน      ความเสี่ยงต่ำ · คุ้มแน่
+📦 ก้อน 1  ✅S1 → ✅S2 → ✅S3 → ✅S4   บันทึกและหลักฐาน      ความเสี่ยงต่ำ · คุ้มแน่
         ▼                        ← ส่งได้ตรงนี้ ใช้งานได้จริง
 📦 ก้อน 2  S5 → S6 → S7 → S8   เปลี่ยนแกนเป็นคน       ความเสี่ยงกลาง
         ▼                        ← ส่งได้ตรงนี้
@@ -349,26 +350,40 @@ W2  ตัดสิน     tracker ข้าม chunk → track ปิด → �
 > **กลไก backpressure เขียนเอง** — `Channel(capacity)` ทำให้แล้ว
 > **`fd.sync()`** — ปิด stream ก่อน `send` พอ
 
-## S4 · `tracks.csv` คอลัมน์ใหม่
+## ✅ S4 · `tracks.csv` คอลัมน์ใหม่
 
-**แตะ**
+> ทำเสร็จและตรวจบนเครื่องแล้ว · **ปิดก้อน 1**
 
-- `shared/src/commonMain/kotlin/com/autobots/camera/TrackSummary.kt`
-- `CapturePipelineCoordinator.writeTrackIndex()`
+**แตะ** `TrackSummary.kt` · `SubjectTracker.kt` · `PipelineSessionRecord.kt` · `PhotoSelector.kt` · `CapturePipelineCoordinator.writeTrackIndex()`
 
 **ทำ**
 
-- [ ] `enteredMs` `exitedMs` `visibleMs` `sessionEnteredMs`
-- [ ] `frames` → `framesSeen` + `framesSpan` `framesMissed` `trackedRatio`
-- [ ] `speedMps` (สูตร PLAN §4.3) + `meanScore` `lowTierFrames`
-- [ ] บรรทัด `#` เตือน: **การเปลี่ยนชื่อ** `frames` · ความไม่แน่นอน **±120 ms** · สมมติฐานของ `speedMps`
-- [ ] `sampleIntervalMs` ส่งเข้า `TrackSummary` **ไม่ hardcode 120**
-- [ ] **พิมพ์** `recordedAtEpochMs` **ต่อ chunk ลง** `session_log.txt` (`PipelineSessionRecord.kt:296` บล็อก Chunk) — 1 บรรทัด · **S0.1 คำนวณไม่ได้ถ้าไม่มี**
+- [x] `frames` → **`framesSeen`** + `framesSpan` `framesMissed` `trackedRatio` · `sampleIntervalMs` ส่งเข้า tracker **ไม่ hardcode 120**
+- [x] `meanScore` — เฉลี่ยเฉพาะเฟรมที่ detector ให้คะแนน · **ว่างเมื่อไม่มี** ไม่เติม 1f ปลอม
+- [x] `enteredMs` — เวลานาฬิกาจริงของ passage
+- [x] **พิมพ์** `recordedAtEpochMs` **ต่อ chunk ลง** `session_log.txt` — **S0.1 วัดได้แล้ว**
+- [x] บรรทัด `#` เตือน 3 บรรทัด: การเปลี่ยนชื่อ · `track` id เป็น session-wide · ความไม่แน่นอน ±120 ms
+- [x] แก้คำอธิบายที่ S3 ทำให้เป็นเท็จ — บรรทัด `#` ในไฟล์ · `TrackSummary.id` · KDoc ของคลาส · `VideoFrameProcessor` ที่ยังเรียกตัวเองว่า "Worker 2"
+- [x] 4 เทสต์คุม `framesSpan`/`framesMissed`/`trackedRatio` (รวมเป็น **10 เทสต์**)
 
-**เสร็จเมื่อ**
+**ผลตรวจ** — `run4mins.mp4` ชุดเดิม · 103 แถวเท่ากับรอบ S3 · **คอลัมน์ที่ทับกันเหมือนเดิมทุกค่า** (ไม่มีพฤติกรรมเปลี่ยน)
 
-- [ ] ตัวเลขบนจอ Session history กับในไฟล์ **ตรงกัน**
-- [ ] สคริปต์เก่าที่อ่าน `frames` **พังแบบเห็นชัด** ไม่ใช่อ่านค่าผิดเงียบ ๆ
+| | |
+|---|---|
+| `trackedRatio` | เฉลี่ย **0.883** · ต่ำสุด 0.38 · เต็ม 1.0 = **57/103** |
+| `framesMissed` | รวม 130 · สูงสุด 8 |
+| `meanScore` | มีค่า 101/103 · ว่าง 2 (track ที่มาจาก pose) · เฉลี่ย 0.791 |
+| `enteredMs` | 11:38:35 → 11:42:43 · ช่วง 247.9 วิ |
+| `session_log.txt` | `Recorded at: 1788237493142` ต่อ chunk ✓ |
+
+> 📌 **สิ่งที่ `trackedRatio` เผยทันที** — track ที่เห็นเฟรมเดียว 16 อัน **ได้ `trackedRatio` = 1.0 ทั้งหมด**
+> แปลว่า "34.3% เห็นเฟรมเดียว" ที่ S0.3 วัดไว้ **ไม่ใช่ตัววัดความล้มเหลวของ tracking โดยตัวเอง** — คนกลุ่มนี้อยู่ในเฟรมจริง ๆ แค่ครั้งเดียว ไม่ได้ถูกทำหลุด
+> ของที่ถูกทำหลุดจริงคือ 46 แถวที่ `trackedRatio` < 1.0 · **นี่คือเลขที่ S6 ต้องทำให้ดีขึ้น** ไม่ใช่ 34.3%
+
+> 🚫 **ที่ตัดออกจากลิสต์เดิม**
+> `exitedMs` `visibleMs` `sessionEnteredMs` — **หลัง S3 เป็นการหารด้วย 1000 ของคอลัมน์ที่มีอยู่แล้ว** เพิ่มไปคือเพิ่มที่ให้ค่าไม่ตรงกัน
+> `speedMps` — ต้องเดาจากส่วนสูงคน ได้ตัวเลขที่ **ดูน่าเชื่อแต่ผิด ±15%** · ต้องมี calibration จริง ซึ่งเป็นฟีเจอร์ ไม่ใช่คอลัมน์
+> `lowTierFrames` → **ย้ายไป S5** ข้อมูลสองชั้นยังไม่เกิดจนถึงตอนนั้น
 
 > ✅ **ส่งก้อน 1 ได้ตรงนี้** — ได้บันทึกที่อยู่รอด + `framesMissed` + ข้อมูลสำหรับ overlay บนคอม
 

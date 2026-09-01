@@ -29,6 +29,8 @@ class PhotoSelector(
     private val windowUs: Long,
     private val maxPerWindow: Int,
     private val retentionChunks: Int,
+    /** Sampling period of the frames, so every track can report how many of its own it missed. */
+    sampleIntervalUs: Long,
 ) {
 
     /** One candidate, rebased onto the session clock and waiting for its person to finish. */
@@ -52,7 +54,7 @@ class PhotoSelector(
         val losers: Int = 0,
     )
 
-    private val tracker = SubjectTracker()
+    private val tracker = SubjectTracker(sampleIntervalUs = sampleIntervalUs)
     private val pending = ArrayList<Pending>()
     private val chunkOfTrack = HashMap<Int, Int>()
     private val photosOfTrack = HashMap<Int, Int>()

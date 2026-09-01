@@ -20,8 +20,9 @@ import kotlin.math.sqrt
  *    detector is right to report them — but they appear in every chunk, so one marshal can
  *    produce twenty-odd tracks across a session. [movedThrough] is the filter for this, and it
  *    is why velocity is recorded rather than inferred later.
- *  - **Chunks are separate files.** A runner crossing a chunk boundary is two tracks, because
- *    the tracker is reset per chunk and has no way to know otherwise.
+ *  - **A lap counts twice.** Nothing here is a person's identity — someone who passes the lens,
+ *    leaves, and comes back is two passages. (Crossing a *chunk* boundary no longer splits
+ *    anyone: since v0.1.7 one tracker runs for the whole session.)
  *  - **There is no re-identification.** Someone lost behind a sign for longer than the
  *    tracker's gap comes back as a new person. The tracker matches on position and motion only;
  *    it never looks at a face or a bib.
@@ -32,11 +33,22 @@ import kotlin.math.sqrt
  * bound, not as attendance.
  */
 data class TrackSummary(
-    /** Unique within its chunk only. Pair it with the chunk index to identify a passage. */
+    /**
+     * Unique for the whole session.
+     *
+     * It used to be unique per chunk only, because the tracker was rebuilt for every chunk. One
+     * tracker now runs for the session, so a runner who crosses a chunk boundary keeps this id
+     * on both sides — which is what makes it safe to join `photos.csv` on.
+     */
     val id: Int,
     val firstSeenUs: Long,
     val lastSeenUs: Long,
-    /** Frames this track was matched in — how much evidence stands behind the row. */
+    /**
+     * Frames this track was matched in — how much evidence stands behind the row.
+     *
+     * Written out as `framesSeen`. Read it next to [framesSpan]: on its own it cannot tell a
+     * short passage that was tracked perfectly from a long one that was mostly lost.
+     */
     val frames: Int,
     val firstCentreX: Float,
     val firstCentreY: Float,
@@ -52,8 +64,40 @@ data class TrackSummary(
     /** True once this track produced at least one kept photo. */
     val captured: Boolean = false,
     val photos: Int = 0,
+    /**
+     * Mean detector confidence over the frames that carried one, or null when none did.
+     *
+     * Null rather than a number because pose reports no score: a track built from torsos has no
+     * confidence to average, and printing one would be inventing evidence.
+     */
+    val meanScore: Float? = null,
+    /** Sampling period the frames came from. Zero means unknown — see [framesSpan]. */
+    val sampleIntervalUs: Long = 0L,
 ) {
     val durationUs: Long get() = lastSeenUs - firstSeenUs
+
+    /**
+     * Frames this track *could* have been seen in, from first sighting to last.
+     *
+     * Falls back to [frames] when the sampling period is unknown, so [trackedRatio] reports a
+     * perfect score rather than a wrong one — an absent measurement should not look like a
+     * finding.
+     */
+    val framesSpan: Int
+        get() = if (sampleIntervalUs > 0L) (durationUs / sampleIntervalUs).toInt() + 1 else frames
+
+    /** Frames inside the passage where nothing was matched to this track. */
+    val framesMissed: Int get() = (framesSpan - frames).coerceAtLeast(0)
+
+    /**
+     * How much of the passage the tracker actually held on to, 0..1.
+     *
+     * The number S6 is measured by. [frames] alone cannot separate a two-frame passage that was
+     * tracked perfectly from a ten-frame one that was lost six times — this can, because it
+     * divides by how long the person was really there. S0.3 measured 34.3% of tracks seen in a
+     * single frame before ByteTrack; this is what says whether that improved.
+     */
+    val trackedRatio: Float get() = if (framesSpan > 0) frames.toFloat() / framesSpan else 0f
 
     /** How far the centre travelled, start to end, in normalised units. */
     val displacement: Float

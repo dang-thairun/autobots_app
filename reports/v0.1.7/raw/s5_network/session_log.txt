@@ -1,0 +1,297 @@
+AutoBots Session Log
+====================
+
+Session ID: 1788250301536
+Source: Import
+Name: 2026-asicsmeta-full-1.mp4
+Status: Done
+Started: 1788250301553 (08:11:41)
+Resolution: 4K · 3840×2160
+Detector: Face + Person · NPU · face_det_lite + foot_track_net
+Gallery folder: DCIM/AutoBots/ext_v0_1_6_01092026_1511
+
+Video duration: 4:00
+Video size: 1172.1 MB
+
+Summary
+-------
+Chunks: 22 (done 22)
+Photos kept: 68 shots
+Photos skipped: 1750
+Found 68 shots from 1818 frames (3%) · avg 45ms/frame · sample 120ms
+22 chunks · 68 shots · 1m 32s
+~71 people · 43 photographed · 325 others
+Total 1m 32s · 0.34x realtime (split 1m 8s + extract 1m 22s)
+Split time: 1m 8s active
+Extract time: 1m 22s
+
+Chunks
+------
+
+Chunk #1
+  Video: import_001.mp4
+  Recorded at: 1788250310632
+  Duration: 10.966 s · 53.8 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 1 shots from 83 frames (1%)
+  avg 52ms/frame · extract 4.334 s
+    - person_c001_6000111.jpg (1.0 MB)
+
+Chunk #2
+  Video: import_002.mp4
+  Recorded at: 1788250313575
+  Duration: 10.966 s · 53.2 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 3 shots from 83 frames (3%)
+  avg 44ms/frame · extract 3.723 s
+    - person_c002_8000222.jpg (1.1 MB)
+    - person_c002_8133555.jpg (966 KB)
+    - person_c002_8266888.jpg (944 KB)
+
+Chunk #3
+  Video: import_003.mp4
+  Recorded at: 1788250317112
+  Duration: 10.967 s · 53.6 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 3 shots from 83 frames (3%)
+  avg 46ms/frame · extract 3.869 s
+    - person_c003_6533444.jpg (933 KB)
+    - person_c003_7333555.jpg (938 KB)
+    - person_c003_7200111.jpg (963 KB)
+
+Chunk #4
+  Video: import_004.mp4
+  Recorded at: 1788250319514
+  Duration: 10.966 s · 53.6 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 2 shots from 83 frames (2%)
+  avg 45ms/frame · extract 3.797 s
+    - person_c004_3066666.jpg (959 KB)
+    - person_c004_3866777.jpg (961 KB)
+
+Chunk #5
+  Video: import_005.mp4
+  Recorded at: 1788250321886
+  Duration: 10.966 s · 53.4 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 0 shots from 83 frames (0%)
+  avg 43ms/frame · extract 3.628 s
+
+Chunk #6
+  Video: import_006.mp4
+  Recorded at: 1788250324601
+  Duration: 10.966 s · 53.6 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 0 shots from 83 frames (0%)
+  avg 43ms/frame · extract 3.643 s
+
+Chunk #7
+  Video: import_007.mp4
+  Recorded at: 1788250327269
+  Duration: 10.967 s · 53.4 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 0 shots from 83 frames (0%)
+  avg 42ms/frame · extract 3.563 s
+
+Chunk #8
+  Video: import_008.mp4
+  Recorded at: 1788250330604
+  Duration: 10.966 s · 53.5 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 1 shots from 83 frames (1%)
+  avg 44ms/frame · extract 3.682 s
+    - person_c008_9466888.jpg (956 KB)
+
+Chunk #9
+  Video: import_009.mp4
+  Recorded at: 1788250333047
+  Duration: 10.966 s · 53.5 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 3 shots from 83 frames (3%)
+  avg 46ms/frame · extract 3.844 s
+    - person_c009_2400000.jpg (952 KB)
+    - person_c009_2533333.jpg (933 KB)
+    - person_c009_3866777.jpg (960 KB)
+
+Chunk #10
+  Video: import_010.mp4
+  Recorded at: 1788250336747
+  Duration: 10.966 s · 53.4 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 3 shots from 83 frames (3%)
+  avg 47ms/frame · extract 3.930 s
+    - person_c010_1600000.jpg (950 KB)
+    - person_c010_2800000.jpg (941 KB)
+    - person_c010_6266777.jpg (947 KB)
+
+Chunk #11
+  Video: import_011.mp4
+  Recorded at: 1788250339772
+  Duration: 10.967 s · 53.5 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 2 shots from 83 frames (2%)
+  avg 45ms/frame · extract 3.747 s
+    - person_c011_5733444.jpg (937 KB)
+    - person_c011_8800222.jpg (944 KB)
+
+Chunk #12
+  Video: import_012.mp4
+  Recorded at: 1788250342912
+  Duration: 10.966 s · 53.6 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 10 shots from 83 frames (12%)
+  avg 49ms/frame · extract 4.079 s
+    - person_c012_1200000.jpg (952 KB)
+    - person_c012_1466666.jpg (960 KB)
+    - person_c012_1733333.jpg (951 KB)
+    - person_c012_2133333.jpg (984 KB)
+    - person_c012_6533444.jpg (945 KB)
+    - person_c012_6666777.jpg (950 KB)
+    - person_c012_6800111.jpg (967 KB)
+    - person_c012_8000222.jpg (1.1 MB)
+    - person_c012_8133555.jpg (966 KB)
+    - person_c012_10933555.jpg (960 KB)
+
+Chunk #13
+  Video: import_013.mp4
+  Recorded at: 1788250345317
+  Duration: 10.966 s · 53.5 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 8 shots from 83 frames (9%)
+  avg 47ms/frame · extract 3.945 s
+    - person_c013_1200000.jpg (945 KB)
+    - person_c013_4266777.jpg (957 KB)
+    - person_c013_4533444.jpg (937 KB)
+    - person_c013_4666777.jpg (948 KB)
+    - person_c013_5200111.jpg (930 KB)
+    - person_c013_5333444.jpg (933 KB)
+    - person_c013_7733555.jpg (951 KB)
+    - person_c013_7866888.jpg (963 KB)
+
+Chunk #14
+  Video: import_014.mp4
+  Recorded at: 1788250348505
+  Duration: 10.966 s · 53.4 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 7 shots from 83 frames (8%)
+  avg 47ms/frame · extract 3.902 s
+    - person_c014_1200000.jpg (957 KB)
+    - person_c014_1466666.jpg (957 KB)
+    - person_c014_1600000.jpg (945 KB)
+    - person_c014_7333555.jpg (950 KB)
+    - person_c014_7466888.jpg (962 KB)
+    - person_c014_9733555.jpg (978 KB)
+    - person_c014_10133555.jpg (904 KB)
+
+Chunk #15
+  Video: import_015.mp4
+  Recorded at: 1788250350825
+  Duration: 10.967 s · 53.6 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 5 shots from 83 frames (6%)
+  avg 46ms/frame · extract 3.875 s
+    - person_c015_1333333.jpg (931 KB)
+    - person_c015_1466666.jpg (942 KB)
+    - person_c015_4400111.jpg (956 KB)
+    - person_c015_10133555.jpg (938 KB)
+    - person_c015_10400222.jpg (978 KB)
+
+Chunk #16
+  Video: import_016.mp4
+  Recorded at: 1788250353901
+  Duration: 10.966 s · 53.5 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 3 shots from 83 frames (3%)
+  avg 44ms/frame · extract 3.725 s
+    - person_c016_1066666.jpg (959 KB)
+    - person_c016_1200000.jpg (952 KB)
+    - person_c016_1733333.jpg (943 KB)
+
+Chunk #17
+  Video: import_017.mp4
+  Recorded at: 1788250357292
+  Duration: 10.966 s · 53.4 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 8 shots from 83 frames (9%)
+  avg 44ms/frame · extract 3.714 s
+    - person_c017_3066666.jpg (940 KB)
+    - person_c017_3200000.jpg (946 KB)
+    - person_c017_6266777.jpg (945 KB)
+    - person_c017_5600111.jpg (957 KB)
+    - person_c017_7866888.jpg (927 KB)
+    - person_c017_8400222.jpg (963 KB)
+    - person_c017_8666888.jpg (973 KB)
+    - person_c017_8933555.jpg (956 KB)
+
+Chunk #18
+  Video: import_018.mp4
+  Recorded at: 1788250359138
+  Duration: 10.966 s · 53.7 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 0 shots from 83 frames (0%)
+  avg 41ms/frame · extract 3.481 s
+
+Chunk #19
+  Video: import_019.mp4
+  Recorded at: 1788250361798
+  Duration: 10.967 s · 53.3 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 4 shots from 83 frames (4%)
+  avg 43ms/frame · extract 3.569 s
+    - person_c019_7466888.jpg (968 KB)
+    - person_c019_9066888.jpg (959 KB)
+    - person_c019_9200222.jpg (958 KB)
+    - person_c019_9333555.jpg (980 KB)
+
+Chunk #20
+  Video: import_020.mp4
+  Recorded at: 1788250364815
+  Duration: 10.966 s · 53.7 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 0 shots from 83 frames (0%)
+  avg 41ms/frame · extract 3.462 s
+
+Chunk #21
+  Video: import_021.mp4
+  Recorded at: 1788250367465
+  Duration: 10.966 s · 53.6 MB
+  Sample interval: 120 ms
+  Frames sampled: 83
+  Found 2 shots from 83 frames (2%)
+  avg 42ms/frame · extract 3.510 s
+    - person_c021_10000222.jpg (1.1 MB)
+    - person_c021_10133555.jpg (943 KB)
+
+Chunk #22
+  Video: import_022.mp4
+  Recorded at: 1788250369926
+  Duration: 9.933 s · 48.4 MB
+  Sample interval: 120 ms
+  Frames sampled: 75
+  Found 3 shots from 75 frames (4%)
+  avg 45ms/frame · extract 3.402 s
+    - person_c022_400000.jpg (945 KB)
+    - person_c022_6266777.jpg (956 KB)
+    - person_c022_5600111.jpg (966 KB)
+
+Generated by AutoBots Camera

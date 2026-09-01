@@ -526,12 +526,20 @@ class VideoFrameProcessor(
                 // has to include the people this frame is *not* being kept for. A runner keeps
                 // their identity across the frames where someone else is the subject only if
                 // they are still being observed in those frames.
-                val inZone = zone?.let { z ->
+                val inZoneAll = zone?.let { z ->
                     people.filter {
                         val b = it.bounds
                         z.containsCentre(b.left, b.top, b.right, b.bottom, detectWidth, detectHeight)
                     }
                 } ?: people
+                // The low tier stops here for now. It may only ever continue an identity the
+                // tracker already holds, and the rules that keep it to that — no new track from a
+                // low box, low boxes matched only against tracks nothing else claimed — are
+                // ByteTrack's, which arrives in S6. Fed to today's greedy tracker it would open
+                // tracks of its own: a low box is usually a second, weaker detection of somebody
+                // already found, and NMS only merges above 0.5 IoU. S5 measures what is down
+                // there; S6 connects it.
+                val inZone = inZoneAll.filter { it.highTier }
                 observed = inZone.map { it.bounds.normalisedIn(detectWidth, detectHeight, it.score) }
                 val relevant = if (anchor != null) {
                     inZone.filter { it.bounds.contains(anchor.centerX(), anchor.centerY()) }
@@ -543,7 +551,7 @@ class VideoFrameProcessor(
                     // Not "the model is broken" — in the combined mode it means the face that
                     // passed has no body under it that the detector can resolve, which is
                     // exactly the frame this gate exists to drop.
-                    if (people.isNotEmpty() && anchor == null && zone != null && inZone.isEmpty()) {
+                    if (people.isNotEmpty() && anchor == null && zone != null && inZoneAll.isEmpty()) {
                         rejects.outOfZone.incrementAndGet()
                         reject = "out_of_zone"
                     } else {
@@ -1002,7 +1010,22 @@ class VideoFrameProcessor(
     ) {
         private val faceDelegate = lazy { createFace() }
         private val poseDelegate = lazy { OfflinePoseDetector() }
-        private val personDelegate = lazy { PersonFootDetector.create(context, backend) }
+        private val personDelegate = lazy {
+            PersonFootDetector.create(
+                context,
+                backend,
+                // The low tier is measurement only until S6 has the rules that make it safe, so
+                // it rides the instrumentation flag rather than a switch of its own: a build with
+                // CamPerf off decodes exactly what 0.1.6 decoded and pays nothing. The extra
+                // boxes reach the histogram in perf_report.json and stop there — see the
+                // `inZone` filter in the person branch.
+                lowScoreFloor = if (CamPerf.enabled) {
+                    PersonFootDetector.MEASUREMENT_LOW_FLOOR
+                } else {
+                    PersonFootDetector.DEFAULT_SCORE_THRESHOLD
+                },
+            )
+        }
         val face: SubjectFaceDetector by faceDelegate
         val pose: OfflinePoseDetector by poseDelegate
 

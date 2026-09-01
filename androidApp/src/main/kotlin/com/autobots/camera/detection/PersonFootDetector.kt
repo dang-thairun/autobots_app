@@ -9,6 +9,7 @@ import org.tensorflow.lite.Delegate
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.gpu.GpuDelegate
 import java.io.FileInputStream
+import java.util.Locale
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
@@ -20,6 +21,22 @@ import kotlin.math.roundToInt
 data class DetectedPerson(
     val bounds: Rect,
     val score: Float,
+    /**
+     * Whether this box is confident enough to stand as a person in its own right.
+     *
+     * `false` is the interesting case. A runner who has stepped behind somebody else is still
+     * partly visible and the model still fires — at 0.2 or 0.3 instead of 0.9. Through 0.1.6
+     * that box was dropped inside the detector, so as far as the rest of the pipeline was
+     * concerned the runner had vanished for those frames.
+     *
+     * A low-tier box may only ever help *continue* an identity the tracker already has. It must
+     * never open a new one, satisfy a photo gate, or be counted as a person. The flag is set by
+     * the detector rather than derived by the reader, because the threshold that defines it
+     * belongs to the detector — a caller comparing against a constant of its own would drift.
+     *
+     * Defaults to true so a caller that never asked for a low tier cannot accidentally get one.
+     */
+    val highTier: Boolean = true,
 )
 
 /**
@@ -74,6 +91,15 @@ class PersonFootDetector private constructor(
     private val landmarkIndex: Int,
     private val visibilityIndex: Int,
     private val minScore: Float,
+    /**
+     * Lowest score the decoder will keep at all, for boxes that are only allowed to continue an
+     * identity — see [DetectedPerson.highTier].
+     *
+     * Equal to [minScore] disables the low tier entirely and the detector behaves exactly as it
+     * did through 0.1.6. That is the default: a caller has to ask for the extra boxes, because
+     * they cost decode work and mean nothing to code that has no rule for them.
+     */
+    private val lowScoreFloor: Float,
 ) : AutoCloseable {
 
     private val inputBuffer: ByteBuffer =
@@ -89,6 +115,19 @@ class PersonFootDetector private constructor(
 
     private var pixelCache = IntArray(0)
     private var lastCount = 0
+    private var lastLowCount = 0
+
+    /** Denominator for the histogram: without it the counts cannot be read per frame. */
+    private var framesProcessed = 0
+
+    /**
+     * How many boxes the model produced in each 0.05 band of score, over this detector's life.
+     *
+     * The distribution below the old cut-off has never been looked at: the decoder discarded it
+     * before anything could count it. It decides where the tier boundary belongs — the 0.5 in
+     * ByteTrack's paper is YOLOX's number on MOT17, and this model is neither.
+     */
+    private val scoreHistogram = IntArray(HISTOGRAM_BUCKETS)
 
     @Volatile
     private var loggedRawSample = false
@@ -98,8 +137,27 @@ class PersonFootDetector private constructor(
             "requestedBackend" to backend.slug,
             "effectiveBackend" to effectiveBackend.slug,
             "minScore" to minScore,
+            "lowScoreFloor" to lowScoreFloor,
             "lastCount" to lastCount,
+            "lastLowCount" to lastLowCount,
+            // One instance per detect worker, so this is that worker's share of the frames, not
+            // the chunk's total. The histogram is a distribution; read it against this.
+            "framesProcessed" to framesProcessed,
+            "scoreHistogram" to histogramLabels(),
         )
+
+    /**
+     * `"0.10-0.15" to 42` — readable in `perf_report.json` without a legend, and stable if the
+     * bucket count ever changes.
+     */
+    private fun histogramLabels(): Map<String, Int> = buildMap {
+        for (i in scoreHistogram.indices) {
+            val n = scoreHistogram[i]
+            if (n == 0) continue
+            val lo = i * HISTOGRAM_STEP
+            put(String.format(Locale.US, "%.2f-%.2f", lo, lo + HISTOGRAM_STEP), n)
+        }
+    }
 
     /** Everyone the model found, largest score first after NMS. */
     fun detect(bitmap: Bitmap): List<DetectedPerson> {
@@ -125,9 +183,11 @@ class PersonFootDetector private constructor(
             return emptyList()
         }
 
+        framesProcessed++
         val found = decode(box, bitmap.width, bitmap.height)
         val kept = nonMaxSuppression(found)
-        lastCount = kept.size
+        lastCount = kept.count { it.highTier }
+        lastLowCount = kept.size - lastCount
         return kept
     }
 
@@ -203,8 +263,12 @@ class PersonFootDetector private constructor(
         for (gy in 0 until GRID_H) {
             for (gx in 0 until GRID_W) {
                 val score = dequantHeatmap(hm.get((gy * GRID_W + gx) * CLASSES + PERSON_CLASS))
-                if (score < minScore) continue
+                if (score < lowScoreFloor) continue
                 if (!isLocalMax(hm, gx, gy, score)) continue
+                // Counted after the local-max test, so a histogram bar is a *box* the model
+                // would report, not one cell of the blob a single person lights up.
+                val bucket = (score / HISTOGRAM_STEP).toInt().coerceIn(0, HISTOGRAM_BUCKETS - 1)
+                scoreHistogram[bucket]++
 
                 val base = ((gy * GRID_W + gx) * CLASSES + PERSON_CLASS) * 4
                 val left = dequantBbox(bb.get(base))
@@ -232,13 +296,14 @@ class PersonFootDetector private constructor(
 
                 found.add(
                     DetectedPerson(
-                        Rect(
+                        bounds = Rect(
                             x1.roundToInt().coerceIn(0, srcW),
                             y1.roundToInt().coerceIn(0, srcH),
                             x2.roundToInt().coerceIn(0, srcW),
                             y2.roundToInt().coerceIn(0, srcH),
                         ),
-                        score,
+                        score = score,
+                        highTier = score >= minScore,
                     ),
                 )
             }
@@ -266,9 +331,20 @@ class PersonFootDetector private constructor(
     private fun dequantBbox(raw: Byte): Float =
         ((raw.toInt() and 0xFF) - BBOX_ZERO_POINT) * BBOX_SCALE
 
+    /**
+     * Highest score first, keeping whatever does not already overlap something kept.
+     *
+     * The scan is `O(n·k)` against what has survived, which was fine when nothing under
+     * [minScore] ever arrived. With a low tier the input can be an order of magnitude longer —
+     * the heatmap is sigmoid-activated, so it has a long tail near zero — hence [MAX_CANDIDATES].
+     * The reference postprocess bounds the same thing by taking the top 1000 cells; this file
+     * replaced that with the local-max test ([isLocalMax]) and so had no bound left at all.
+     */
     private fun nonMaxSuppression(boxes: List<DetectedPerson>): List<DetectedPerson> {
         if (boxes.size <= 1) return boxes
-        val sorted = boxes.sortedByDescending { it.score }
+        val sorted = boxes.sortedByDescending { it.score }.let {
+            if (it.size <= MAX_CANDIDATES) it else it.take(MAX_CANDIDATES)
+        }
         val kept = mutableListOf<DetectedPerson>()
         for (candidate in sorted) {
             if (kept.none { iou(it.bounds, candidate.bounds) > NMS_IOU }) kept.add(candidate)
@@ -330,6 +406,31 @@ class PersonFootDetector private constructor(
          */
         const val DEFAULT_SCORE_THRESHOLD = 0.7f
 
+        /**
+         * Floor for the low tier while its distribution is being measured (S5).
+         *
+         * Deliberately below anything anyone expects to use: the question this answers is what
+         * the model reports under the cut-off, and a floor picked to look reasonable would
+         * answer a narrower question. The tier boundary itself is [DEFAULT_SCORE_THRESHOLD]
+         * until the measurement says otherwise — ByteTrack's 0.5 is YOLOX's number on MOT17,
+         * and moving our boundary to it would quietly promote every 0.5–0.7 box into the photo
+         * gate.
+         */
+        const val MEASUREMENT_LOW_FLOOR = 0.05f
+
+        /** 0.05 per bucket over 0..1. */
+        private const val HISTOGRAM_STEP = 0.05f
+        private const val HISTOGRAM_BUCKETS = 20
+
+        /**
+         * Boxes carried into NMS, highest score first.
+         *
+         * A bound on the `O(n·k)` scan, not a quality judgement: 128 boxes in one 4K frame is
+         * already far more people than a lane holds, and the ones cut are the lowest-scoring of
+         * a frame that is already crowded.
+         */
+        private const val MAX_CANDIDATES = 128
+
         /** The reference demo's person IOU. Faces use 0.2 there; people overlap more. */
         private const val NMS_IOU = 0.5f
 
@@ -347,6 +448,8 @@ class PersonFootDetector private constructor(
             context: Context,
             backend: DetectorBackend,
             minScore: Float = DEFAULT_SCORE_THRESHOLD,
+            /** Defaults to [minScore], which is the 0.1.6 behaviour: no low tier at all. */
+            lowScoreFloor: Float = minScore,
         ): PersonFootDetector? {
             val model = runCatching { loadModel(context) }.getOrElse {
                 Log.e(TAG, "Cannot read $ASSET_PATH", it)
@@ -421,6 +524,7 @@ class PersonFootDetector private constructor(
             return PersonFootDetector(
                 interpreter, delegate, backend, effective,
                 heatmapIndex, bboxIndex, landmarkIndex, visibilityIndex, minScore,
+                lowScoreFloor.coerceAtMost(minScore),
             )
         }
 
